@@ -1,4 +1,4 @@
-name: _native-build
+name: _desktop-build
 
 on:
   workflow_call:
@@ -7,7 +7,7 @@ on:
         description: Prefix for uploaded artifact names
         required: false
         type: string
-        default: yuanpu-agent-native
+        default: yuanpu-agent-desktop
       retention-days:
         description: Artifact retention in days
         required: false
@@ -18,8 +18,8 @@ permissions:
   contents: read
 
 jobs:
-  native-bundle:
-    name: Native bundle (${{ matrix.target }})
+  desktop-bundle:
+    name: Desktop bundle (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,27 +45,25 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - name: Verify runner architecture
-        shell: bash
-        run: test "$(node -p "process.platform + '-' + process.arch")" = "${{ matrix.target }}"
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
-      - name: Build native executable
-        run: pnpm build:native
+      - name: Build desktop package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm package:desktop -- --publish never
 
-      - name: Smoke test native executable
-        run: pnpm smoke:native
-
-      - name: Package native artifact
-        run: pnpm package:native
-
-      - name: Upload native artifact
+      - name: Upload desktop artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-prefix }}-${{ matrix.target }}
           retention-days: ${{ inputs.retention-days }}
           if-no-files-found: error
           path: |
-            apps/runtime/dist-native/artifacts/YuanpuAgentRuntime-${{ matrix.target }}*
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.tar.gz
+            apps/desktop/release/*.yml
+            apps/desktop/release/*.zip

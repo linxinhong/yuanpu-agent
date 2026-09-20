@@ -1,0 +1,35 @@
+appId: com.yuanpu.agent
+productName: Yuanpu Agent
+asar: true
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: ../app/dist
+    to: app
+    filter:
+      - '**/*'
+  - from: ../runtime/dist-native/bin
+    to: runtime
+    filter:
+      - 'YuanpuAgentRuntime-*'
+artifactName: 'YuanpuAgent-${version}-${os}-${arch}.${ext}'
+executableName: YuanpuAgent
+mac:
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+    - zip
+linux:
+  target:
+    - AppImage
+    - tar.gz
+publish:
+  provider: github
+  owner: linxinhong
+  repo: yuanpu-agent

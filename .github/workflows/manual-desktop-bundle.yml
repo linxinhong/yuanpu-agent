@@ -1,0 +1,11 @@
+name: Manual desktop bundle
+
+on:
+  workflow_dispatch:
+
+jobs:
+  desktop-artifacts:
+    uses: ./.github/workflows/_desktop-build.yml
+    with:
+      artifact-prefix: yuanpu-agent-desktop
+      retention-days: 3

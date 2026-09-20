@@ -1,22 +1,32 @@
-# yuanpu-agent
+# Yuanpu Agent
 
-用于验证 pnpm monorepo、TypeScript CLI、Node.js SEA 单文件构建和 GitHub Actions 发布链路的最小项目。目录边界参考 Kimi Code 与 OpenWork：
+Electron 图形界面与 Node.js SEA Runtime 解耦的 pnpm monorepo。工程组织参考 OpenWork，独立 Runtime 更新机制参考 Kimi Code。
 
-- `apps/yuanpu-agent`：可运行、可发布的 CLI 应用及 native 构建脚本。
-- `packages/core`：不感知 CLI 的共享领域逻辑，由应用通过 `workspace:*` 引用。
-- 根目录：只负责编排 workspace、统一工具链和 CI/CD。
+## 架构
 
-## 本地运行
+- `apps/app`：React/Vite renderer，只能访问 preload 暴露的窄接口。
+- `apps/desktop`：Electron main/preload，负责窗口、Runtime 生命周期与桌面端更新。
+- `apps/runtime`：Node SEA sidecar，承载 Agent 与本地服务，可以独立于桌面壳更新。
+- `packages/protocol`：Renderer、Electron 和 Runtime 共用的协议版本与类型。
+- `packages/core`：不感知界面的领域逻辑。
+
+Electron 首次使用安装包中携带的 Runtime。独立更新会下载到 Electron `userData/runtime/.staging`，校验文件大小和 SHA-256，执行 `--version` 冒烟测试，并在下次启动时原子切换。Runtime API 只监听 `127.0.0.1` 的随机端口。
+
+## 本地开发
 
 要求 Node.js 22 和 pnpm 11。
 
 ```bash
 pnpm install
 pnpm check
-pnpm start -- --name Yuanpu
+pnpm dev
 ```
 
-## 构建单文件可执行程序
+`pnpm dev` 会构建 Runtime 和 Electron main/preload，启动 Vite，然后打开 Electron。
+
+## 构建产物
+
+构建当前平台的 SEA Runtime：
 
 ```bash
 pnpm build:native
@@ -24,19 +34,26 @@ pnpm smoke:native
 pnpm package:native
 ```
 
-产物位于 `apps/yuanpu-agent/dist-native/artifacts/`，文件名中包含当前平台和架构。
+构建当前平台的 Electron 安装包（会先构建并嵌入 SEA Runtime）：
+
+```bash
+pnpm package:desktop
+```
+
+Runtime 产物位于 `apps/runtime/dist-native/artifacts/`，桌面产物位于 `apps/desktop/release/`。
 
 ## CI/CD
 
-- `CI`：向 `main` push 或创建 PR 时执行类型检查、JS 构建和测试。
-- `Manual native bundle`：通过 `workflow_dispatch` 在 GitHub 托管 runner 上手动触发，复用正式发布的构建矩阵；当前最小版本尚未接入 Apple/Azure 证书，因此 macOS 仅做 ad-hoc 签名，Windows 不做正式签名。
-- `Release`：push 与 `apps/yuanpu-agent/package.json` 版本一致的 tag（例如 `v0.1.0`）后，构建三个平台、执行真实二进制冒烟测试，并创建 GitHub Release。
+- `CI`：对 push 和 PR 执行类型检查、构建和测试。
+- `Manual native bundle`：手动构建三个平台的独立 SEA Runtime。
+- `Manual desktop bundle`：手动构建三个平台的 Electron 安装包。
+- `Release`：推送 `v*.*.*` tag 后，同时发布桌面安装包、Runtime 裸二进制和 `manifest.json`。
 
-发布附件包含各平台裸二进制、对应的 `.sha256` 文件，以及供未来自动更新器读取的 `manifest.json`。
+Runtime manifest 包含协议版本、最低桌面版本、各平台 URL、大小和 SHA-256，供桌面端的独立更新器消费。
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-当前版本只做 ad-hoc macOS 签名，没有配置 Apple 公证或 Windows 正式代码签名。正式对外分发前应补齐签名步骤。
+当前 macOS 仅使用 ad-hoc 签名，Windows 尚未正式签名。正式对外分发前仍需配置 Apple Developer ID、公证和 Windows 代码签名。

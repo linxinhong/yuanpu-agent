@@ -18,6 +18,6 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   deps: {
-    alwaysBundle: (id) => !id.startsWith('node:'),
+    alwaysBundle: ['@yuanpu-agent/core', '@yuanpu-agent/protocol'],
   },
 });

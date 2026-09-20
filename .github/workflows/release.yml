@@ -16,9 +16,17 @@ jobs:
       artifact-prefix: yuanpu-agent-native
       retention-days: 7
 
+  desktop-artifacts:
+    uses: ./.github/workflows/_desktop-build.yml
+    with:
+      artifact-prefix: yuanpu-agent-desktop
+      retention-days: 7
+
   publish:
     name: Publish GitHub Release
-    needs: native-artifacts
+    needs:
+      - native-artifacts
+      - desktop-artifacts
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -33,10 +41,17 @@ jobs:
           path: dist-release
           merge-multiple: true
 
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: yuanpu-agent-desktop-*
+          path: dist-release
+          merge-multiple: true
+
       - name: Produce update manifest
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node apps/yuanpu-agent/scripts/native/produce-manifest.mjs dist-release "$RELEASE_TAG"
+        run: node apps/runtime/scripts/native/produce-manifest.mjs dist-release "$RELEASE_TAG"
 
       - name: Create GitHub Release
         env:

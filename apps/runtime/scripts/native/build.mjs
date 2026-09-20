@@ -9,7 +9,7 @@ const workDir = resolve(appRoot, 'dist-native/work', target);
 const outputDir = resolve(appRoot, 'dist-native/bin');
 const seaConfig = resolve(workDir, 'sea-config.json');
 const seaBlob = resolve(workDir, 'sea-prep.blob');
-const output = resolve(outputDir, `yuanpu-agent-${target}${executableSuffix(target)}`);
+const output = resolve(outputDir, `YuanpuAgentRuntime-${target}${executableSuffix(target)}`);
 const postject = resolve(appRoot, 'node_modules/postject/dist/cli.js');
 
 await rm(workDir, { recursive: true, force: true });

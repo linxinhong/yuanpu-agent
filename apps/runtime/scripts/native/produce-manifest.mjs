@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { sha256File } from './lib.mjs';
@@ -18,23 +18,33 @@ if (!tag) {
 const version = tag.replace(/^v/, '');
 const packageJson = JSON.parse(await readFile(resolve(appRoot, 'package.json'), 'utf8'));
 if (packageJson.version !== version) {
-  throw new Error(`Tag ${tag} does not match CLI package version ${packageJson.version}`);
+  throw new Error(`Tag ${tag} does not match runtime package version ${packageJson.version}`);
 }
 
 const files = (await readdir(inputDir)).filter(
-  (file) => /^yuanpu-agent-(linux|darwin|win32)-(x64|arm64)(\.exe)?$/.test(file),
+  (file) => /^YuanpuAgentRuntime-(linux|darwin|win32)-(x64|arm64)(\.exe)?$/.test(file),
 );
 if (files.length === 0) throw new Error(`No native binaries found in ${inputDir}`);
 
 const platforms = {};
 for (const filename of files.sort()) {
-  const target = filename.replace(/^yuanpu-agent-/, '').replace(/\.exe$/, '');
+  const target = filename.replace(/^YuanpuAgentRuntime-/, '').replace(/\.exe$/, '');
+  const artifact = resolve(inputDir, filename);
   platforms[target] = {
     filename,
-    checksum: await sha256File(resolve(inputDir, filename)),
+    url: `https://github.com/linxinhong/yuanpu-agent/releases/download/${tag}/${filename}`,
+    size: (await stat(artifact)).size,
+    sha256: await sha256File(artifact),
   };
 }
 
-const manifest = { version, tag, platforms };
+const manifest = {
+  schemaVersion: 1,
+  protocolVersion: 1,
+  minDesktopVersion: '0.1.0',
+  version,
+  tag,
+  platforms,
+};
 await writeFile(resolve(inputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`Wrote manifest.json for ${Object.keys(platforms).length} platforms`);

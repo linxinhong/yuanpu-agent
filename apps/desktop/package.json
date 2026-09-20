@@ -1,0 +1,23 @@
+{
+  "name": "@yuanpu-agent/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Yuanpu Agent Electron desktop shell.",
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "node scripts/dev.mjs",
+    "package": "electron-builder --config electron-builder.yml",
+    "start": "electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@yuanpu-agent/protocol": "workspace:*",
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

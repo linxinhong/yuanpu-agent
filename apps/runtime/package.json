@@ -1,16 +1,16 @@
 {
-  "name": "@yuanpu-agent/cli",
+  "name": "@yuanpu-agent/runtime",
   "version": "0.1.0",
-  "description": "Yuanpu Agent command-line application.",
+  "description": "Yuanpu Agent native runtime sidecar.",
   "type": "module",
   "bin": {
-    "yuanpu-agent": "dist/index.cjs"
+    "yuanpu-runtime": "dist/index.cjs"
   },
   "files": ["dist", "README.md"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/linxinhong/yuanpu-agent.git",
-    "directory": "apps/yuanpu-agent"
+    "directory": "apps/runtime"
   },
   "publishConfig": {
     "access": "public",
@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "build:native": "pnpm -w run build:cli && node scripts/native/build.mjs",
+    "build:native": "pnpm run build && node scripts/native/build.mjs",
     "package:native": "node scripts/native/package.mjs",
     "release:manifest": "node scripts/native/produce-manifest.mjs",
     "smoke:native": "node scripts/native/smoke.mjs",
@@ -27,7 +27,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@yuanpu-agent/core": "workspace:*"
+    "@yuanpu-agent/core": "workspace:*",
+    "@yuanpu-agent/protocol": "workspace:*"
   },
   "devDependencies": {
     "postject": "1.0.0-alpha.6"

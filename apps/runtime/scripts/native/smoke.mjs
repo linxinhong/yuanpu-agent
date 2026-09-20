@@ -9,7 +9,7 @@ const appRoot = resolve(import.meta.dirname, '../..');
 const target = targetTriple();
 const binary = resolve(
   appRoot,
-  `dist-native/bin/yuanpu-agent-${target}${executableSuffix(target)}`,
+  `dist-native/bin/YuanpuAgentRuntime-${target}${executableSuffix(target)}`,
 );
 const { version } = JSON.parse(await readFile(resolve(appRoot, 'package.json'), 'utf8'));
 
