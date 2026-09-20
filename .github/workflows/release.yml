@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-artifacts:
+    uses: ./.github/workflows/_native-build.yml
+    with:
+      artifact-prefix: yuanpu-agent-native
+      retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: native-artifacts
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download native artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: yuanpu-agent-native-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: Produce update manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node apps/yuanpu-agent/scripts/native/produce-manifest.mjs dist-release "$RELEASE_TAG"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist-release/* --generate-notes --verify-tag

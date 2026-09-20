@@ -1,0 +1,27 @@
+{
+  "name": "@yuanpu-agent/monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "build:cli": "pnpm --filter @yuanpu-agent/cli... run build",
+    "build:native": "pnpm --filter @yuanpu-agent/cli run build:native",
+    "check": "pnpm run typecheck && pnpm run build && pnpm run test",
+    "package:native": "pnpm --filter @yuanpu-agent/cli run package:native",
+    "release:manifest": "pnpm --filter @yuanpu-agent/cli run release:manifest",
+    "smoke:native": "pnpm --filter @yuanpu-agent/cli run smoke:native",
+    "start": "pnpm --filter @yuanpu-agent/cli run start",
+    "test": "pnpm -r --if-present run test",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsdown": "0.23.0",
+    "typescript": "6.0.2"
+  }
+}

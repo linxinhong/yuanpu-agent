@@ -1,0 +1,11 @@
+name: Native build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  native-artifacts:
+    uses: ./.github/workflows/_native-build.yml
+    with:
+      artifact-prefix: yuanpu-agent-native
+      retention-days: 3

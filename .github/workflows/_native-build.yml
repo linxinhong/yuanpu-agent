@@ -1,0 +1,71 @@
+name: _native-build
+
+on:
+  workflow_call:
+    inputs:
+      artifact-prefix:
+        description: Prefix for uploaded artifact names
+        required: false
+        type: string
+        default: yuanpu-agent-native
+      retention-days:
+        description: Artifact retention in days
+        required: false
+        type: number
+        default: 7
+
+permissions:
+  contents: read
+
+jobs:
+  native-bundle:
+    name: Native bundle (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+          - os: macos-14
+            target: darwin-arm64
+          - os: windows-2022
+            target: win32-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Verify runner architecture
+        shell: bash
+        run: test "$(node -p "process.platform + '-' + process.arch")" = "${{ matrix.target }}"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build native executable
+        run: pnpm build:native
+
+      - name: Smoke test native executable
+        run: pnpm smoke:native
+
+      - name: Package native artifact
+        run: pnpm package:native
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-prefix }}-${{ matrix.target }}
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+          path: |
+            apps/yuanpu-agent/dist-native/artifacts/yuanpu-agent-${{ matrix.target }}*
