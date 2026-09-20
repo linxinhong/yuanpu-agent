@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsdown",
     "dev": "node scripts/dev.mjs",
-    "package": "electron-builder --config electron-builder.yml",
+    "package": "electron-builder --config electron-builder.yml --publish never",
     "start": "electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -51,7 +51,7 @@ jobs:
       - name: Build desktop package
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm package:desktop -- --publish never
+        run: pnpm package:desktop
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v7
