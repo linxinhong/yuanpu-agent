@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - packages/session-backends/*
 
 linkWorkspacePackages: true
 preferWorkspacePackages: true
@@ -9,6 +10,19 @@ overrides:
   '@electron/get@3.0.0': 3.1.0
 
 allowBuilds:
+  '@google/genai': false
+  autoevals: false
+  canvas: false
   electron: true
   electron-winstaller: true
   esbuild: true
+  protobufjs: false
+
+minimumReleaseAgeExclude:
+  - '@earendil-works/chord@0.86.1'
+  - '@earendil-works/pi-agent-core@0.86.1'
+  - '@earendil-works/pi-ai@0.86.1'
+  - '@earendil-works/pi-client@0.86.1'
+  - '@earendil-works/pi-protocol@0.86.1'
+  - '@earendil-works/pi-server@0.86.1'
+  - '@earendil-works/pi-telemetry@0.86.1'

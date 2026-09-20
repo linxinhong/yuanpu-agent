@@ -1,10 +1,14 @@
 import { greeting } from '@yuanpu-agent/core';
+import { createYuanpuMcpServer } from '@yuanpu-agent/mcp';
+import { createYuanpuCapabilityTools, PI_UPSTREAM_VERSION } from '@yuanpu-agent/pi-runtime';
 import { PROTOCOL_VERSION, RUNTIME_ROUTES } from '@yuanpu-agent/protocol';
 import { createServer } from 'node:http';
 
 declare const __APP_VERSION__: string;
 
 const args = process.argv.slice(2);
+const mcp = createYuanpuMcpServer();
+const piCapabilityTools = createYuanpuCapabilityTools(mcp);
 
 if (args.includes('--version') || args.includes('-v')) {
   console.log(__APP_VERSION__);
@@ -17,7 +21,12 @@ if (args.includes('--version') || args.includes('-v')) {
 
     if (url.pathname === RUNTIME_ROUTES.health) {
       response.end(
-        JSON.stringify({ version: __APP_VERSION__, protocolVersion: PROTOCOL_VERSION }),
+        JSON.stringify({
+          version: __APP_VERSION__,
+          protocolVersion: PROTOCOL_VERSION,
+          piVersion: PI_UPSTREAM_VERSION,
+          mcpTools: piCapabilityTools.map((tool) => tool.name),
+        }),
       );
       return;
     }
@@ -41,6 +50,8 @@ if (args.includes('--version') || args.includes('-v')) {
         port: address.port,
         version: __APP_VERSION__,
         protocolVersion: PROTOCOL_VERSION,
+        piVersion: PI_UPSTREAM_VERSION,
+        mcpTools: piCapabilityTools.map((tool) => tool.name),
       }),
     );
   });

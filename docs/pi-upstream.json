@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/earendil-works/pi.git",
+  "commit": "3390bd93630965a12a0a1a5c36ce890ec22f7e1d",
+  "version": "0.86.1",
+  "packages": [
+    "agent",
+    "ai",
+    "chord",
+    "client",
+    "coding-agent",
+    "durable",
+    "evals",
+    "protocol",
+    "server",
+    "session-backends",
+    "telemetry",
+    "tui"
+  ],
+  "unavailablePackages": [
+    "storage"
+  ]
+}

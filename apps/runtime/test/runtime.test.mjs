@@ -40,6 +40,11 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     `http://${ready.host}:${ready.port}/v1/greeting?name=Integration`,
   ).then((response) => response.json());
 
-  assert.deepEqual(health, { version: '0.1.0', protocolVersion: 1 });
+  assert.deepEqual(health, {
+    version: '0.1.0',
+    protocolVersion: 1,
+    piVersion: '0.86.1',
+    mcpTools: ['search_capabilities', 'execute_capability'],
+  });
   assert.deepEqual(greeting, { message: 'Hello, Integration!' });
 });
