@@ -29,7 +29,7 @@ pnpm package:native
 ## CI/CD
 
 - `CI`：向 `main` push 或创建 PR 时执行类型检查、JS 构建和测试。
-- `Manual native bundle`：可在 Actions 页面手动触发，复用正式发布的构建矩阵，但不做正式签名；分别生成 Linux x64、macOS arm64 和 Windows x64 单文件。
+- `Manual native bundle`：通过 `workflow_dispatch` 在 GitHub 托管 runner 上手动触发，复用正式发布的构建矩阵；当前最小版本尚未接入 Apple/Azure 证书，因此 macOS 仅做 ad-hoc 签名，Windows 不做正式签名。
 - `Release`：push 与 `apps/yuanpu-agent/package.json` 版本一致的 tag（例如 `v0.1.0`）后，构建三个平台、执行真实二进制冒烟测试，并创建 GitHub Release。
 
 发布附件包含各平台裸二进制、对应的 `.sha256` 文件，以及供未来自动更新器读取的 `manifest.json`。
