@@ -1,6 +1,9 @@
 import {
   createAgentSession,
+  DefaultResourceLoader,
   defineTool,
+  ModelRuntime,
+  SettingsManager,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
   type ToolDefinition,
@@ -11,6 +14,8 @@ import {
   type ExecuteCapabilityInput,
 } from '@yuanpu-agent/mcp-contracts';
 import { Type } from 'typebox';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export const PI_UPSTREAM_VERSION = '0.86.1';
 
@@ -84,4 +89,132 @@ export function createYuanpuAgentSession(
     tools,
     customTools: [...(sessionOptions.customTools ?? []), ...capabilityTools],
   });
+}
+
+export interface YuanpuChatResult {
+  message: string;
+  tools: Array<{ name: string; status: 'completed' | 'failed' }>;
+}
+
+export interface CreateYuanpuChatOptions {
+  capabilityClient: CapabilityToolClient;
+  agentDir: string;
+  cwd: string;
+  provider: string;
+  model: string;
+  apiKey?: string;
+  apiKeyEnv: string;
+  baseUrl?: string;
+  api?: 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
+}
+
+export interface YuanpuChatSession {
+  prompt(message: string): Promise<YuanpuChatResult>;
+  dispose(): void;
+}
+
+async function readMemory(agentDir: string): Promise<string> {
+  try {
+    return await readFile(join(agentDir, 'memory', 'MEMORY.md'), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+export async function createYuanpuChatSession(
+  options: CreateYuanpuChatOptions,
+): Promise<YuanpuChatSession> {
+  const modelsPath = options.baseUrl
+    ? join(options.agentDir, 'yuanpu-models.json')
+    : join(options.agentDir, 'models.json');
+  if (options.baseUrl) {
+    await writeFile(modelsPath, `${JSON.stringify({
+      providers: {
+        [options.provider]: {
+          name: options.provider,
+          baseUrl: options.baseUrl,
+          api: options.api ?? 'openai-completions',
+          apiKey: `$${options.apiKeyEnv}`,
+          compat: {
+            supportsDeveloperRole: false,
+            supportsReasoningEffort: false,
+          },
+          models: [{
+            id: options.model,
+            name: options.model,
+            reasoning: false,
+            input: ['text'],
+            contextWindow: 128_000,
+            maxTokens: 32_000,
+          }],
+        },
+      },
+    }, null, 2)}\n`);
+  }
+  const modelRuntime = await ModelRuntime.create({
+    authPath: join(options.agentDir, 'auth.json'),
+    modelsPath,
+  });
+  if (options.apiKey) await modelRuntime.setRuntimeApiKey(options.provider, options.apiKey);
+  const model = modelRuntime.getModel(options.provider, options.model);
+  if (!model) throw new Error(`Unknown model ${options.provider}/${options.model}`);
+
+  const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
+  const memory = await readMemory(options.agentDir);
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    settingsManager,
+    systemPromptOverride: () => [
+      'You are YuanpuAgent, a concise work assistant.',
+      'External capabilities are available only through search_capabilities and execute_capability.',
+      'When the user explicitly asks to use, test, or call an external capability, search first and then execute the exact returned name.',
+      memory ? `Durable user memory:\n${memory}` : '',
+    ].filter(Boolean).join('\n\n'),
+  });
+  await resourceLoader.reload();
+
+  const { session } = await createYuanpuAgentSession({
+    capabilityClient: options.capabilityClient,
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    model,
+    modelRuntime,
+    resourceLoader,
+    settingsManager,
+  });
+
+  let queue: Promise<void> = Promise.resolve();
+  const runPrompt = async (message: string): Promise<YuanpuChatResult> => {
+    let text = '';
+    const toolStates = new Map<string, 'completed' | 'failed'>();
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
+        text += event.assistantMessageEvent.delta;
+      }
+      if (event.type === 'tool_execution_end') {
+        toolStates.set(event.toolName, event.isError ? 'failed' : 'completed');
+      }
+    });
+    try {
+      await session.prompt(message);
+      return {
+        message: text.trim() || '完成。',
+        tools: [...toolStates].map(([name, status]) => ({ name, status })),
+      };
+    } finally {
+      unsubscribe();
+    }
+  };
+
+  return {
+    prompt(message) {
+      const task = queue.then(() => runPrompt(message));
+      queue = task.then(() => undefined, () => undefined);
+      return task;
+    },
+    dispose() {
+      session.dispose();
+    },
+  };
 }

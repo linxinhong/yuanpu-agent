@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { CAPABILITY_TOOL_NAMES } from '@yuanpu-agent/mcp-contracts';
-import { CapabilityError, createYuanpuMcpServer } from '../dist/index.mjs';
+import { CapabilityError, createDemoCapabilitySource, createYuanpuMcpServer } from '../dist/index.mjs';
 
 test('the MCP surface always exposes exactly two meta tools', () => {
   const server = createYuanpuMcpServer();
@@ -85,4 +85,15 @@ test('unknown capability fails with a structured retry hint', async () => {
       && error.failure.error === 'unknown_capability'
       && error.failure.retry.search,
   );
+});
+
+test('demo MCP capability completes the two-tool discovery and execution path', async () => {
+  const server = createYuanpuMcpServer([createDemoCapabilitySource()]);
+  const search = await server.callTool(CAPABILITY_TOOL_NAMES.search, { query: 'echo' });
+  assert.equal(search.matches[0]?.name, 'yuanpu.echo');
+  const result = await server.callTool(CAPABILITY_TOOL_NAMES.execute, {
+    name: 'yuanpu.echo',
+    arguments: { text: 'Yuanpu' },
+  });
+  assert.deepEqual(result.content, { text: 'Yuanpu' });
 });

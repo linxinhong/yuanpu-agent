@@ -221,3 +221,44 @@ export class YuanpuMcpServer implements CapabilityToolClient {
 export function createYuanpuMcpServer(sources: CapabilitySource[] = []): YuanpuMcpServer {
   return new YuanpuMcpServer(sources);
 }
+
+const echoCapability: CapabilityDescriptor = {
+  name: 'yuanpu.echo',
+  description: 'Echo text back unchanged. Use this capability to verify the external MCP execution path.',
+  type: 'mcp_tool',
+  riskLevel: 'R0',
+  status: 'available',
+  inputSchema: {
+    type: 'object',
+    required: ['text'],
+    properties: { text: { type: 'string', description: 'Text to echo.' } },
+    additionalProperties: false,
+  },
+};
+
+export function createDemoCapabilitySource(): CapabilitySource {
+  return {
+    async list() {
+      return [echoCapability];
+    },
+    async resolve(name) {
+      return name === echoCapability.name ? echoCapability : undefined;
+    },
+    async execute(input) {
+      if (input.name !== echoCapability.name) return undefined;
+      const text = input.arguments?.text;
+      if (typeof text !== 'string') {
+        throw new CapabilityError({
+          error: 'invalid_arguments',
+          message: 'yuanpu.echo requires a string argument named text.',
+          retry: { search: false, action: 'correct_arguments' },
+        });
+      }
+      return {
+        capability: echoCapability.name,
+        riskLevel: echoCapability.riskLevel,
+        content: { text },
+      };
+    },
+  };
+}

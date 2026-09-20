@@ -1,114 +1,172 @@
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import './styles.css';
 
+type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
+type ChatMessage = {
+  id: number;
+  role: 'user' | 'assistant' | 'error';
+  text: string;
+  tools?: ToolState[];
+};
+
+const initialMessages: ChatMessage[] = [{
+  id: 1,
+  role: 'assistant',
+  text: '你好，我是 YuanpuAgent。你可以直接开始对话，也可以让我调用外部 MCP 能力。',
+}];
+
 function App() {
-  const [name, setName] = useState('Yuanpu');
-  const [message, setMessage] = useState('正在连接本地 Runtime…');
-  const [runtimeVersion, setRuntimeVersion] = useState('—');
-  const [updateText, setUpdateText] = useState('');
+  const [messages, setMessages] = useState(initialMessages);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [runtime, setRuntime] = useState({ connected: false, piVersion: '—', configRoot: '~/.yuanpu' });
+  const nextId = useRef(2);
+  const conversation = useRef<HTMLDivElement>(null);
   const desktop = window.yuanpu;
 
   useEffect(() => {
-    if (!desktop) {
-      setMessage('当前为浏览器预览；请通过 Electron 启动以连接 Runtime。');
-      return;
-    }
-    void desktop.runtimeInfo().then((info) => {
-      setRuntimeVersion(`${info.version} · protocol ${info.protocolVersion}`);
-      setMessage('Runtime 已就绪');
-    });
+    if (!desktop) return;
+    void desktop.runtimeInfo()
+      .then((info) => setRuntime({
+        connected: true,
+        piVersion: info.piVersion,
+        configRoot: info.configRoot,
+      }))
+      .catch(() => setRuntime((current) => ({ ...current, connected: false })));
   }, [desktop]);
 
-  async function greet() {
-    if (!desktop) return;
-    const result = await desktop.greeting(name.trim() || 'world');
-    setMessage(result.message);
-  }
+  useEffect(() => {
+    conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, busy]);
 
-  async function checkRuntimeUpdate() {
-    if (!desktop) return;
-    setUpdateText('正在检查…');
-    const state = await desktop.checkRuntimeUpdate();
-    setUpdateText(
-      state.status === 'current'
-        ? `Runtime ${state.currentVersion} 已是最新版本`
-        : state.message || state.status,
-    );
-  }
+  async function sendMessage() {
+    const text = input.trim();
+    if (!text || busy) return;
+    setMessages((current) => [...current, { id: nextId.current++, role: 'user', text }]);
+    setInput('');
+    setBusy(true);
 
-  async function checkDesktopUpdate() {
-    if (!desktop) return;
-    setUpdateText('正在检查桌面端更新；如有新版本，将在后台下载并于退出时安装。');
     try {
-      await desktop.checkDesktopUpdate();
+      const result = desktop
+        ? await desktop.chat(text)
+        : {
+            message: '这是浏览器预览回复。通过 Electron 启动后，消息会交给 Pi coding-agent。',
+            tools: text.toLowerCase().includes('echo')
+              ? [{ name: 'yuanpu.echo', status: 'completed' as const }]
+              : [],
+          };
+      setMessages((current) => [...current, {
+        id: nextId.current++,
+        role: 'assistant',
+        text: result.message,
+        tools: result.tools,
+      }]);
     } catch (error) {
-      setUpdateText(error instanceof Error ? error.message : String(error));
+      setMessages((current) => [...current, {
+        id: nextId.current++,
+        role: 'error',
+        text: error instanceof Error ? error.message : String(error),
+      }]);
+      setInput(text);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void sendMessage();
     }
   }
 
   return (
-    <main className="shell">
-      <header>
-        <div className="brand-mark">源</div>
-        <div>
-          <p className="eyebrow">YUANPU AGENT</p>
-          <h1>桌面端与智能运行时，已经解耦。</h1>
-        </div>
-      </header>
-
-      <section className="hero-card">
-        <div>
-          <span className="status-dot" />
-          <span className="status-label">LOCAL RUNTIME</span>
-          <p className="message">{message}</p>
-        </div>
-        <dl>
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">源</div>
           <div>
-            <dt>Runtime</dt>
-            <dd>{runtimeVersion}</dd>
+            <strong>YUANPU AGENT</strong>
+            <span>本地工作助手</span>
           </div>
-          <div>
-            <dt>更新策略</dt>
-            <dd>独立暂存 · 重启切换</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="workspace">
-        <div>
-          <p className="section-label">通信链路验证</p>
-          <h2>Renderer → Preload → Electron → SEA</h2>
-          <p className="description">
-            图形界面只调用受限的 preload API。Electron 管理 SEA 生命周期，Runtime 通过版本化的本地协议提供能力。
-          </p>
         </div>
-        <div className="controls">
-          <label htmlFor="name">向 Runtime 发送名字</label>
-          <div className="input-row">
-            <input id="name" value={name} onChange={(event) => setName(event.target.value)} />
-            <button type="button" onClick={() => void greet()} disabled={!desktop}>
+
+        <button className="conversation-item" type="button" aria-current="page">
+          <span className="conversation-icon" aria-hidden="true" />
+          <span>
+            <strong>新对话</strong>
+            <small>当前会话</small>
+          </span>
+        </button>
+
+        <div className="sidebar-footer">
+          <span className="footer-label">配置目录</span>
+          <code title={runtime.configRoot}>{runtime.configRoot}</code>
+          <span className="route-note">Renderer → Electron → SEA</span>
+        </div>
+      </aside>
+
+      <section className="chat-panel">
+        <header className="chat-header">
+          <div className="runtime-state">
+            <span className={`status-dot ${runtime.connected ? 'online' : ''}`} />
+            <div>
+              <strong>{runtime.connected ? '本地 Runtime 已连接' : desktop ? '正在连接 Runtime' : '浏览器预览模式'}</strong>
+              <span>{runtime.connected ? '对话仅在本机处理' : 'Electron 中启用真实 Pi 对话'}</span>
+            </div>
+          </div>
+          <div className="runtime-meta">
+            <span>Pi {runtime.piVersion}</span>
+            <span className="mcp-count">2 个 MCP 元工具</span>
+          </div>
+        </header>
+
+        <div className="conversation" ref={conversation} aria-live="polite">
+          <div className="conversation-inner">
+            {messages.map((message) => (
+              <article key={message.id} className={`message ${message.role}`}>
+                <div className="message-label">
+                  {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
+                </div>
+                <div className="message-body">
+                  <p>{message.text}</p>
+                  {message.tools?.map((tool) => (
+                    <div className={`tool-event ${tool.status}`} key={`${message.id}-${tool.name}`}>
+                      <span className="tool-check">{tool.status === 'completed' ? '✓' : '!'}</span>
+                      <span>调用 MCP</span>
+                      <code>{tool.name}</code>
+                      <small>{tool.status === 'completed' ? '已完成' : '失败'}</small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+            {busy && (
+              <article className="message assistant pending">
+                <div className="message-label">YuanpuAgent</div>
+                <div className="thinking"><span /><span /><span /> Pi 正在处理</div>
+              </article>
+            )}
+          </div>
+        </div>
+
+        <div className="composer-wrap">
+          <div className="composer">
+            <textarea
+              aria-label="消息"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="向 YuanpuAgent 发送消息…"
+              rows={1}
+            />
+            <button type="button" onClick={() => void sendMessage()} disabled={!input.trim() || busy}>
               发送
             </button>
           </div>
-          <button
-            className="secondary"
-            type="button"
-            onClick={() => void checkRuntimeUpdate()}
-            disabled={!desktop}
-          >
-            检查 Runtime 更新
-          </button>
-          <button
-            className="secondary"
-            type="button"
-            onClick={() => void checkDesktopUpdate()}
-            disabled={!desktop}
-          >
-            检查桌面端更新
-          </button>
-          {updateText && <p className="update-text">{updateText}</p>}
+          <p>Enter 发送 · Shift + Enter 换行 · 配置模型与密钥后即可开始</p>
         </div>
       </section>
     </main>

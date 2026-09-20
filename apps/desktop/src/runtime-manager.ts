@@ -1,12 +1,13 @@
 import {
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,
+  type ChatResponse,
   type RuntimeGreeting,
   type RuntimeInfo,
   type RuntimeUpdateState,
 } from '@yuanpu-agent/protocol';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -59,6 +60,7 @@ export function compareVersions(left: string, right: string): number {
 export class RuntimeManager {
   private child?: ChildProcessWithoutNullStreams;
   private ready?: RuntimeReady;
+  private readonly token = randomBytes(32).toString('hex');
 
   constructor(
     private readonly appPath: string,
@@ -153,10 +155,14 @@ export class RuntimeManager {
     const command = await this.command();
 
     return await new Promise<RuntimeReady>((resolveReady, reject) => {
-      const child = spawn(command.executable, [...command.args, '--serve', '--port', '0'], {
+      const child = spawn(
+        command.executable,
+        [...command.args, '--serve', '--port', '0', '--token', this.token],
+        {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
-      });
+        },
+      );
       this.child = child;
       let stdout = '';
       let stderr = '';
@@ -195,10 +201,20 @@ export class RuntimeManager {
     });
   }
 
-  private async request<T>(path: string): Promise<T> {
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const runtime = await this.start();
-    const response = await fetch(`http://${runtime.host}:${runtime.port}${path}`);
-    if (!response.ok) throw new Error(`Runtime request failed with HTTP ${response.status}`);
+    const response = await fetch(`http://${runtime.host}:${runtime.port}${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${this.token}`,
+        ...init?.headers,
+      },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { error?: string; hint?: string };
+      throw new Error([body.error || `Runtime request failed with HTTP ${response.status}`, body.hint]
+        .filter(Boolean).join(' '));
+    }
     return (await response.json()) as T;
   }
 
@@ -208,6 +224,14 @@ export class RuntimeManager {
 
   greeting(name: string): Promise<RuntimeGreeting> {
     return this.request(`${RUNTIME_ROUTES.greeting}?name=${encodeURIComponent(name)}`);
+  }
+
+  chat(message: string): Promise<ChatResponse> {
+    return this.request(RUNTIME_ROUTES.chat, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
   }
 
   async checkForUpdate(): Promise<RuntimeUpdateState> {

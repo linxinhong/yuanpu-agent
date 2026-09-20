@@ -39,6 +39,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('runtime:info', () => runtime.info());
   ipcMain.handle('runtime:greeting', (_event, name: string) => runtime.greeting(name));
+  ipcMain.handle('runtime:chat', (_event, message: string) => runtime.chat(message));
   ipcMain.handle('runtime:update', () => runtime.checkForUpdate());
   ipcMain.handle('desktop:update', async () => {
     if (!app.isPackaged) throw new Error('Desktop updates are only available in packaged builds');

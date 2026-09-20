@@ -28,6 +28,12 @@ pnpm dev
 
 `pnpm dev` 会构建 Runtime 和 Electron main/preload，启动 Vite，然后打开 Electron。
 
+## 本地 Agent 配置
+
+Runtime 使用 Node 的系统主目录解析创建跨平台配置根目录：macOS/Linux 为 `~/.yuanpu`，Windows 为 `%USERPROFILE%\\.yuanpu`。首次启动会创建 `config.json`、`skills/`、`memory/` 和 `sessions/`。
+
+默认模型从 `OPENAI_API_KEY` 读取密钥。可在 `config.json` 修改 `provider`、`model`、`apiKeyEnv`、`baseUrl`、`api` 或 `workingDirectory`，然后重启桌面端。`baseUrl` 可接入 OpenAI-compatible 自定义服务；也可使用 Pi 的 `~/.yuanpu/auth.json` 凭据格式。API 密钥不会写入 `config.json`。
+
 ## 构建产物
 
 构建当前平台的 SEA Runtime：
