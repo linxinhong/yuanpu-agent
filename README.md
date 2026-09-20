@@ -45,8 +45,8 @@ Runtime 产物位于 `apps/runtime/dist-native/artifacts/`，桌面产物位于 
 ## CI/CD
 
 - `CI`：对 push 和 PR 执行类型检查、构建和测试。
-- `Manual native bundle`：手动构建三个平台的独立 SEA Runtime。
-- `Manual desktop bundle`：手动构建三个平台的 Electron 安装包。
+- `Runtime Bundle`：既可手动构建三个平台的独立 SEA Runtime，也供正式发布复用。
+- `Desktop Bundle`：既可手动构建三个平台的 Electron 安装包，也供正式发布复用。
 - `Release`：推送 `v*.*.*` tag 后，同时发布桌面安装包、Runtime 裸二进制和 `manifest.json`。
 
 Runtime manifest 包含协议版本、最低桌面版本、各平台 URL、大小和 SHA-256，供桌面端的独立更新器消费。

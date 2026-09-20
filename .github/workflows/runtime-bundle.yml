@@ -1,13 +1,25 @@
-name: _desktop-build
+name: Runtime Bundle
 
 on:
+  workflow_dispatch:
+    inputs:
+      artifact-prefix:
+        description: Prefix for uploaded artifact names
+        required: false
+        type: string
+        default: yuanpu-agent-native
+      retention-days:
+        description: Artifact retention in days
+        required: false
+        type: number
+        default: 3
   workflow_call:
     inputs:
       artifact-prefix:
         description: Prefix for uploaded artifact names
         required: false
         type: string
-        default: yuanpu-agent-desktop
+        default: yuanpu-agent-native
       retention-days:
         description: Artifact retention in days
         required: false
@@ -18,8 +30,8 @@ permissions:
   contents: read
 
 jobs:
-  desktop-bundle:
-    name: Desktop bundle (${{ matrix.target }})
+  native-bundle:
+    name: Native bundle (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,25 +57,27 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
+      - name: Verify runner architecture
+        shell: bash
+        run: test "$(node -p "process.platform + '-' + process.arch")" = "${{ matrix.target }}"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
-      - name: Build desktop package
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm package:desktop
+      - name: Build native executable
+        run: pnpm build:native
 
-      - name: Upload desktop artifact
+      - name: Smoke test native executable
+        run: pnpm smoke:native
+
+      - name: Package native artifact
+        run: pnpm package:native
+
+      - name: Upload native artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-prefix }}-${{ matrix.target }}
           retention-days: ${{ inputs.retention-days }}
           if-no-files-found: error
           path: |
-            apps/desktop/release/*.AppImage
-            apps/desktop/release/*.blockmap
-            apps/desktop/release/*.dmg
-            apps/desktop/release/*.exe
-            apps/desktop/release/*.tar.gz
-            apps/desktop/release/*.yml
-            apps/desktop/release/*.zip
+            apps/runtime/dist-native/artifacts/YuanpuAgentRuntime-${{ matrix.target }}*

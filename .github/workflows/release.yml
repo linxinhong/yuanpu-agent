@@ -11,13 +11,13 @@ concurrency:
 
 jobs:
   native-artifacts:
-    uses: ./.github/workflows/_native-build.yml
+    uses: ./.github/workflows/runtime-bundle.yml
     with:
       artifact-prefix: yuanpu-agent-native
       retention-days: 7
 
   desktop-artifacts:
-    uses: ./.github/workflows/_desktop-build.yml
+    uses: ./.github/workflows/desktop-bundle.yml
     with:
       artifact-prefix: yuanpu-agent-desktop
       retention-days: 7
