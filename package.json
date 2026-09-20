@@ -11,7 +11,7 @@
     "build:native": "pnpm --filter @yuanpu-agent/runtime run build:native",
     "check": "pnpm run typecheck && pnpm run build && pnpm run test",
     "dev": "pnpm build:runtime && pnpm build:desktop && pnpm --filter @yuanpu-agent/desktop run dev",
-    "package:desktop": "pnpm run build && pnpm run build:native && pnpm --filter @yuanpu-agent/desktop run package",
+    "package:desktop": "pnpm run build && pnpm run build:native && pnpm run smoke:native && pnpm --filter @yuanpu-agent/desktop run package",
     "package:native": "pnpm --filter @yuanpu-agent/runtime run package:native",
     "release:manifest": "pnpm --filter @yuanpu-agent/runtime run release:manifest",
     "smoke:native": "pnpm --filter @yuanpu-agent/runtime run smoke:native",
