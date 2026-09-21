@@ -11,6 +11,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import {
   CAPABILITY_TOOL_NAMES,
+  type CapabilityContext,
   type CapabilityToolClient,
   type ExecuteCapabilityInput,
 } from '../capabilities/contracts.js';
@@ -58,7 +59,10 @@ function capabilityResultForPi(
   return { content, details: result };
 }
 
-export function createYuanpuCapabilityTools(client: CapabilityToolClient): ToolDefinition[] {
+export function createYuanpuCapabilityTools(
+  client: CapabilityToolClient,
+  context: CapabilityContext = {},
+): ToolDefinition[] {
   return [
     defineTool({
       name: CAPABILITY_TOOL_NAMES.search,
@@ -66,7 +70,7 @@ export function createYuanpuCapabilityTools(client: CapabilityToolClient): ToolD
       description: 'Find external capabilities available to the current workspace. Use an empty query to list available capabilities.',
       parameters: searchParameters,
       execute: async (_toolCallId, params) => {
-        const result = await client.search(params);
+        const result = await client.search(params, context);
         return {
           content: [{ type: 'text', text: JSON.stringify(result) }],
           details: result,
@@ -84,7 +88,7 @@ export function createYuanpuCapabilityTools(client: CapabilityToolClient): ToolD
           arguments: params.arguments,
           approvalRequestId: params.approvalRequestId,
         } as ExecuteCapabilityInput;
-        const result = await client.execute(input);
+        const result = await client.execute(input, context);
         return capabilityResultForPi(result);
       },
     }),
@@ -93,13 +97,14 @@ export function createYuanpuCapabilityTools(client: CapabilityToolClient): ToolD
 
 export type CreateYuanpuAgentSessionOptions = CreateAgentSessionOptions & {
   capabilityClient: CapabilityToolClient;
+  capabilityContext?: CapabilityContext;
 };
 
 export function createYuanpuAgentSession(
   options: CreateYuanpuAgentSessionOptions,
 ): Promise<CreateAgentSessionResult> {
-  const { capabilityClient, ...sessionOptions } = options;
-  const capabilityTools = createYuanpuCapabilityTools(capabilityClient);
+  const { capabilityClient, capabilityContext, ...sessionOptions } = options;
+  const capabilityTools = createYuanpuCapabilityTools(capabilityClient, capabilityContext);
   const tools = sessionOptions.tools ?? [
     'read',
     'write',
@@ -189,6 +194,7 @@ export async function inspectYuanpuExtensions(options: {
 
 export interface CreateYuanpuChatOptions {
   capabilityClient: CapabilityToolClient;
+  capabilityContext?: CapabilityContext;
   agentDir: string;
   cwd: string;
   provider: string;
@@ -268,6 +274,7 @@ export async function createYuanpuChatSession(
 
   const { session } = await createYuanpuAgentSession({
     capabilityClient: options.capabilityClient,
+    capabilityContext: options.capabilityContext,
     cwd: options.cwd,
     agentDir: options.agentDir,
     model,

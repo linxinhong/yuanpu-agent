@@ -14,6 +14,8 @@ export const RUNTIME_ROUTES = {
   pluginConfigValidate: '/v1/plugins/config/validate',
   pluginConfigSave: '/v1/plugins/config/save',
   pluginConfigReset: '/v1/plugins/config/reset',
+  capabilityApprovals: '/v1/capabilities/approvals',
+  capabilityApprovalDecision: '/v1/capabilities/approvals/decision',
 } as const;
 
 export interface RuntimeInfo {
@@ -43,6 +45,24 @@ export interface RuntimeUpdateState {
   currentVersion?: string;
   availableVersion?: string;
   message?: string;
+}
+
+export interface CapabilityApprovalSummary {
+  requestId: string;
+  sessionId: string;
+  workspaceId: string;
+  sourceInstanceId: string;
+  capabilityId: string;
+  packageVersion?: string;
+  argumentsDigest: string;
+  status: 'pending';
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface CapabilityApprovalDecisionInput {
+  requestId: string;
+  decision: 'approved' | 'denied';
 }
 
 export const CAPABILITY_PACKAGE_MANIFEST_VERSION = 1;

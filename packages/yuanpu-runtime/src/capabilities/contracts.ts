@@ -119,6 +119,25 @@ export interface CapabilityApprovalRecord extends CapabilityApprovalBinding {
   consumedAt?: string;
 }
 
+export interface CapabilityAuthorizationInput {
+  approvalRequestId?: string;
+  sessionId?: string;
+  workspaceId?: string;
+  sourceInstanceId: string;
+  packageVersion?: string;
+  capabilityId: string;
+  arguments: Record<string, JsonValue>;
+}
+
+export type CapabilityAuthorizationResult =
+  | { status: 'authorized' }
+  | { status: 'pending'; requestId: string }
+  | { status: 'invalid'; message: string };
+
+export interface CapabilityAuthorizer {
+  authorize(input: CapabilityAuthorizationInput): Promise<CapabilityAuthorizationResult>;
+}
+
 export type CapabilityErrorCode =
   | 'unknown_capability'
   | 'invalid_arguments'

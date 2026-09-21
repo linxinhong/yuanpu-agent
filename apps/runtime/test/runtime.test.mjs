@@ -91,6 +91,21 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     .then((response) => response.json());
   const localSkills = await fetch(`http://${ready.host}:${ready.port}/v1/skills/local`, { headers })
     .then((response) => response.json());
+  const unauthorizedApprovals = await fetch(
+    `http://${ready.host}:${ready.port}/v1/capabilities/approvals`,
+  );
+  const approvals = await fetch(
+    `http://${ready.host}:${ready.port}/v1/capabilities/approvals`,
+    { headers },
+  ).then((response) => response.json());
+  const invalidApprovalDecision = await fetch(
+    `http://${ready.host}:${ready.port}/v1/capabilities/approvals/decision`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ requestId: '', decision: 'approved' }),
+    },
+  );
   const invalidPluginInstall = await fetch(`http://${ready.host}:${ready.port}/v1/plugins/install`, {
     method: 'POST',
     headers: { ...headers, 'content-type': 'application/json' },
@@ -133,6 +148,9 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const unconfiguredError = await unconfiguredChat.json();
 
   assert.equal(unauthorized.status, 401);
+  assert.equal(unauthorizedApprovals.status, 401);
+  assert.deepEqual(approvals, []);
+  assert.equal(invalidApprovalDecision.status, 400);
   assert.equal(invalidChat.status, 400);
   assert.equal(invalidPluginInstall.status, 400);
   assert.equal(floatingPluginInstall.status, 500);

@@ -1,5 +1,6 @@
 import {
   createDemoCapabilitySource,
+  CapabilityApprovalStore,
   createYuanpuMcpServer,
   createYuanpuCapabilityTools,
   createYuanpuChatSession,
@@ -18,6 +19,8 @@ import {
   type PluginConfigScope,
 } from '@yuanpu-agent/protocol';
 import { createServer, type IncomingMessage } from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 
 declare const __APP_VERSION__: string;
 
@@ -72,9 +75,11 @@ async function serve(): Promise<void> {
     home.config.workingDirectory,
     home.config.catalogUrl,
   );
-  const mcp = createYuanpuMcpServer([createDemoCapabilitySource()]);
+  const approvals = await CapabilityApprovalStore.open(join(home.appPath, 'approvals.json'));
+  const mcp = createYuanpuMcpServer([createDemoCapabilitySource()], approvals);
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   let chatPromise: Promise<YuanpuChatSession> | undefined;
+  let chatSessionId: string | undefined;
   let activePrompts = 0;
   const retiredChats = new Set<Promise<YuanpuChatSession>>();
   const disposeRetiredChats = () => {
@@ -86,13 +91,23 @@ async function serve(): Promise<void> {
   };
   const resetChat = () => {
     const previous = chatPromise;
+    const previousSessionId = chatSessionId;
     chatPromise = undefined;
+    chatSessionId = undefined;
+    if (previousSessionId) void approvals.cancelSession(previousSessionId);
     if (previous) retiredChats.add(previous);
     disposeRetiredChats();
   };
   const getChat = () => {
-    chatPromise ??= createYuanpuChatSession({
+    if (!chatPromise) {
+      chatSessionId = randomUUID();
+      chatPromise = createYuanpuChatSession({
       capabilityClient: mcp,
+      capabilityContext: {
+        sessionId: chatSessionId,
+        workspaceId: home.config.workingDirectory,
+        userId: 'local-user',
+      },
       agentDir: home.agentPath,
       cwd: home.config.workingDirectory,
       provider: home.config.provider,
@@ -101,7 +116,8 @@ async function serve(): Promise<void> {
       apiKeyEnv: home.config.apiKeyEnv,
       baseUrl: home.config.baseUrl,
       api: home.config.api,
-    });
+      });
+    }
     return chatPromise;
   };
   const inspectPlugin = async (plugin: { installPath: string }) => {
@@ -164,6 +180,31 @@ async function serve(): Promise<void> {
           agentDir: home.agentPath,
           cwd: home.config.workingDirectory,
         })));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.capabilityApprovals && request.method === 'GET') {
+        response.end(JSON.stringify(await approvals.listPending()));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.capabilityApprovalDecision && request.method === 'POST') {
+        const body = await readJsonBody(request) as { requestId?: unknown; decision?: unknown };
+        if (
+          typeof body.requestId !== 'string'
+          || !body.requestId.trim()
+          || (body.decision !== 'approved' && body.decision !== 'denied')
+        ) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid capability approval decision.' }));
+          return;
+        }
+        try {
+          response.end(JSON.stringify(await approvals.decide(body.requestId, body.decision)));
+        } catch (error) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
         return;
       }
 
@@ -295,6 +336,9 @@ async function serve(): Promise<void> {
           : {}),
       }));
     }
+  });
+  server.on('close', () => {
+    if (chatSessionId) void approvals.cancelSession(chatSessionId);
   });
 
   server.listen(requestedPort, '127.0.0.1', () => {

@@ -5,6 +5,7 @@ import {
   CAPABILITY_ID_PREFIX,
   CAPABILITY_TOOL_NAMES,
   type CapabilityContext,
+  type CapabilityAuthorizer,
   type CapabilityDefinition,
   type CapabilityDescriptor,
   type CapabilityFailure,
@@ -19,6 +20,7 @@ import {
 } from './contracts.js';
 
 export * from './contracts.js';
+export * from './approval.js';
 
 export interface CapabilitySource {
   /** Stable for this configured source, not merely its package display name. */
@@ -134,9 +136,11 @@ function validateArguments(capability: CapabilityDescriptor, value: unknown): vo
 
 export class CapabilityRegistry implements CapabilityToolClient {
   readonly #sources: Map<string, CapabilitySource>;
+  readonly #authorizer?: CapabilityAuthorizer;
 
-  constructor(sources: CapabilitySource[] = []) {
+  constructor(sources: CapabilitySource[] = [], authorizer?: CapabilityAuthorizer) {
     this.#sources = new Map();
+    this.#authorizer = authorizer;
     for (const source of sources) {
       if (!source.sourceInstanceId.trim()) throw new Error('Capability sourceInstanceId must be non-empty.');
       if (this.#sources.has(source.sourceInstanceId)) {
@@ -201,12 +205,37 @@ export class CapabilityRegistry implements CapabilityToolClient {
     }
     validateArguments(capability, input.arguments ?? {});
     if (capability.status === 'needs_approval' || riskOrder[capability.riskLevel] >= riskOrder.R2) {
-      throw new CapabilityError({
-        error: 'needs_approval',
-        message: `${input.name} requires host approval before execution.`,
-        retry: { search: false, action: 'request_approval' },
+      if (!this.#authorizer) {
+        throw new CapabilityError({
+          error: 'needs_approval',
+          message: `${input.name} requires host approval, but no host authorizer is available.`,
+          retry: { search: false, action: 'request_approval' },
+        });
+      }
+      const authorization = await this.#authorizer.authorize({
         approvalRequestId: input.approvalRequestId,
+        sessionId: context.sessionId,
+        workspaceId: context.workspaceId,
+        sourceInstanceId: capability.sourceInstanceId,
+        packageVersion: capability.packageVersion,
+        capabilityId: capability.name,
+        arguments: input.arguments ?? {},
       });
+      if (authorization.status === 'pending') {
+        throw new CapabilityError({
+          error: 'needs_approval',
+          message: `${input.name} requires host approval before execution.`,
+          retry: { search: false, action: 'request_approval' },
+          approvalRequestId: authorization.requestId,
+        });
+      }
+      if (authorization.status === 'invalid') {
+        throw new CapabilityError({
+          error: 'approval_invalid',
+          message: authorization.message,
+          retry: { search: false, action: 'request_approval' },
+        });
+      }
     }
 
     const result = await source.execute({
@@ -263,8 +292,8 @@ export const YUANPU_MCP_TOOLS: readonly CapabilityToolDefinition[] = [
 export class YuanpuMcpServer implements CapabilityToolClient {
   readonly #registry: CapabilityRegistry;
 
-  constructor(sources: CapabilitySource[] = []) {
-    this.#registry = new CapabilityRegistry(sources);
+  constructor(sources: CapabilitySource[] = [], authorizer?: CapabilityAuthorizer) {
+    this.#registry = new CapabilityRegistry(sources, authorizer);
   }
 
   listTools(): readonly CapabilityToolDefinition[] {
@@ -294,8 +323,11 @@ export class YuanpuMcpServer implements CapabilityToolClient {
   }
 }
 
-export function createYuanpuMcpServer(sources: CapabilitySource[] = []): YuanpuMcpServer {
-  return new YuanpuMcpServer(sources);
+export function createYuanpuMcpServer(
+  sources: CapabilitySource[] = [],
+  authorizer?: CapabilityAuthorizer,
+): YuanpuMcpServer {
+  return new YuanpuMcpServer(sources, authorizer);
 }
 
 const echoCapability: CapabilityDefinition = {

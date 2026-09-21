@@ -1,14 +1,44 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
   CAPABILITY_TOOL_NAMES,
+  CapabilityApprovalStore,
   CapabilityError,
   createCapabilityId,
   createDemoCapabilitySource,
   createYuanpuMcpServer,
   parseCapabilityId,
 } from '../dist/index.mjs';
+
+function sensitiveSource(onExecute = () => undefined) {
+  const definition = {
+    name: 'publish',
+    description: 'Publish external data',
+    type: 'mcp_tool',
+    riskLevel: 'R3',
+    status: 'needs_approval',
+    packageVersion: '1.2.3',
+    inputSchema: {
+      type: 'object',
+      required: ['target'],
+      properties: { target: { type: 'string' } },
+      additionalProperties: false,
+    },
+  };
+  return {
+    sourceInstanceId: 'test.sensitive',
+    async list() { return [definition]; },
+    async resolve(name) { return name === definition.name ? definition : undefined; },
+    async execute() {
+      onExecute();
+      return { content: [{ type: 'text', text: 'published' }] };
+    },
+  };
+}
 
 test('the MCP surface always exposes exactly two meta tools', () => {
   const server = createYuanpuMcpServer();
@@ -118,6 +148,107 @@ test('model supplied approval ids do not authorize sensitive capabilities', asyn
     );
   }
   assert.equal(executions, 0);
+});
+
+test('host approval is bound, atomically consumed once, and replay-safe', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-approval-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let executions = 0;
+  const store = await CapabilityApprovalStore.open(join(root, 'approvals.json'), {
+    createId: () => 'host-request-1',
+  });
+  const server = createYuanpuMcpServer([sensitiveSource(() => { executions += 1; })], store);
+  const capability = createCapabilityId('test.sensitive', 'publish');
+  const execution = { name: capability, arguments: { target: 'release' } };
+  const hostContext = { sessionId: 'session-a', workspaceId: '/workspace/a' };
+
+  let requestId;
+  await assert.rejects(
+    server.execute(execution, hostContext),
+    (error) => {
+      requestId = error.failure.approvalRequestId;
+      return error instanceof CapabilityError
+        && error.failure.error === 'needs_approval'
+        && requestId === 'host-request-1';
+    },
+  );
+  assert.equal((await store.listPending()).length, 1);
+  await store.decide(requestId, 'approved');
+
+  for (const [changed, changedContext] of [
+    [{ target: 'other' }, hostContext],
+    [execution.arguments, { ...hostContext, sessionId: 'session-b' }],
+    [execution.arguments, { ...hostContext, workspaceId: '/workspace/b' }],
+  ]) {
+    await assert.rejects(
+      server.execute({ ...execution, arguments: changed, approvalRequestId: requestId }, changedContext),
+      (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+    );
+  }
+
+  const attempts = await Promise.allSettled([
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+  ]);
+  assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
+  assert.equal(executions, 1);
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
+});
+
+test('expired, fabricated, denied and restarted approvals cannot execute', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-approval-state-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'approvals.json');
+  let now = new Date('2026-09-21T00:00:00.000Z');
+  let sequence = 0;
+  const options = { ttlMs: 1_000, now: () => now, createId: () => `request-${++sequence}` };
+  const capability = createCapabilityId('test.sensitive', 'publish');
+  const execution = { name: capability, arguments: { target: 'release' } };
+  const hostContext = { sessionId: 'session-a', workspaceId: '/workspace/a' };
+  let store = await CapabilityApprovalStore.open(path, options);
+  let server = createYuanpuMcpServer([sensitiveSource()], store);
+
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: 'fabricated' }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
+  let requestId;
+  await assert.rejects(server.execute(execution, hostContext), (error) => {
+    requestId = error.failure.approvalRequestId;
+    return true;
+  });
+  await store.decide(requestId, 'denied');
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
+
+  await assert.rejects(server.execute(execution, hostContext), (error) => {
+    requestId = error.failure.approvalRequestId;
+    return true;
+  });
+  await store.decide(requestId, 'approved');
+  now = new Date(now.getTime() + 2_000);
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
+
+  now = new Date('2026-09-21T01:00:00.000Z');
+  await assert.rejects(server.execute(execution, hostContext), (error) => {
+    requestId = error.failure.approvalRequestId;
+    return true;
+  });
+  await store.decide(requestId, 'approved');
+  store = await CapabilityApprovalStore.open(path, options);
+  server = createYuanpuMcpServer([sensitiveSource()], store);
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
 });
 
 test('demo capability completes discovery and preserves MCP result fields', async () => {
