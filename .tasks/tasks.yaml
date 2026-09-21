@@ -82,7 +82,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-003
     title: "实现宿主一次性授权"
-    status: in_progress
+    status: done
     goal: "敏感能力由宿主审批并严格一次执行，移除非空 token 即放行。"
     scope:
       in: ["capabilities 授权状态与持久消费","Runtime 认证审批 API、Pi needs_approval 适配","授权回放与并发测试"]
@@ -107,10 +107,16 @@ tasks:
       owner: "codex-yuanpu"
       attempts: 0
       claimed_at: "2026-09-21T08:03:52.245Z"
-      completed_at: null
+      completed_at: "2026-09-21T08:22:16.657Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-003-approval"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Host authorization implementation and evidence are merged into main at 6d2b71b."}
+        - {type: "test", check: "S2 authorization matrix", status: "passed", summary: "Tests cover fabricated, expired, denied, cross-session/workspace, changed args/version, missing version, replay, concurrent consume, and restart cancellation."}
+        - {type: "test", check: "signed host boundary", status: "passed", summary: "Runtime tests cover auth, forged Ed25519 decisions, valid signed decisions, nonce replay, and confirm bearer is absent from child argv."}
+        - {type: "review", check: "independent security review", status: "passed", summary: "Reviewer found and reproduced argv-token self-approval in 65f4dd0; after stdin bootstrap plus Electron-held signing key at 143b514, second review found no blocking issue and confirmed package-version binding."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Final full build, Yuanpu typecheck, and tests passed on Node 24.15.0/pnpm 11.22.0."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-003.md with security boundary and recheck triggers."}
       follow_up_candidates: []
   - id: TASK-004
     title: "接入受管 Python MCP 示例"
