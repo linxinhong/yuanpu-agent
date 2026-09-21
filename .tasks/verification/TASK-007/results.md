@@ -11,14 +11,16 @@
 | --- | --- | --- |
 | S7-SEARCH | 技能页从 catalog 搜索 Python 示例能力，显示发布者、版本、权限；安装前出现信任确认 | PASS |
 | S7-INSTALL | 从 catalog 下载、验签、解包并健康检查 0.1.0，立即激活；renderer 刷新后仍显示已安装 | PASS |
-| S7-ALLOW | 真实 LongCat 对话请求 `yuanpu_approved_echo`；点击“允许一次”后仅执行一次并返回 `TASK007-ALLOW` | PASS |
+| S7-CONFIG | 安装 0.3.0 后从签名 schema 打开配置页，保存 `responsePrefix`；配置位于独立用户目录，刷新仍可读取 | PASS |
+| S7-ALLOW | 真实 LongCat 对话请求 `yuanpu_approved_echo`；renderer 刷新后点击“允许一次”，Runtime 以原能力/参数/上下文直接执行并返回 `已配置：TASK007-APPROVAL-2` | PASS |
 | S7-DENY | 新审批点击拒绝，回到对话并显示拒绝结果，能力未执行 | PASS |
 | S7-REFRESH | 审批待定时刷新 renderer，Runtime 持久记录恢复相同审批卡 | PASS |
 | S7-UPDATE-FAIL | 0.2.0 使用另一测试签名；Runtime 拒绝，0.1.0 保持活动，界面显示当前版本与重试 | PASS |
 | S7-ROLLBACK | 加载匹配测试信任根后升级到 0.2.0；已安装页显示历史版本，点击后回滚至 0.1.0 | PASS |
 | S7-DEDUP | 安装/回滚/审批进行时相关按钮禁用；审批后端的一次消费及重放拒绝由 runtime 测试覆盖 | PASS |
-| S7-CONFLICT | UI 检测已启用 `pi-mcp-adapter` 后要求明确选择；取消不变更，选择 Yuanpu 仅停用旧 adapter；配置保留由 runtime 回归测试覆盖 | PASS |
-| IPC-TRUST | Electron 所有 invoke handler 校验发送 webContents 与主 frame，preload 只暴露窄方法 | PASS（静态检查 + typecheck） |
+| S7-CONFLICT | Runtime 从验签 manifest 读取连接名，只报告与旧 adapter 配置重合的 `yuanpu_echo_mcp`，不误报 `unrelated`；UI 要求明确选择，配置保留由 runtime 回归测试覆盖 | PASS |
+| IPC-TRUST | invoke 同时校验当前 webContents、main frame 与配置入口 URL；远端页面实测调用 `runtime:info` 被拒绝；普通导航/webview/新窗有阻断策略 | PASS |
+| TRUST-METADATA | 市场权限、版本与连接名在 Runtime 下载并验签 manifest 后覆盖 catalog 展示数据；配置 schema 同样来自已安装签名版本 | PASS |
 
 证据：`.tasks/ui/task-007-skill-ui/images/`。其中信任、安装、审批、刷新、失败恢复和回滚均来自真实 Electron，不是浏览器 mock。
 
@@ -27,8 +29,11 @@
 - `PATH=/Users/linxinhong/.nvm/versions/node/v24.15.0/bin:$PATH pnpm check` — PASS
 - `YUANPU_CAPABILITY_VERSION=0.2.0 pnpm build:python-artifact` — PASS
 - PyInstaller 制品 `--version` 健康检查 — PASS；入口先处理版本参数，不再加载完整 MCP 栈
-- `agent-browser --session task007-yuanpu --cdp 9333 ...` — PASS，完成上述真实桌面旅程
+- `agent-browser --session task007-yuanpu --cdp 9333 ...` 与 `task007-review --cdp 9334 ...` — PASS，完成初始及复核修正后的真实桌面旅程
+- 远端 frame 调用结果：`Rejected IPC from an untrusted renderer frame`；重复批准结果：`Approval request is consumed.`
 
 ## 边界
 
 本卡只证明 macOS arm64 的界面与真实后端链路。Linux/Windows、系统签名提示、正式发布密钥和三平台离线制品证据仍为 `UNVERIFIED`，由 TASK-008 汇总；不得据此宣称生产发布就绪。
+
+独立安全复核首轮在 `4cced6e` 报告 1 HIGH 与 4 MEDIUM；上述 IPC URL、精确审批、配置、签名元数据及冲突范围问题均已修复，最终 revision 需在修复提交后记录并重新复核。

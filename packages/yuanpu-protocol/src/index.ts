@@ -15,6 +15,7 @@ export const RUNTIME_ROUTES = {
   pluginConfigSave: '/v1/plugins/config/save',
   pluginConfigReset: '/v1/plugins/config/reset',
   pluginRollback: '/v1/plugins/rollback',
+  pluginMcpConflicts: '/v1/plugins/mcp-conflicts',
   capabilityApprovals: '/v1/capabilities/approvals',
   capabilityApprovalDecision: '/v1/capabilities/approvals/decision',
 } as const;
@@ -71,7 +72,13 @@ export interface CapabilityApprovalDecisionInput {
 
 export interface CapabilityApprovalDecisionResult {
   requestId: string;
-  status: 'approved' | 'denied';
+  status: 'completed' | 'denied';
+  message?: string;
+}
+
+export interface McpOwnershipConflict {
+  name: string;
+  owners: Array<'yuanpu' | 'pi-mcp-adapter-user' | 'pi-mcp-adapter-workspace'>;
 }
 
 export function capabilityApprovalSigningPayload(
@@ -111,6 +118,7 @@ export interface CapabilityPackageManifest {
   artifacts: CapabilityArtifactTarget[];
   configSchema?: Record<string, unknown>;
   permissions: Array<'filesystem' | 'network' | 'credentials' | 'background'>;
+  connections?: string[];
   issuedAt: string;
   signature: { algorithm: 'ed25519'; keyId: string; value: string };
 }
@@ -202,6 +210,7 @@ export interface DesktopBridge {
   savePluginConfig(input: PluginConfigInput): Promise<PluginConfigDocument>;
   resetPluginConfig(name: string, scope: PluginConfigScope): Promise<PluginConfigDocument>;
   rollbackPlugin(name: string, version: string): Promise<InstalledPlugin>;
+  listMcpOwnershipConflicts(source: string): Promise<McpOwnershipConflict[]>;
   listCapabilityApprovals(): Promise<CapabilityApprovalSummary[]>;
   decideCapabilityApproval(
     requestId: string,

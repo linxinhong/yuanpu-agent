@@ -199,6 +199,13 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
     },
   );
   assert.equal((await store.listPending()).length, 1);
+  assert.deepEqual(store.executionFor(requestId), {
+    requestId,
+    sessionId: hostContext.sessionId,
+    workspaceId: hostContext.workspaceId,
+    capabilityId: capability,
+    arguments: execution.arguments,
+  });
   await store.decide(requestId, 'approved');
 
   const updatedServer = createYuanpuMcpServer([sensitiveSource(() => undefined, '2.0.0')], store);
@@ -224,6 +231,7 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
   ]);
   assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
   assert.equal(executions, 1);
+  assert.equal(store.executionFor(requestId), undefined);
   await assert.rejects(
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
     (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',

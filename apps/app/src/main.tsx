@@ -446,7 +446,7 @@ function SkillPage({ active }: { active: boolean }) {
     void Promise.all([search(''), refreshInstalled(), refreshLocalSkills()]).catch((loadError) => {
       setError(formatError(loadError));
     });
-  }, [desktop]);
+  }, [desktop, active]);
 
   async function install(candidate: PluginSearchResult) {
     const source = candidate.source;
@@ -461,12 +461,16 @@ function SkillPage({ active }: { active: boolean }) {
     let legacyDisabled = false;
     try {
       if (isArtifactSource(source) && legacyAdapter?.enabled) {
-        const useYuanpu = window.confirm(
-          '检测到已启用的旧 pi-mcp-adapter。\n\n选择“确定”将由 Yuanpu 托管此能力并停用旧适配器；旧配置会完整保留。选择“取消”则保持旧适配器且不安装。',
-        );
-        if (!useYuanpu) return;
-        await desktop.setPluginEnabled(legacyAdapter.name, false);
-        legacyDisabled = true;
+        const conflicts = await desktop.listMcpOwnershipConflicts(source);
+        if (conflicts.length > 0) {
+          const names = conflicts.map((conflict) => conflict.name).join('、');
+          const useYuanpu = window.confirm(
+            `检测到旧 pi-mcp-adapter 正在托管同名连接：${names}。\n\n选择“确定”将停用旧适配器并由 Yuanpu 托管；旧配置会完整保留，但旧适配器中的其他连接也会暂停。选择“取消”则保持旧适配器且不安装。`,
+          );
+          if (!useYuanpu) return;
+          await desktop.setPluginEnabled(legacyAdapter.name, false);
+          legacyDisabled = true;
+        }
       }
       await desktop.installPlugin(source);
       await refreshInstalled();
@@ -807,19 +811,11 @@ function ChatPanel({ active }: { active: boolean }) {
   const [approvalBusy, setApprovalBusy] = useState<string>();
   const nextId = useRef(2);
   const conversation = useRef<HTMLDivElement>(null);
-  const approvalMessages = useRef(new Map<string, string>());
   const desktop = window.yuanpu;
 
-  async function refreshApprovals(originatingMessage?: string) {
+  async function refreshApprovals() {
     if (!desktop) return [];
     const pendingApprovals = await desktop.listCapabilityApprovals();
-    if (originatingMessage) {
-      for (const approval of pendingApprovals) {
-        if (!approvalMessages.current.has(approval.requestId)) {
-          approvalMessages.current.set(approval.requestId, originatingMessage);
-        }
-      }
-    }
     setApprovals(pendingApprovals);
     return pendingApprovals;
   }
@@ -867,7 +863,7 @@ function ChatPanel({ active }: { active: boolean }) {
       setMessages((current) => [...current, { id: nextId.current++, role: 'error', text: formatError(error) }]);
       setInput(text);
     } finally {
-      await refreshApprovals(text).catch(() => []);
+      await refreshApprovals().catch(() => []);
       setBusy(false);
     }
   }
@@ -879,7 +875,7 @@ function ChatPanel({ active }: { active: boolean }) {
     if (!desktop || approvalBusy) return;
     setApprovalBusy(approval.requestId);
     try {
-      await desktop.decideCapabilityApproval(approval.requestId, decision);
+      const result = await desktop.decideCapabilityApproval(approval.requestId, decision);
       setApprovals((current) => current.filter((item) => item.requestId !== approval.requestId));
       if (decision === 'denied') {
         setMessages((current) => [...current, {
@@ -889,21 +885,11 @@ function ChatPanel({ active }: { active: boolean }) {
         }]);
         return;
       }
-      setBusy(true);
-      const original = approvalMessages.current.get(approval.requestId);
-      const continuation = [
-        original ? `继续完成我刚才的请求：${original}` : '继续完成刚才等待审批的请求。',
-        `宿主已允许一次；调用 execute_capability 时使用 approvalRequestId=${approval.requestId}。`,
-        '不得改动原参数，也不得申请其他权限。',
-      ].join('\n');
-      const result = await desktop.chat(continuation);
       setMessages((current) => [...current, {
         id: nextId.current++,
         role: 'assistant',
-        text: result.message,
-        tools: result.tools,
+        text: result.message ?? `能力 ${approval.capabilityId} 已执行。`,
       }]);
-      approvalMessages.current.delete(approval.requestId);
       await refreshApprovals();
     } catch (error) {
       setMessages((current) => [...current, {

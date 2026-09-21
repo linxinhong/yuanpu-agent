@@ -10,6 +10,7 @@
     "dev": "node scripts/dev.mjs",
     "package": "electron-builder --config electron-builder.yml --publish never",
     "start": "electron .",
+    "test": "node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

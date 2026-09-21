@@ -45,7 +45,15 @@
 - `approval-v001.png`、`approval-restored-v001.png`：真实 LongCat 对话触发 R2 能力审批，且刷新后待审批状态恢复。
 - `update-failure-v001.png`：0.2.0 使用不同测试签名时被 Runtime 拒绝，页面保留 0.1.0 并提供重试。
 - `rollback-v001.png`：信任根一致后成功更新到 0.2.0，再由界面显式回滚至 0.1.0。
+- `approval-exact-v002.png`：修复复核问题后，刷新 renderer 再允许；Runtime 以保存的原能力、
+  参数和上下文直接执行，返回配置前缀与原参数，不再要求模型重构调用。
 
 迭代中发现 catalog 的展示名称与能力包稳定 ID 不同，安装状态必须用 `id` 关联；同时发现
 PyInstaller 入口在处理 `--version` 前导入 MCP 依赖会超过安装健康检查时限。最终实现分别改为
 按 catalog `id` 匹配，以及在导入 MCP 前快速返回版本。
+
+独立安全复核的首轮结果为 FAIL：IPC 未绑定 URL，审批依赖模型续跑，artifact 配置与签名权限
+未接通，adapter 冲突判断过宽。v002 已将 IPC 绑定到配置的入口文档并拒绝非受信 frame；将
+审批原始调用保存在 Runtime 内存中并由宿主精确执行；使用验签 manifest 的权限、配置 schema
+和连接名；只在签名连接名与旧 adapter 配置重合时提示。外部页面实测仍可由 CDP 强制导航，
+但 preload 调用被 main 进程拒绝；普通导航和新窗口也由 webContents 策略阻止。

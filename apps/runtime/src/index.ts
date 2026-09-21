@@ -13,6 +13,7 @@ import {
   PI_UPSTREAM_VERSION,
   PluginManager,
   CapabilityArtifactManager,
+  detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
   type YuanpuChatSession,
 } from '@yuanpu-agent/runtime-kit';
@@ -24,11 +25,13 @@ import {
   type CapabilityApprovalDecisionInput,
   type PluginConfigInput,
   type PluginConfigScope,
+  type PluginConfigDocument,
+  type PluginConfigValidation,
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
 import { createPublicKey, randomUUID, verify } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -97,7 +100,10 @@ async function readBoundedJsonResponse(response: Response, maximumBytes = 256 * 
   return JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8')) as unknown;
 }
 
-function createConfiguredPythonSource(privateHome: string): ManagedMcpCapabilitySource | undefined {
+function createConfiguredPythonSource(
+  privateHome: string,
+  configFile?: string,
+): ManagedMcpCapabilitySource | undefined {
   const pythonExecutable = process.env.YUANPU_PYTHON_MCP_EXECUTABLE;
   const pythonRoot = process.env.YUANPU_PYTHON_MCP_ROOT;
   if (!pythonExecutable || !pythonRoot) return undefined;
@@ -126,6 +132,7 @@ function createConfiguredPythonSource(privateHome: string): ManagedMcpCapability
       PATH: dirname(executable),
       PYTHONPATH: join(root, 'src'),
       PYTHONUNBUFFERED: '1',
+      ...(configFile ? { YUANPU_CAPABILITY_CONFIG_FILE: configFile } : {}),
       ...(process.platform === 'win32' && process.env.SYSTEMROOT
         ? { SYSTEMROOT: process.env.SYSTEMROOT }
         : {}),
@@ -236,9 +243,64 @@ async function serve(): Promise<void> {
     }
   }
   const approvals = await CapabilityApprovalStore.open(join(home.appPath, 'approvals.json'));
+  const pythonConfigFile = join(home.packagesPath, 'config', 'builtin.python.echo', 'user.json');
+  const fetchArtifactManifest = async (source: string) => {
+    if (!artifacts) throw new Error('当前宿主没有配置能力制品信任根。');
+    if (!source.startsWith('artifact:')) throw new Error('能力来源无效。');
+    const manifestUrl = source.slice('artifact:'.length);
+    const parsedManifestUrl = new URL(manifestUrl);
+    if (!['https:', 'http:'].includes(parsedManifestUrl.protocol)) {
+      throw new Error('能力 manifest 必须使用 HTTP(S) 地址。');
+    }
+    const response = await fetch(parsedManifestUrl, {
+      headers: { accept: 'application/json', 'user-agent': `YuanpuAgent/${__APP_VERSION__}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`能力 manifest 下载失败：HTTP ${response.status}`);
+    const manifest = await readBoundedJsonResponse(response) as CapabilityPackageManifest;
+    return { manifest: artifacts.inspectManifest(manifest), manifestUrl: response.url };
+  };
+  const artifactConfigValidation = (value: Record<string, unknown>): PluginConfigValidation => {
+    const keys = Object.keys(value);
+    const prefix = value.responsePrefix;
+    const valid = keys.every((key) => key === 'responsePrefix')
+      && (prefix === undefined || (typeof prefix === 'string' && prefix.length <= 40));
+    return {
+      valid,
+      errors: valid ? [] : ['responsePrefix 必须是不超过 40 个字符的字符串，且不能包含其他字段。'],
+    };
+  };
+  const readArtifactConfig = async (): Promise<Record<string, unknown>> => {
+    try {
+      const value = JSON.parse(await readFile(pythonConfigFile, 'utf8')) as unknown;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('能力配置必须是对象。');
+      return value as Record<string, unknown>;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { responsePrefix: '' };
+      throw error;
+    }
+  };
+  const artifactConfigDocument = async (scope: PluginConfigScope): Promise<PluginConfigDocument> => {
+    if (scope !== 'user') throw new Error('Python 能力仅支持用户级配置。');
+    const active = await artifacts?.active('builtin.python.echo');
+    if (!active?.configSchema) throw new Error('当前能力版本未声明可管理配置。');
+    return {
+      pluginName: 'builtin.python.echo',
+      kind: 'schema',
+      title: 'Python 示例能力',
+      description: '配置 echo 输出前缀；配置独立于版本目录，更新和回滚不会删除。',
+      scope,
+      path: pythonConfigFile,
+      value: await readArtifactConfig(),
+      schema: active.configSchema,
+      supportsWorkspace: false,
+      secretPolicy: 'environment-only',
+    };
+  };
   const capabilitySources = [createDemoCapabilitySource()];
   let pythonSource = createConfiguredPythonSource(
     join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
+    pythonConfigFile,
   );
   if (pythonSource) capabilitySources.push(pythonSource);
   let mcp = createYuanpuMcpServer(capabilitySources, approvals);
@@ -271,6 +333,7 @@ async function serve(): Promise<void> {
     process.env.YUANPU_PYTHON_MCP_VERSION = version;
     pythonSource = createConfiguredPythonSource(
       join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
+      pythonConfigFile,
     );
     mcp = createYuanpuMcpServer(
       [createDemoCapabilitySource(), ...(pythonSource ? [pythonSource] : [])],
@@ -412,7 +475,26 @@ async function serve(): Promise<void> {
           if (oldest) usedDecisionNonces.delete(oldest);
         }
         try {
-          response.end(JSON.stringify(await approvals.decide(body.requestId, body.decision)));
+          await approvals.decide(body.requestId, body.decision);
+          if (body.decision === 'denied') {
+            response.end(JSON.stringify({ requestId: body.requestId, status: 'denied' }));
+            return;
+          }
+          const execution = approvals.executionFor(body.requestId);
+          if (!execution) throw new Error('Approved capability execution is no longer available.');
+          const result = await mcp.execute({
+            name: execution.capabilityId,
+            arguments: execution.arguments,
+            approvalRequestId: execution.requestId,
+          }, {
+            sessionId: execution.sessionId,
+            workspaceId: execution.workspaceId,
+          });
+          const message = result.content
+            .filter((block): block is Extract<(typeof result.content)[number], { type: 'text' }> => block.type === 'text')
+            .map((block) => block.text)
+            .join('\n') || JSON.stringify(result.structuredContent ?? {});
+          response.end(JSON.stringify({ requestId: body.requestId, status: 'completed', message }));
         } catch (error) {
           response.statusCode = 409;
           response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
@@ -421,14 +503,38 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.pluginSearch && request.method === 'GET') {
-        response.end(JSON.stringify(await plugins.search(url.searchParams.get('q') ?? '')));
+        const results = await plugins.search(url.searchParams.get('q') ?? '');
+        const hydrated = await Promise.all(results.map(async (item) => {
+          if (!item.source.startsWith('artifact:')) return item;
+          const { manifest } = await fetchArtifactManifest(item.source);
+          if (item.id && item.id !== manifest.id) throw new Error('Catalog capability id does not match its signed manifest.');
+          return {
+            ...item,
+            id: manifest.id,
+            version: manifest.version,
+            permissions: manifest.permissions,
+          };
+        }));
+        response.end(JSON.stringify(hydrated));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginMcpConflicts && request.method === 'GET') {
+        const source = url.searchParams.get('source');
+        if (!source) throw new Error('能力来源不能为空。');
+        const { manifest } = await fetchArtifactManifest(source);
+        response.end(JSON.stringify(await detectMcpOwnershipConflicts({
+          yuanpuConnections: manifest.connections ?? [],
+          agentRoot: home.agentPath,
+          workspaceRoot: home.config.workingDirectory,
+        })));
         return;
       }
 
       if (url.pathname === RUNTIME_ROUTES.plugins && request.method === 'GET') {
         const installed = await plugins.list();
         const installedArtifacts = artifacts
-          ? (await artifacts.list()).map((item) => {
+          ? await Promise.all((await artifacts.list()).map(async (item) => {
             const active = item.versions[item.activeVersion]!;
             return {
               name: item.id,
@@ -438,13 +544,15 @@ async function serve(): Promise<void> {
               installPath: active.installPath,
               enabled: true,
               installedAt: active.installedAt,
-              configurable: false,
-              configStatus: 'unsupported' as const,
+              configurable: Boolean(active.configSchema),
+              configStatus: active.configSchema
+                ? artifactConfigValidation(await readArtifactConfig()).valid ? 'valid' as const : 'invalid' as const
+                : 'unsupported' as const,
               kind: 'python-mcp' as const,
               activeVersion: item.activeVersion,
               availableVersions: Object.keys(item.versions).sort((left, right) => right.localeCompare(left)),
             };
-          })
+          }))
           : [];
         response.end(JSON.stringify([...installed, ...installedArtifacts]));
         return;
@@ -458,20 +566,38 @@ async function serve(): Promise<void> {
           return;
         }
         const scope = readConfigScope(url.searchParams.get('scope'));
-        response.end(JSON.stringify(await plugins.getConfig(name, scope)));
+        response.end(JSON.stringify(name === 'builtin.python.echo'
+          ? await artifactConfigDocument(scope)
+          : await plugins.getConfig(name, scope)));
         return;
       }
 
       if (url.pathname === RUNTIME_ROUTES.pluginConfigValidate && request.method === 'POST') {
         const input = readConfigInput(await readJsonBody(request));
-        response.end(JSON.stringify(await plugins.validateConfig(input)));
+        response.end(JSON.stringify(input.name === 'builtin.python.echo'
+          ? input.scope === 'user'
+            ? artifactConfigValidation(input.value)
+            : { valid: false, errors: ['Python 能力仅支持用户级配置。'] }
+          : await plugins.validateConfig(input)));
         return;
       }
 
       if (url.pathname === RUNTIME_ROUTES.pluginConfigSave && request.method === 'POST') {
         const input = readConfigInput(await readJsonBody(request));
-        const document = await plugins.saveConfig(input);
-        resetChat();
+        let document: PluginConfigDocument;
+        if (input.name === 'builtin.python.echo') {
+          if (input.scope !== 'user') throw new Error('Python 能力仅支持用户级配置。');
+          const validation = artifactConfigValidation(input.value);
+          if (!validation.valid) throw new Error(`能力配置无效：${validation.errors.join('；')}`);
+          await mkdir(dirname(pythonConfigFile), { recursive: true });
+          const temporary = `${pythonConfigFile}.${randomUUID()}.tmp`;
+          await writeFile(temporary, `${JSON.stringify(input.value, null, 2)}\n`, { mode: 0o600 });
+          await rename(temporary, pythonConfigFile);
+          document = await artifactConfigDocument(input.scope);
+        } else {
+          document = await plugins.saveConfig(input);
+          resetChat();
+        }
         response.end(JSON.stringify(document));
         return;
       }
@@ -483,8 +609,11 @@ async function serve(): Promise<void> {
           response.end(JSON.stringify({ error: '插件名称不能为空。' }));
           return;
         }
-        const document = await plugins.resetConfig(body.name, readConfigScope(body.scope));
-        resetChat();
+        const scope = readConfigScope(body.scope);
+        const document = body.name === 'builtin.python.echo'
+          ? (await rm(pythonConfigFile, { force: true }), await artifactConfigDocument(scope))
+          : await plugins.resetConfig(body.name, scope);
+        if (body.name !== 'builtin.python.echo') resetChat();
         response.end(JSON.stringify(document));
         return;
       }
@@ -499,23 +628,13 @@ async function serve(): Promise<void> {
         const source = body.source.trim();
         if (source.startsWith('artifact:')) {
           if (!artifacts) throw new Error('当前宿主没有配置能力制品信任根。');
-          const manifestUrl = source.slice('artifact:'.length);
-          const parsedManifestUrl = new URL(manifestUrl);
-          if (!['https:', 'http:'].includes(parsedManifestUrl.protocol)) {
-            throw new Error('能力 manifest 必须使用 HTTP(S) 地址。');
-          }
-          const manifestResponse = await fetch(parsedManifestUrl, {
-            headers: { accept: 'application/json', 'user-agent': `YuanpuAgent/${__APP_VERSION__}` },
-            signal: AbortSignal.timeout(15_000),
-          });
-          if (!manifestResponse.ok) throw new Error(`能力 manifest 下载失败：HTTP ${manifestResponse.status}`);
-          const manifest = await readBoundedJsonResponse(manifestResponse) as CapabilityPackageManifest;
+          const { manifest, manifestUrl } = await fetchArtifactManifest(source);
           const installed = await artifacts.install(manifest, {
-            manifestUrl: manifestResponse.url,
+            manifestUrl,
             healthCheck: async (entrypoint, installPath) => {
               const { stdout } = await execFileAsync(entrypoint, ['--version'], {
                 cwd: installPath,
-                timeout: 10_000,
+                timeout: 20_000,
                 env: {
                   PATH: dirname(entrypoint),
                   ...(process.platform === 'win32' && process.env.SYSTEMROOT
@@ -584,8 +703,10 @@ async function serve(): Promise<void> {
           installPath: active.installPath,
           enabled: true,
           installedAt: active.installedAt,
-          configurable: false,
-          configStatus: 'unsupported',
+          configurable: Boolean(active.configSchema),
+          configStatus: active.configSchema
+            ? artifactConfigValidation(await readArtifactConfig()).valid ? 'valid' : 'invalid'
+            : 'unsupported',
           kind: 'python-mcp',
           activeVersion: active.version,
           availableVersions: Object.keys(item.versions).sort((left, right) => right.localeCompare(left)),

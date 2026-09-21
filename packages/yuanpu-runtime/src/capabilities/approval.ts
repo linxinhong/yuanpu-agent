@@ -21,6 +21,14 @@ export interface ApprovalStoreOptions {
   createId?: () => string;
 }
 
+export interface PendingCapabilityExecution {
+  requestId: string;
+  sessionId: string;
+  workspaceId: string;
+  capabilityId: string;
+  arguments: Record<string, JsonValue>;
+}
+
 function canonicalize(value: JsonValue): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`;
@@ -48,6 +56,7 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
   readonly #now: () => Date;
   readonly #createId: () => string;
   #records: CapabilityApprovalRecord[];
+  #pendingExecutions = new Map<string, PendingCapabilityExecution>();
   #queue: Promise<void> = Promise.resolve();
 
   private constructor(path: string, records: CapabilityApprovalRecord[], options: ApprovalStoreOptions) {
@@ -134,6 +143,13 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
           expiresAt: new Date(now.getTime() + this.#ttlMs).toISOString(),
         };
         this.#records.push(record);
+        this.#pendingExecutions.set(record.requestId, {
+          requestId: record.requestId,
+          sessionId: input.sessionId,
+          workspaceId: input.workspaceId,
+          capabilityId: input.capabilityId,
+          arguments: structuredClone(input.arguments),
+        });
         await this.#persist();
         return { status: 'pending', requestId: record.requestId };
       }
@@ -157,6 +173,7 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
         status: 'consumed',
         consumedAt: this.#now().toISOString(),
       };
+      this.#pendingExecutions.delete(record.requestId);
       await this.#persist();
       return { status: 'authorized' };
     });
@@ -182,9 +199,15 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
         decidedAt: this.#now().toISOString(),
       };
       this.#records[index] = next;
+      if (decision === 'denied') this.#pendingExecutions.delete(requestId);
       await this.#persist();
       return { ...next };
     });
+  }
+
+  executionFor(requestId: string): PendingCapabilityExecution | undefined {
+    const execution = this.#pendingExecutions.get(requestId);
+    return execution ? structuredClone(execution) : undefined;
   }
 
   async cancelSession(sessionId: string): Promise<void> {
@@ -198,6 +221,9 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
         return record;
       });
       if (changed) await this.#persist();
+      for (const [requestId, execution] of this.#pendingExecutions) {
+        if (execution.sessionId === sessionId) this.#pendingExecutions.delete(requestId);
+      }
     });
   }
 }

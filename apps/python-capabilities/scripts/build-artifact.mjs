@@ -113,7 +113,21 @@ const manifest = {
     sha256: createHash('sha256').update(archive).digest('hex'),
     entrypoint: relative(bundleRoot, join(frozenRoot, executableName)).replaceAll('\\', '/'),
   }],
-  permissions: [],
+  configSchema: {
+    type: 'object',
+    properties: {
+      responsePrefix: {
+        type: 'string',
+        maxLength: 40,
+        description: 'Prefix added to echo responses.',
+        default: '',
+      },
+    },
+    additionalProperties: false,
+    default: { responsePrefix: '' },
+  },
+  permissions: ['background'],
+  connections: ['yuanpu_echo_mcp'],
   issuedAt: process.env.SOURCE_DATE_EPOCH
     ? new Date(Number(process.env.SOURCE_DATE_EPOCH) * 1000).toISOString()
     : new Date().toISOString(),

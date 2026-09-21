@@ -4,15 +4,18 @@ import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 import { RuntimeManager } from './runtime-manager.js';
+import { isTrustedRendererUrl, packagedRendererUrl } from './renderer-security.js';
 
 let runtime: RuntimeManager;
 let mainWindow: BrowserWindow | undefined;
+let trustedRendererEntry = '';
 
 function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
   if (
     !mainWindow
     || event.sender !== mainWindow.webContents
     || event.senderFrame !== mainWindow.webContents.mainFrame
+    || !isTrustedRendererUrl(event.senderFrame.url, trustedRendererEntry)
   ) {
     throw new Error('Rejected IPC from an untrusted renderer frame');
   }
@@ -44,10 +47,20 @@ function createWindow(): void {
   window.once('closed', () => {
     if (mainWindow === window) mainWindow = undefined;
   });
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  window.webContents.on('will-navigate', (event, targetUrl) => {
+    if (!isTrustedRendererUrl(targetUrl, trustedRendererEntry)) event.preventDefault();
+  });
 
-  const rendererUrl = process.env.YUANPU_RENDERER_URL;
-  if (rendererUrl) void window.loadURL(rendererUrl);
-  else void window.loadFile(join(process.resourcesPath, 'app', 'index.html'));
+  if (!app.isPackaged && process.env.YUANPU_RENDERER_URL) {
+    trustedRendererEntry = process.env.YUANPU_RENDERER_URL;
+    void window.loadURL(trustedRendererEntry);
+  } else {
+    const rendererFile = join(process.resourcesPath, 'app', 'index.html');
+    trustedRendererEntry = packagedRendererUrl(rendererFile);
+    void window.loadFile(rendererFile);
+  }
 }
 
 app.whenReady().then(async () => {
@@ -77,6 +90,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('plugins:config:reset', trustedHandler((name, scope) => runtime.resetPluginConfig(name, scope)));
   ipcMain.handle('plugins:rollback', trustedHandler((name: string, version: string) => (
     runtime.rollbackPlugin(name, version)
+  )));
+  ipcMain.handle('plugins:mcp-conflicts', trustedHandler((source: string) => (
+    runtime.listMcpOwnershipConflicts(source)
   )));
   ipcMain.handle('capabilities:approvals:list', trustedHandler(() => runtime.listCapabilityApprovals()));
   ipcMain.handle('capabilities:approvals:decide', trustedHandler((requestId, decision) => (

@@ -49,7 +49,16 @@ const manifest = {
   capabilityContractVersion: 1,
   runtimeCompatibility: { minimum: '0.1.0', maximumExclusive: '1.0.0' },
   artifacts,
-  permissions: [],
+  configSchema: {
+    type: 'object',
+    properties: {
+      responsePrefix: { type: 'string', maxLength: 40, default: '' },
+    },
+    additionalProperties: false,
+    default: { responsePrefix: '' },
+  },
+  permissions: ['background'],
+  connections: ['yuanpu_echo_mcp'],
   issuedAt: new Date().toISOString(),
   signature: { algorithm: 'ed25519', keyId, value: '' },
 };

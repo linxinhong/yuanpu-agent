@@ -53,7 +53,9 @@ function signedManifest({ url, body, sha256, version = '1.0.0', issuedAt = '2026
       sha256,
       entrypoint: 'server',
     }],
-    permissions: [],
+    configSchema: { type: 'object', properties: { responsePrefix: { type: 'string' } } },
+    permissions: ['background'],
+    connections: ['yuanpu_echo_mcp'],
     issuedAt,
     signature: { algorithm: 'ed25519', keyId: 'test-root', value: '' },
   };
@@ -118,6 +120,9 @@ test('installs signed artifacts atomically, stays offline after install, and pre
   await source.close();
   const active = await instance.active('builtin.python.echo');
   assert.equal(active.version, '1.0.0');
+  assert.deepEqual(active.permissions, ['background']);
+  assert.deepEqual(active.connections, ['yuanpu_echo_mcp']);
+  assert.equal(active.configSchema.properties.responsePrefix.type, 'string');
 });
 
 test('rejects bad signatures, incompatible runtimes, stale replay, and implicit downgrade', async (t) => {

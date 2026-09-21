@@ -8,6 +8,7 @@ import {
   type ChatResponse,
   type InstalledPlugin,
   type LocalSkillList,
+  type McpOwnershipConflict,
   type PluginConfigDocument,
   type PluginConfigInput,
   type PluginConfigScope,
@@ -381,6 +382,12 @@ export class RuntimeManager {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, version }),
     });
+  }
+
+  listMcpOwnershipConflicts(source: string): Promise<McpOwnershipConflict[]> {
+    return this.request(
+      `${RUNTIME_ROUTES.pluginMcpConflicts}?source=${encodeURIComponent(source)}`,
+    );
   }
 
   async checkForUpdate(): Promise<RuntimeUpdateState> {

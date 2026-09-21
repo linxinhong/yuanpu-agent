@@ -43,6 +43,9 @@ export interface InstalledArtifactVersion {
   issuedAt: string;
   target: string;
   manifestUrl?: string;
+  configSchema?: Record<string, unknown>;
+  permissions?: CapabilityPackageManifest['permissions'];
+  connections?: string[];
 }
 
 export interface InstalledArtifactPackage {
@@ -256,6 +259,12 @@ export class CapabilityArtifactManager {
     }
   }
 
+  inspectManifest(manifest: CapabilityPackageManifest): CapabilityPackageManifest {
+    this.verifyManifest(manifest);
+    this.selectTarget(manifest);
+    return manifest;
+  }
+
   private selectTarget(manifest: CapabilityPackageManifest): CapabilityArtifactTarget {
     const target = manifest.artifacts.find((candidate) => (
       candidate.platform === this.platform && candidate.arch === this.arch
@@ -437,6 +446,9 @@ export class CapabilityArtifactManager {
         issuedAt: manifest.issuedAt,
         target: targetName,
         ...(installOptions.manifestUrl ? { manifestUrl: installOptions.manifestUrl } : {}),
+        ...(manifest.configSchema ? { configSchema: manifest.configSchema } : {}),
+        permissions: manifest.permissions,
+        ...(manifest.connections ? { connections: manifest.connections } : {}),
       };
       const versions = { ...(previous?.versions ?? {}), [manifest.version]: installed };
       state.packages[manifest.id] = {

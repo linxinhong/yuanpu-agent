@@ -1,6 +1,7 @@
 """Minimal stdio MCP server used to verify Yuanpu's managed Python path."""
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -18,6 +19,19 @@ class EchoResult(TypedDict):
 
 
 mcp = FastMCP("yuanpu_echo_mcp", log_level="ERROR")
+
+
+def _configured_text(text: str) -> str:
+    config_file = os.environ.get("YUANPU_CAPABILITY_CONFIG_FILE")
+    if not config_file:
+        return text
+    try:
+        with open(config_file, encoding="utf-8") as handle:
+            value = json.load(handle)
+        prefix = value.get("responsePrefix", "")
+        return f"{prefix}{text}" if isinstance(prefix, str) else text
+    except (OSError, ValueError, TypeError):
+        return text
 
 
 @mcp.tool(
@@ -39,7 +53,8 @@ async def yuanpu_echo_text(
 ) -> EchoResult:
     """Return text unchanged with its Unicode code-point length."""
 
-    return {"text": text, "length": len(text)}
+    configured = _configured_text(text)
+    return {"text": configured, "length": len(configured)}
 
 
 @mcp.tool(
@@ -61,7 +76,8 @@ async def yuanpu_approved_echo(
 ) -> EchoResult:
     """Exercise Yuanpu's trusted one-time approval flow before returning text."""
 
-    return {"text": text, "length": len(text)}
+    configured = _configured_text(text)
+    return {"text": configured, "length": len(configured)}
 
 
 @mcp.tool(
