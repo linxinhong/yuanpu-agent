@@ -46,7 +46,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-002
     title: "固定能力与制品公共契约"
-    status: in_progress
+    status: done
     goal: "固定跨进程、授权和分发数据契约，消除消费者各自解释。"
     scope:
       in: ["capabilities/contracts.ts 及 yuanpu-protocol 公共 DTO","source 路由、MCP 结果、授权状态、制品 schema 与兼容策略","对应旧消费者适配和契约测试"]
@@ -71,14 +71,18 @@ tasks:
       owner: "codex-yuanpu"
       attempts: 0
       claimed_at: "2026-09-21T07:52:43.157Z"
-      completed_at: null
+      completed_at: "2026-09-21T08:02:52.301Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-002-contract"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Capability contract implementation 2f3761f and memory 491a65f are merged into main."}
+        - {type: "test", check: "runtime-kit contract tests", status: "passed", summary: "19 tests passed, covering opaque ids, duplicate sources, JSON Schema 2020-12 validation, MCP results, Pi degradation, and non-authorizing model approval ids."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Full build, Yuanpu typecheck, and test suite passed with Node 24.15.0 and pnpm 11.22.0."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-002.md with contract seams, failures repaired, and recheck conditions."}
       follow_up_candidates: []
   - id: TASK-003
     title: "实现宿主一次性授权"
-    status: pending
+    status: ready
     goal: "敏感能力由宿主审批并严格一次执行，移除非空 token 即放行。"
     scope:
       in: ["capabilities 授权状态与持久消费","Runtime 认证审批 API、Pi needs_approval 适配","授权回放与并发测试"]
@@ -110,7 +114,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-004
     title: "接入受管 Python MCP 示例"
-    status: pending
+    status: ready
     goal: "真实 Python 子进程通过统一能力入口发现和执行，单源故障可隔离。"
     scope:
       in: ["capabilities MCP client、source 和进程生命周期","新增 apps/python-capabilities 示例及开发依赖锁定","apps/runtime 组合及 SEA 集成测试"]
