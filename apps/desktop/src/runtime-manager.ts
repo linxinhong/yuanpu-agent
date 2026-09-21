@@ -3,6 +3,7 @@ import {
   RUNTIME_ROUTES,
   capabilityApprovalSigningPayload,
   type CapabilityApprovalDecisionInput,
+  type CapabilityApprovalDecisionResult,
   type CapabilityApprovalSummary,
   type ChatResponse,
   type InstalledPlugin,
@@ -183,6 +184,9 @@ export class RuntimeManager {
         : join(pythonRoot, '.venv', 'bin', 'python'),
       YUANPU_PYTHON_MCP_ROOT: pythonRoot,
       YUANPU_PYTHON_MCP_ARGS: JSON.stringify(['-m', 'yuanpu_echo_mcp']),
+      ...(process.env.YUANPU_CAPABILITY_TRUST_ROOT_FILE
+        ? { YUANPU_CAPABILITY_TRUST_ROOT_FILE: process.env.YUANPU_CAPABILITY_TRUST_ROOT_FILE }
+        : {}),
     };
   }
 
@@ -271,7 +275,7 @@ export class RuntimeManager {
   decideCapabilityApproval(
     requestId: string,
     decision: CapabilityApprovalDecisionInput['decision'],
-  ): Promise<CapabilityApprovalSummary> {
+  ): Promise<CapabilityApprovalDecisionResult> {
     const unsigned = {
       requestId,
       decision,
@@ -368,6 +372,14 @@ export class RuntimeManager {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, scope }),
+    });
+  }
+
+  rollbackPlugin(name: string, version: string): Promise<InstalledPlugin> {
+    return this.request(RUNTIME_ROUTES.pluginRollback, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, version }),
     });
   }
 

@@ -118,6 +118,7 @@ function createConfiguredPythonSource(privateHome: string): ManagedMcpCapability
     privateHome,
     riskPolicy: {
       yuanpu_echo_text: 'R0',
+      yuanpu_approved_echo: 'R2',
       yuanpu_diagnostic_error: 'R0',
       yuanpu_wait: 'R0',
     },
@@ -208,7 +209,7 @@ async function serve(): Promise<void> {
     home.agentPath,
     process.env.YUANPU_PLUGIN_REGISTRY_URL,
     home.config.workingDirectory,
-    home.config.catalogUrl,
+    process.env.YUANPU_CATALOG_URL ?? home.config.catalogUrl,
   );
   let artifacts: CapabilityArtifactManager | undefined;
   const trustRootFile = process.env.YUANPU_CAPABILITY_TRUST_ROOT_FILE;
@@ -236,11 +237,11 @@ async function serve(): Promise<void> {
   }
   const approvals = await CapabilityApprovalStore.open(join(home.appPath, 'approvals.json'));
   const capabilitySources = [createDemoCapabilitySource()];
-  const pythonSource = createConfiguredPythonSource(
+  let pythonSource = createConfiguredPythonSource(
     join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
   );
   if (pythonSource) capabilitySources.push(pythonSource);
-  const mcp = createYuanpuMcpServer(capabilitySources, approvals);
+  let mcp = createYuanpuMcpServer(capabilitySources, approvals);
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   let chatPromise: Promise<YuanpuChatSession> | undefined;
   let chatSessionId: string | undefined;
@@ -261,6 +262,22 @@ async function serve(): Promise<void> {
     if (previousSessionId) void approvals.cancelSession(previousSessionId);
     if (previous) retiredChats.add(previous);
     disposeRetiredChats();
+  };
+  const activatePythonArtifact = async (entrypoint: string, installPath: string, version: string) => {
+    const previousSource = pythonSource;
+    process.env.YUANPU_PYTHON_MCP_EXECUTABLE = entrypoint;
+    process.env.YUANPU_PYTHON_MCP_ROOT = installPath;
+    process.env.YUANPU_PYTHON_MCP_ARGS = '[]';
+    process.env.YUANPU_PYTHON_MCP_VERSION = version;
+    pythonSource = createConfiguredPythonSource(
+      join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
+    );
+    mcp = createYuanpuMcpServer(
+      [createDemoCapabilitySource(), ...(pythonSource ? [pythonSource] : [])],
+      approvals,
+    );
+    resetChat();
+    await previousSource?.close();
   };
   const getChat = () => {
     if (!chatPromise) {
@@ -423,6 +440,9 @@ async function serve(): Promise<void> {
               installedAt: active.installedAt,
               configurable: false,
               configStatus: 'unsupported' as const,
+              kind: 'python-mcp' as const,
+              activeVersion: item.activeVersion,
+              availableVersions: Object.keys(item.versions).sort((left, right) => right.localeCompare(left)),
             };
           })
           : [];
@@ -508,7 +528,8 @@ async function serve(): Promise<void> {
               }
             },
           });
-          resetChat();
+          await activatePythonArtifact(installed.entrypoint, installed.installPath, installed.version);
+          const installedItem = (await artifacts.list()).find((item) => item.id === manifest.id);
           response.end(JSON.stringify({
             name: manifest.id,
             version: manifest.version,
@@ -519,6 +540,11 @@ async function serve(): Promise<void> {
             installedAt: installed.installedAt,
             configurable: Boolean(manifest.configSchema),
             configStatus: manifest.configSchema ? 'optional' : 'unsupported',
+            kind: 'python-mcp',
+            activeVersion: installed.version,
+            availableVersions: installedItem
+              ? Object.keys(installedItem.versions).sort((left, right) => right.localeCompare(left))
+              : [installed.version],
           }));
           return;
         }
@@ -536,6 +562,34 @@ async function serve(): Promise<void> {
         }
         resetChat();
         response.end(JSON.stringify(plugin));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginRollback && request.method === 'POST') {
+        if (!artifacts) throw new Error('当前宿主没有配置能力制品信任根。');
+        const body = await readJsonBody(request) as { name?: unknown; version?: unknown };
+        if (typeof body.name !== 'string' || typeof body.version !== 'string') {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: '能力名称和回滚版本不能为空。' }));
+          return;
+        }
+        const active = await artifacts.rollback(body.name, body.version);
+        await activatePythonArtifact(active.entrypoint, active.installPath, active.version);
+        const item = (await artifacts.list()).find((candidate) => candidate.id === body.name)!;
+        response.end(JSON.stringify({
+          name: item.id,
+          version: active.version,
+          description: '自包含 Python MCP 能力包',
+          source: active.manifestUrl ? `artifact:${active.manifestUrl}` : `artifact:${item.id}`,
+          installPath: active.installPath,
+          enabled: true,
+          installedAt: active.installedAt,
+          configurable: false,
+          configStatus: 'unsupported',
+          kind: 'python-mcp',
+          activeVersion: active.version,
+          availableVersions: Object.keys(item.versions).sort((left, right) => right.localeCompare(left)),
+        }));
         return;
       }
 

@@ -29,6 +29,7 @@ test('catalog server exposes controlled signed metadata and immutable artifacts'
   const body = Buffer.from('signed-fixture');
   await writeFile(join(root, 'manifest.json'), JSON.stringify({
     id: 'builtin.python.echo',
+    version: '9.8.7',
     artifacts: [
       { url: 'artifacts/YuanpuEchoMcp-linux-x64.tar.gz' },
       { url: 'artifacts/private.pem' },
@@ -43,6 +44,9 @@ test('catalog server exposes controlled signed metadata and immutable artifacts'
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   const origin = `http://127.0.0.1:${address.port}`;
+
+  const search = await fetch(`${origin}/v1/catalog/search?q=Python`).then((response) => response.json());
+  assert.equal(search.items[0].version, '9.8.7');
 
   const manifest = await fetch(`${origin}/v1/capability-packages/builtin.python.echo/manifest`).then((response) => response.json());
   assert.equal(manifest.signature.value, 'fixture');

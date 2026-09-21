@@ -37,6 +37,23 @@ export interface CatalogServerOptions {
   artifactRoot?: string;
 }
 
+async function publishedCatalog(
+  items: SkillCatalogItem[],
+  artifactRoot: string | undefined,
+): Promise<SkillCatalogItem[]> {
+  if (!artifactRoot) return items;
+  try {
+    const manifest = JSON.parse(await readFile(resolve(artifactRoot, 'manifest.json'), 'utf8')) as {
+      id?: unknown;
+      version?: unknown;
+    };
+    if (manifest.id !== 'builtin.python.echo' || typeof manifest.version !== 'string') return items;
+    return items.map((item) => item.id === manifest.id ? { ...item, version: manifest.version as string } : item);
+  } catch {
+    return items;
+  }
+}
+
 async function serveCapabilityArtifact(
   pathname: string,
   artifactRoot: string | undefined,
@@ -113,7 +130,8 @@ export function createCatalogServer(
     }
     if (request.method === 'GET' && url.pathname === '/v1/catalog/search') {
       const query = (url.searchParams.get('q') ?? '').trim().toLocaleLowerCase();
-      const matches = items.filter((item) => !query || [
+      const currentItems = await publishedCatalog(items, options.artifactRoot);
+      const matches = currentItems.filter((item) => !query || [
         item.id,
         item.name,
         item.displayName,
@@ -134,7 +152,8 @@ export function createCatalogServer(
         writeJson(response, 400, { error: 'Malformed catalog item id' });
         return;
       }
-      const item = items.find((candidate) => candidate.id === id);
+      const item = (await publishedCatalog(items, options.artifactRoot))
+        .find((candidate) => candidate.id === id);
       writeJson(response, item ? 200 : 404, item ?? { error: 'Skill not found' });
       return;
     }

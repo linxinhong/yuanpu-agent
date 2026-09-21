@@ -14,6 +14,7 @@ export const RUNTIME_ROUTES = {
   pluginConfigValidate: '/v1/plugins/config/validate',
   pluginConfigSave: '/v1/plugins/config/save',
   pluginConfigReset: '/v1/plugins/config/reset',
+  pluginRollback: '/v1/plugins/rollback',
   capabilityApprovals: '/v1/capabilities/approvals',
   capabilityApprovalDecision: '/v1/capabilities/approvals/decision',
 } as const;
@@ -66,6 +67,11 @@ export interface CapabilityApprovalDecisionInput {
   issuedAt: number;
   nonce: string;
   signature: string;
+}
+
+export interface CapabilityApprovalDecisionResult {
+  requestId: string;
+  status: 'approved' | 'denied';
 }
 
 export function capabilityApprovalSigningPayload(
@@ -148,6 +154,9 @@ export interface InstalledPlugin {
   loadError?: string;
   configurable?: boolean;
   configStatus?: 'unsupported' | 'optional' | 'required' | 'valid' | 'invalid';
+  kind?: 'pi-extension' | 'python-mcp';
+  activeVersion?: string;
+  availableVersions?: string[];
 }
 
 export type PluginConfigScope = 'user' | 'workspace';
@@ -192,4 +201,10 @@ export interface DesktopBridge {
   validatePluginConfig(input: PluginConfigInput): Promise<PluginConfigValidation>;
   savePluginConfig(input: PluginConfigInput): Promise<PluginConfigDocument>;
   resetPluginConfig(name: string, scope: PluginConfigScope): Promise<PluginConfigDocument>;
+  rollbackPlugin(name: string, version: string): Promise<InstalledPlugin>;
+  listCapabilityApprovals(): Promise<CapabilityApprovalSummary[]>;
+  decideCapabilityApproval(
+    requestId: string,
+    decision: CapabilityApprovalDecisionInput['decision'],
+  ): Promise<CapabilityApprovalDecisionResult>;
 }

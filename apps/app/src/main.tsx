@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
+  CapabilityApprovalSummary,
   InstalledPlugin,
   LocalSkill,
   PluginConfigDocument,
@@ -104,6 +105,10 @@ function isDirectPluginSource(value: string): boolean {
   return value.startsWith('npm:')
     || value.startsWith('https://github.com/')
     || value.startsWith('git+https://github.com/');
+}
+
+function isArtifactSource(value: string): boolean {
+  return value.startsWith('artifact:');
 }
 
 function formatError(error: unknown): string {
@@ -390,10 +395,16 @@ function SkillPage({ active }: { active: boolean }) {
   const [pending, setPending] = useState<string>();
   const [error, setError] = useState<string>();
   const [editingPlugin, setEditingPlugin] = useState<InstalledPlugin>();
+  const [trustCandidate, setTrustCandidate] = useState<PluginSearchResult>();
+  const [installFailures, setInstallFailures] = useState<Record<string, string>>({});
 
   const installedByName = useMemo(
     () => new Map(installed.map((plugin) => [plugin.name, plugin])),
     [installed],
+  );
+
+  const installedFor = (candidate: PluginSearchResult) => (
+    installedByName.get(candidate.id ?? candidate.name) ?? installedByName.get(candidate.name)
   );
 
   async function refreshInstalled() {
@@ -437,26 +448,43 @@ function SkillPage({ active }: { active: boolean }) {
     });
   }, [desktop]);
 
-  async function install(source: string) {
+  async function install(candidate: PluginSearchResult) {
+    const source = candidate.source;
     if (!desktop) {
       setError('浏览器预览模式不会执行技能安装。请通过 Electron 启动 YuanpuAgent。');
       return;
     }
-    const confirmed = window.confirm(
-      `将安装 ${source}\n\n技能可能包含指令、可执行扩展或外部服务连接。请确认来源与权限后继续。`,
-    );
-    if (!confirmed) return;
+    setTrustCandidate(undefined);
     setPending(source);
     setError(undefined);
+    const legacyAdapter = installedByName.get('pi-mcp-adapter');
+    let legacyDisabled = false;
     try {
+      if (isArtifactSource(source) && legacyAdapter?.enabled) {
+        const useYuanpu = window.confirm(
+          '检测到已启用的旧 pi-mcp-adapter。\n\n选择“确定”将由 Yuanpu 托管此能力并停用旧适配器；旧配置会完整保留。选择“取消”则保持旧适配器且不安装。',
+        );
+        if (!useYuanpu) return;
+        await desktop.setPluginEnabled(legacyAdapter.name, false);
+        legacyDisabled = true;
+      }
       await desktop.installPlugin(source);
       await refreshInstalled();
+      setInstallFailures((current) => {
+        const next = { ...current };
+        delete next[source];
+        return next;
+      });
       setTab('installed');
     } catch (installError) {
-      setError(formatError(installError));
+      const message = formatError(installError);
+      if (legacyDisabled && legacyAdapter) {
+        await desktop.setPluginEnabled(legacyAdapter.name, true).catch(() => undefined);
+      }
+      setError(message);
+      setInstallFailures((current) => ({ ...current, [source]: message }));
       const current = await desktop.listPlugins().catch(() => []);
       setInstalled(current);
-      if (current.some((plugin) => plugin.source === source)) setTab('installed');
     } finally {
       setPending(undefined);
     }
@@ -466,7 +494,12 @@ function SkillPage({ active }: { active: boolean }) {
     event.preventDefault();
     const term = query.trim();
     if (isDirectPluginSource(term)) {
-      await install(term);
+      setTrustCandidate({
+        name: term,
+        version: '固定来源',
+        description: '手动输入的固定版本插件来源。',
+        source: term,
+      });
       return;
     }
     await search(term);
@@ -495,6 +528,20 @@ function SkillPage({ active }: { active: boolean }) {
       await refreshInstalled();
     } catch (uninstallError) {
       setError(formatError(uninstallError));
+    } finally {
+      setPending(undefined);
+    }
+  }
+
+  async function rollback(plugin: InstalledPlugin, version: string) {
+    if (!desktop || pending) return;
+    setPending(plugin.name);
+    setError(undefined);
+    try {
+      await desktop.rollbackPlugin(plugin.name, version);
+      await refreshInstalled();
+    } catch (rollbackError) {
+      setError(`回滚失败，仍在使用 v${plugin.activeVersion ?? plugin.version}：${formatError(rollbackError)}`);
     } finally {
       setPending(undefined);
     }
@@ -566,7 +613,7 @@ function SkillPage({ active }: { active: boolean }) {
 
         <div className="plugin-list">
           {tab === 'marketplace' && results.map((plugin) => {
-            const current = installedByName.get(plugin.name);
+            const current = installedFor(plugin);
             const isPending = pending === plugin.source;
             return (
               <article className="plugin-card" key={`${plugin.name}@${plugin.version}`}>
@@ -591,10 +638,16 @@ function SkillPage({ active }: { active: boolean }) {
                   type="button"
                   className="install-button"
                   disabled={Boolean(pending) || current?.version === plugin.version}
-                  onClick={() => void install(plugin.source)}
+                  onClick={() => setTrustCandidate(plugin)}
                 >
                   {isPending ? '安装中…' : current?.version === plugin.version ? '已安装' : current ? '更新' : '安装'}
                 </button>
+                {installFailures[plugin.source] && (
+                  <div className="install-recovery" role="alert">
+                    <span>更新失败，仍在使用 v{current?.activeVersion ?? current?.version ?? '—'}</span>
+                    <button type="button" disabled={Boolean(pending)} onClick={() => setTrustCandidate(plugin)}>重试</button>
+                  </div>
+                )}
               </article>
             );
           })}
@@ -612,7 +665,7 @@ function SkillPage({ active }: { active: boolean }) {
                 {plugin.loadError && <div className="plugin-load-error">加载失败：{plugin.loadError}</div>}
                 <div className="plugin-meta">
                   <span>v{plugin.version}</span>
-                  <span title={plugin.source}>{plugin.source.startsWith('npm:') ? 'npm' : 'Git'}</span>
+                  <span title={plugin.source}>{plugin.source.startsWith('npm:') ? 'npm' : plugin.kind === 'python-mcp' ? '能力制品' : 'Git'}</span>
                 </div>
               </div>
               <div className="plugin-actions">
@@ -621,12 +674,23 @@ function SkillPage({ active }: { active: boolean }) {
                     配置
                   </button>
                 )}
-                <button type="button" disabled={Boolean(pending)} onClick={() => void setEnabled(plugin, !plugin.enabled)}>
-                  {pending === plugin.name ? '处理中…' : plugin.enabled ? '停用' : '启用'}
-                </button>
-                <button type="button" className="danger" disabled={Boolean(pending)} onClick={() => void uninstall(plugin)}>
-                  卸载
-                </button>
+                {plugin.kind !== 'python-mcp' && (
+                  <button type="button" disabled={Boolean(pending)} onClick={() => void setEnabled(plugin, !plugin.enabled)}>
+                    {pending === plugin.name ? '处理中…' : plugin.enabled ? '停用' : '启用'}
+                  </button>
+                )}
+                {plugin.kind === 'python-mcp' && plugin.availableVersions
+                  ?.filter((version) => version !== plugin.activeVersion)
+                  .map((version) => (
+                    <button type="button" disabled={Boolean(pending)} key={version} onClick={() => void rollback(plugin, version)}>
+                      回滚到 v{version}
+                    </button>
+                  ))}
+                {plugin.kind !== 'python-mcp' && (
+                  <button type="button" className="danger" disabled={Boolean(pending)} onClick={() => void uninstall(plugin)}>
+                    卸载
+                  </button>
+                )}
               </div>
             </article>
           ))}
@@ -661,7 +725,38 @@ function SkillPage({ active }: { active: boolean }) {
             </div>
           )}
 
-          {tab === 'updates' && (
+          {tab === 'updates' && results.filter((plugin) => {
+            const current = installedFor(plugin);
+            return current && current.version !== plugin.version;
+          }).map((plugin) => {
+            const current = installedFor(plugin)!;
+            return (
+              <article className="plugin-card" key={`update:${plugin.id ?? plugin.name}@${plugin.version}`}>
+                <div className="plugin-card-main">
+                  <h2>{plugin.displayName ?? plugin.name}</h2>
+                  <p>{plugin.description}</p>
+                  <div className="plugin-meta">
+                    <span>当前 v{current.activeVersion ?? current.version}</span>
+                    <span>可更新至 v{plugin.version}</span>
+                  </div>
+                </div>
+                <button type="button" className="install-button" disabled={Boolean(pending)} onClick={() => setTrustCandidate(plugin)}>
+                  {pending === plugin.source ? '更新中…' : '更新'}
+                </button>
+                {installFailures[plugin.source] && (
+                  <div className="install-recovery" role="alert">
+                    <span>更新失败，仍在使用 v{current.activeVersion ?? current.version}</span>
+                    <button type="button" disabled={Boolean(pending)} onClick={() => setTrustCandidate(plugin)}>重试</button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+
+          {tab === 'updates' && results.every((plugin) => {
+            const current = installedFor(plugin);
+            return !current || current.version === plugin.version;
+          }) && (
             <div className="plugin-empty">当前没有待更新的技能。能力包更新会保留独立配置。</div>
           )}
 
@@ -673,6 +768,32 @@ function SkillPage({ active }: { active: boolean }) {
           )}
         </div>
       </div>
+      {trustCandidate && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setTrustCandidate(undefined)}>
+          <section className="trust-dialog" role="dialog" aria-modal="true" aria-labelledby="trust-title" onMouseDown={(event) => event.stopPropagation()}>
+            <span className="dialog-kicker">安装确认</span>
+            <h2 id="trust-title">信任并安装 {trustCandidate.displayName ?? trustCandidate.name}？</h2>
+            <p>{trustCandidate.description}</p>
+            <dl>
+              <div><dt>版本</dt><dd>{trustCandidate.version}</dd></div>
+              <div><dt>来源</dt><dd>{trustCandidate.source}</dd></div>
+              <div><dt>发布者</dt><dd>{trustCandidate.publisher ?? '未知发布者'}</dd></div>
+            </dl>
+            <div className="skill-badges">
+              {trustCandidate.permissions?.map((permission) => (
+                <span className="permission-badge" key={permission}>{permissionLabels[permission]}</span>
+              ))}
+            </div>
+            {isArtifactSource(trustCandidate.source) && (
+              <p className="trust-boundary">此能力在独立进程中运行，不会作为 Pi extension 加载；安装仍会验证签名、平台、哈希和兼容版本。</p>
+            )}
+            <footer>
+              <button type="button" onClick={() => setTrustCandidate(undefined)}>取消</button>
+              <button type="button" className="primary" onClick={() => void install(trustCandidate)}>信任并安装</button>
+            </footer>
+          </section>
+        </div>
+      )}
     </section>
   );
 }
@@ -682,9 +803,26 @@ function ChatPanel({ active }: { active: boolean }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [runtime, setRuntime] = useState({ connected: false, piVersion: '—' });
+  const [approvals, setApprovals] = useState<CapabilityApprovalSummary[]>([]);
+  const [approvalBusy, setApprovalBusy] = useState<string>();
   const nextId = useRef(2);
   const conversation = useRef<HTMLDivElement>(null);
+  const approvalMessages = useRef(new Map<string, string>());
   const desktop = window.yuanpu;
+
+  async function refreshApprovals(originatingMessage?: string) {
+    if (!desktop) return [];
+    const pendingApprovals = await desktop.listCapabilityApprovals();
+    if (originatingMessage) {
+      for (const approval of pendingApprovals) {
+        if (!approvalMessages.current.has(approval.requestId)) {
+          approvalMessages.current.set(approval.requestId, originatingMessage);
+        }
+      }
+    }
+    setApprovals(pendingApprovals);
+    return pendingApprovals;
+  }
 
   useEffect(() => {
     if (!desktop) return;
@@ -692,6 +830,13 @@ function ChatPanel({ active }: { active: boolean }) {
       .then((info) => setRuntime({ connected: true, piVersion: info.piVersion }))
       .catch(() => setRuntime((current) => ({ ...current, connected: false })));
   }, [desktop]);
+
+  useEffect(() => {
+    if (!desktop || !active) return;
+    void refreshApprovals();
+    const timer = window.setInterval(() => void refreshApprovals(), 1_500);
+    return () => window.clearInterval(timer);
+  }, [desktop, active]);
 
   useEffect(() => {
     conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'smooth' });
@@ -722,7 +867,53 @@ function ChatPanel({ active }: { active: boolean }) {
       setMessages((current) => [...current, { id: nextId.current++, role: 'error', text: formatError(error) }]);
       setInput(text);
     } finally {
+      await refreshApprovals(text).catch(() => []);
       setBusy(false);
+    }
+  }
+
+  async function decideApproval(
+    approval: CapabilityApprovalSummary,
+    decision: 'approved' | 'denied',
+  ) {
+    if (!desktop || approvalBusy) return;
+    setApprovalBusy(approval.requestId);
+    try {
+      await desktop.decideCapabilityApproval(approval.requestId, decision);
+      setApprovals((current) => current.filter((item) => item.requestId !== approval.requestId));
+      if (decision === 'denied') {
+        setMessages((current) => [...current, {
+          id: nextId.current++,
+          role: 'assistant',
+          text: `已拒绝能力 ${approval.capabilityId} 的本次调用，没有执行外部操作。`,
+        }]);
+        return;
+      }
+      setBusy(true);
+      const original = approvalMessages.current.get(approval.requestId);
+      const continuation = [
+        original ? `继续完成我刚才的请求：${original}` : '继续完成刚才等待审批的请求。',
+        `宿主已允许一次；调用 execute_capability 时使用 approvalRequestId=${approval.requestId}。`,
+        '不得改动原参数，也不得申请其他权限。',
+      ].join('\n');
+      const result = await desktop.chat(continuation);
+      setMessages((current) => [...current, {
+        id: nextId.current++,
+        role: 'assistant',
+        text: result.message,
+        tools: result.tools,
+      }]);
+      approvalMessages.current.delete(approval.requestId);
+      await refreshApprovals();
+    } catch (error) {
+      setMessages((current) => [...current, {
+        id: nextId.current++,
+        role: 'error',
+        text: `审批处理失败：${formatError(error)}`,
+      }]);
+    } finally {
+      setBusy(false);
+      setApprovalBusy(undefined);
     }
   }
 
@@ -765,6 +956,27 @@ function ChatPanel({ active }: { active: boolean }) {
                     <small>{tool.status === 'completed' ? '已完成' : '失败'}</small>
                   </div>
                 ))}
+              </div>
+            </article>
+          ))}
+          {approvals.map((approval) => (
+            <article className="approval-card" key={approval.requestId}>
+              <div className="approval-heading">
+                <span>待确认</span>
+                <strong>外部能力请求一次性授权</strong>
+              </div>
+              <dl>
+                <div><dt>能力</dt><dd>{approval.capabilityId}</dd></div>
+                <div><dt>来源</dt><dd>{approval.sourceInstanceId}</dd></div>
+                <div><dt>版本</dt><dd>{approval.packageVersion ?? '未声明'}</dd></div>
+                <div><dt>参数摘要</dt><dd><code>{approval.argumentsDigest.slice(0, 16)}…</code></dd></div>
+              </dl>
+              <p>允许只对当前会话、当前参数和当前版本生效一次；刷新或重放不会复用。</p>
+              <div className="approval-actions">
+                <button type="button" disabled={Boolean(approvalBusy)} onClick={() => void decideApproval(approval, 'denied')}>拒绝</button>
+                <button type="button" className="primary" disabled={Boolean(approvalBusy)} onClick={() => void decideApproval(approval, 'approved')}>
+                  {approvalBusy === approval.requestId ? '处理中…' : '允许一次'}
+                </button>
               </div>
             </article>
           ))}

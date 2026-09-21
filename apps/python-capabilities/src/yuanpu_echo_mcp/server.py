@@ -43,6 +43,28 @@ async def yuanpu_echo_text(
 
 
 @mcp.tool(
+    name="yuanpu_approved_echo",
+    annotations=ToolAnnotations(
+        title="Echo text after one-time approval",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+    structured_output=True,
+)
+async def yuanpu_approved_echo(
+    text: Annotated[
+        str,
+        Field(description="Text to return after explicit host approval.", min_length=1, max_length=4096),
+    ],
+) -> EchoResult:
+    """Exercise Yuanpu's trusted one-time approval flow before returning text."""
+
+    return {"text": text, "length": len(text)}
+
+
+@mcp.tool(
     name="yuanpu_diagnostic_error",
     annotations=ToolAnnotations(
         title="Return a diagnostic error",

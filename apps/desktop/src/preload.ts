@@ -17,6 +17,11 @@ const bridge: DesktopBridge = {
   validatePluginConfig: (input) => ipcRenderer.invoke('plugins:config:validate', input),
   savePluginConfig: (input) => ipcRenderer.invoke('plugins:config:save', input),
   resetPluginConfig: (name, scope) => ipcRenderer.invoke('plugins:config:reset', name, scope),
+  rollbackPlugin: (name, version) => ipcRenderer.invoke('plugins:rollback', name, version),
+  listCapabilityApprovals: () => ipcRenderer.invoke('capabilities:approvals:list'),
+  decideCapabilityApproval: (requestId, decision) => (
+    ipcRenderer.invoke('capabilities:approvals:decide', requestId, decision)
+  ),
 };
 
 contextBridge.exposeInMainWorld('yuanpu', bridge);
