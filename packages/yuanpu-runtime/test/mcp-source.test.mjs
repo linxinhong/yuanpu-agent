@@ -227,6 +227,29 @@ test('a real unresponsive process does not hide a healthy Python MCP source', as
   assert.match(result.failures?.[0]?.message ?? '', /initialization failed|timeout/i);
 });
 
+test('tool discovery timeout terminates the initialized MCP process', async () => {
+  const fixture = resolve('test/fixtures/hanging-list-tools.mjs');
+  const source = pythonSource({
+    sourceInstanceId: 'test.hanging-list-tools',
+    command: process.execPath,
+    args: [fixture],
+    initializationTimeoutMs: 1_000,
+    discoveryTimeoutMs: 100,
+  });
+  const discovery = source.list({});
+  let pid = source.processId;
+  for (let attempt = 0; !pid && attempt < 50; attempt += 1) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    pid = source.processId;
+  }
+  assert.ok(pid);
+  await assert.rejects(discovery, /tool discovery failed.*timed out/i);
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+  assert.equal(source.processId, null);
+  assert.throws(() => process.kill(pid, 0));
+  await source.close();
+});
+
 test('concurrent discovery waiters have independent cancellation', async () => {
   let calls = 0;
   const definition = {

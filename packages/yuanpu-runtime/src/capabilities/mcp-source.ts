@@ -369,6 +369,18 @@ export class ManagedMcpCapabilitySource {
     return this.#connecting;
   }
 
+  async #resetConnection(expectedClient: Client): Promise<void> {
+    if (this.#client !== expectedClient) return;
+    const transport = this.#transport;
+    this.#client = undefined;
+    this.#transport = undefined;
+    this.#tools.clear();
+    this.#toolsExpiresAt = 0;
+    await expectedClient.close().catch(async () => {
+      await transport?.close().catch(() => undefined);
+    });
+  }
+
   async #refreshTools(context: CapabilityContext): Promise<Tool[]> {
     const client = await this.#connect();
     const tools: Tool[] = [];
@@ -383,7 +395,10 @@ export class ManagedMcpCapabilitySource {
         cursor = result.nextCursor;
         if (!cursor) break;
       } catch (error) {
-        if (context.signal?.aborted) throw new ManagedMcpSourceError('cancelled', 'MCP discovery was cancelled.');
+        await this.#resetConnection(client);
+        if (context.signal?.aborted) {
+          throw new ManagedMcpSourceError('cancelled', 'MCP discovery was cancelled.');
+        }
         const message = error instanceof Error ? error.message : String(error);
         throw new ManagedMcpSourceError(
           /timeout/i.test(message) ? 'timeout' : 'unavailable',

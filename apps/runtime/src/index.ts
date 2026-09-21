@@ -41,6 +41,8 @@ import { promisify } from 'node:util';
 declare const __APP_VERSION__: string;
 
 const args = process.argv.slice(2);
+const PYTHON_MCP_INITIALIZATION_TIMEOUT_MS = 15_000;
+const PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS = 20_000;
 const execFileAsync = promisify(execFile);
 
 interface RuntimeBootstrap {
@@ -139,6 +141,7 @@ function createConfiguredPythonSource(
         ? { SYSTEMROOT: process.env.SYSTEMROOT }
         : {}),
     },
+    initializationTimeoutMs: PYTHON_MCP_INITIALIZATION_TIMEOUT_MS,
   });
 }
 
@@ -150,7 +153,9 @@ async function capabilitySmoke(): Promise<void> {
     throw new Error('Python MCP smoke requires YUANPU_PYTHON_MCP_EXECUTABLE and YUANPU_PYTHON_MCP_ROOT.');
   }
   try {
-    const mcp = createYuanpuMcpServer([pythonSource]);
+    const mcp = createYuanpuMcpServer([pythonSource], undefined, {
+      discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS,
+    });
     const search = await mcp.callTool(CAPABILITY_TOOL_NAMES.search, {});
     if (!('matches' in search) || !Array.isArray(search.matches)) {
       throw new Error('Capability search returned an invalid result.');
@@ -313,7 +318,9 @@ async function serve(): Promise<void> {
     pythonConfigFile,
   );
   if (pythonSource) capabilitySources.push(pythonSource);
-  let mcp = createYuanpuMcpServer(capabilitySources, approvals);
+  let mcp = createYuanpuMcpServer(capabilitySources, approvals, {
+    discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS,
+  });
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   let chatPromise: Promise<YuanpuChatSession> | undefined;
   let chatSessionId: string | undefined;
@@ -348,6 +355,7 @@ async function serve(): Promise<void> {
     mcp = createYuanpuMcpServer(
       [createDemoCapabilitySource(), ...(pythonSource ? [pythonSource] : [])],
       approvals,
+      { discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS },
     );
     resetChat();
     await previousSource?.close();
