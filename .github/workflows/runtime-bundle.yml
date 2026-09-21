@@ -74,6 +74,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
+      - name: Test managed MCP lifecycle
+        run: |
+          pnpm prepare:python-capabilities
+          pnpm --filter @yuanpu-agent/runtime-kit run build
+          pnpm --filter @yuanpu-agent/runtime-kit test
+
       - name: Build native executable
         run: pnpm build:native
 

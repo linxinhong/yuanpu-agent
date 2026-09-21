@@ -3,7 +3,7 @@ import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/s
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { CallToolResult, JSONRPCMessage, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -43,6 +43,104 @@ export class ManagedMcpSourceError extends Error {
 }
 
 const execFileAsync = promisify(execFile);
+
+const WINDOWS_JOB_SUPERVISOR = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public static class YuanpuJob {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct BasicLimits {
+    public long PerProcessUserTimeLimit;
+    public long PerJobUserTimeLimit;
+    public uint LimitFlags;
+    public UIntPtr MinimumWorkingSetSize;
+    public UIntPtr MaximumWorkingSetSize;
+    public uint ActiveProcessLimit;
+    public UIntPtr Affinity;
+    public uint PriorityClass;
+    public uint SchedulingClass;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct IoCounters {
+    public ulong ReadOperationCount;
+    public ulong WriteOperationCount;
+    public ulong OtherOperationCount;
+    public ulong ReadTransferCount;
+    public ulong WriteTransferCount;
+    public ulong OtherTransferCount;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct ExtendedLimits {
+    public BasicLimits BasicLimitInformation;
+    public IoCounters IoInfo;
+    public UIntPtr ProcessMemoryLimit;
+    public UIntPtr JobMemoryLimit;
+    public UIntPtr PeakProcessMemoryUsed;
+    public UIntPtr PeakJobMemoryUsed;
+  }
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern IntPtr CreateJobObject(IntPtr securityAttributes, string name);
+  [DllImport("kernel32.dll")]
+  public static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length);
+  [DllImport("kernel32.dll")]
+  public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+  [DllImport("kernel32.dll")]
+  public static extern bool CloseHandle(IntPtr handle);
+}
+'@
+
+$job = [YuanpuJob]::CreateJobObject([IntPtr]::Zero, $null)
+if ($job -eq [IntPtr]::Zero) { throw 'CreateJobObject failed' }
+$limits = New-Object YuanpuJob+ExtendedLimits
+$limits.BasicLimitInformation.LimitFlags = 0x2000
+$size = [Runtime.InteropServices.Marshal]::SizeOf($limits)
+$pointer = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
+try {
+  [Runtime.InteropServices.Marshal]::StructureToPtr($limits, $pointer, $false)
+  if (-not [YuanpuJob]::SetInformationJobObject($job, 9, $pointer, $size)) {
+    throw 'SetInformationJobObject failed'
+  }
+} finally {
+  [Runtime.InteropServices.Marshal]::FreeHGlobal($pointer)
+}
+
+$process = New-Object Diagnostics.Process
+$process.StartInfo.FileName = $env:YUANPU_MCP_CHILD_COMMAND
+$process.StartInfo.Arguments = $env:YUANPU_MCP_CHILD_ARGUMENTS
+$process.StartInfo.UseShellExecute = $false
+$process.StartInfo.RedirectStandardInput = $true
+$process.StartInfo.RedirectStandardOutput = $true
+$process.StartInfo.RedirectStandardError = $true
+$process.StartInfo.CreateNoWindow = $true
+try {
+  if (-not $process.Start()) { throw 'MCP child failed to start' }
+  if (-not [YuanpuJob]::AssignProcessToJobObject($job, $process.Handle)) {
+    $process.Kill()
+    throw 'AssignProcessToJobObject failed'
+  }
+  $stdout = $process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
+  $stderr = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+  $stdin = [Console]::OpenStandardInput().CopyToAsync($process.StandardInput.BaseStream)
+  $process.WaitForExit()
+  $process.StandardInput.Close()
+  $stdout.GetAwaiter().GetResult()
+  $stderr.GetAwaiter().GetResult()
+  $exitCode = $process.ExitCode
+} finally {
+  [YuanpuJob]::CloseHandle($job) | Out-Null
+  $process.Dispose()
+}
+exit $exitCode
+`;
+
+function quoteWindowsArgument(value: string): string {
+  if (value.length > 0 && !/[\s"]/u.test(value)) return value;
+  return `"${value.replace(/(\\*)"/gu, '$1$1\\"').replace(/(\\*)$/u, '$1$1')}"`;
+}
 
 async function terminateProcessGroup(rootPid: number): Promise<void> {
   if (process.platform === 'win32') {
@@ -174,7 +272,7 @@ export class ManagedMcpCapabilitySource {
       args: [...(options.args ?? [])],
       env: { ...(options.env ?? {}) },
       riskPolicy: { ...(options.riskPolicy ?? {}) },
-      initializationTimeoutMs: options.initializationTimeoutMs ?? 5_000,
+      initializationTimeoutMs: options.initializationTimeoutMs ?? (process.platform === 'win32' ? 15_000 : 5_000),
       discoveryTimeoutMs: options.discoveryTimeoutMs ?? 3_000,
       executionTimeoutMs: options.executionTimeoutMs ?? 30_000,
       restartLimit: options.restartLimit ?? 3,
@@ -206,19 +304,38 @@ export class ManagedMcpCapabilitySource {
       const appData = join(this.#options.privateHome, 'app-data');
       const localAppData = join(this.#options.privateHome, 'local-app-data');
       await Promise.all([mkdir(appData, { recursive: true }), mkdir(localAppData, { recursive: true })]);
+      const isolatedEnv: Record<string, string> = {
+        ...this.#options.env,
+        HOME: this.#options.privateHome,
+        USERPROFILE: this.#options.privateHome,
+        APPDATA: appData,
+        LOCALAPPDATA: localAppData,
+      };
+      let command = this.#options.command;
+      let args = this.#options.args;
+      if (process.platform === 'win32') {
+        const systemRoot = isolatedEnv.SYSTEMROOT;
+        if (!systemRoot) throw new ManagedMcpSourceError('unavailable', 'SYSTEMROOT is required for Windows MCP isolation.');
+        const supervisor = join(this.#options.privateHome, 'mcp-job-supervisor.ps1');
+        await writeFile(supervisor, WINDOWS_JOB_SUPERVISOR, { encoding: 'utf8', mode: 0o600 });
+        isolatedEnv.YUANPU_MCP_CHILD_COMMAND = command;
+        isolatedEnv.YUANPU_MCP_CHILD_ARGUMENTS = args.map(quoteWindowsArgument).join(' ');
+        command = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+        args = [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          supervisor,
+        ];
+      }
       const transport = new ProcessGroupStdioTransport({
-        command: this.#options.command,
-        args: this.#options.args,
+        command,
+        args,
         cwd: this.#options.cwd,
-        env: {
-          ...this.#options.env,
-          HOME: this.#options.privateHome,
-          USERPROFILE: this.#options.privateHome,
-          APPDATA: appData,
-          LOCALAPPDATA: localAppData,
-        },
-        // Do not inherit or buffer an untrusted child process's diagnostics. A
-        // future host logger may expose a redacted, bounded diagnostic sink.
+        env: isolatedEnv,
       });
       const client = new Client({ name: 'yuanpu-agent', version: '0.1.0' });
       transport.onclose = () => {
