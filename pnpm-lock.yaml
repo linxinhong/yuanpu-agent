@@ -448,9 +448,6 @@ importers:
       npm-package-arg:
         specifier: 14.0.0
         version: 14.0.0
-      proper-lockfile:
-        specifier: 4.1.2
-        version: 4.1.2
       tar:
         specifier: 7.5.2
         version: 7.5.2
@@ -461,9 +458,6 @@ importers:
       '@types/npmcli__arborist':
         specifier: 6.3.3
         version: 6.3.3
-      '@types/proper-lockfile':
-        specifier: 4.1.4
-        version: 4.1.4
 
   server:
     dependencies:

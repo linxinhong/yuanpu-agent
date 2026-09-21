@@ -19,15 +19,16 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { createServer as createNetServer } from 'node:net';
 import { Readable } from 'node:stream';
-import { lock as lockFile } from 'proper-lockfile';
 import * as tar from 'tar';
 
 const STATE_VERSION = 1;
 const DEFAULT_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const DEFAULT_MAX_UNPACKED_BYTES = 768 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 20_000;
-const LOCK_STALE_MS = 10 * 60 * 1000;
+const LOCK_PORT_BASE = 12_000;
+const LOCK_PORT_SPAN = 28_000;
 
 export interface ArtifactTrustRoot {
   keyId: string;
@@ -74,6 +75,11 @@ export interface CapabilityArtifactManagerOptions {
   maxArchiveBytes?: number;
   maxUnpackedBytes?: number;
   maxEntries?: number;
+}
+
+export function artifactInstallLockPort(packagesRoot: string): number {
+  const digest = createHash('sha256').update(resolve(packagesRoot)).digest();
+  return LOCK_PORT_BASE + (digest.readUInt32BE(0) % LOCK_PORT_SPAN);
 }
 
 function initialState(): ArtifactState {
@@ -156,7 +162,7 @@ export class CapabilityArtifactManager {
   private readonly statePath: string;
   private readonly artifactsRoot: string;
   private readonly stagingRoot: string;
-  private readonly lockPath: string;
+  private readonly lockPort: number;
   private readonly platform: NodeJS.Platform;
   private readonly arch: string;
   private readonly fetcher: typeof globalThis.fetch;
@@ -172,7 +178,7 @@ export class CapabilityArtifactManager {
     this.statePath = join(packagesRoot, 'artifact-state.json');
     this.artifactsRoot = join(packagesRoot, 'artifacts');
     this.stagingRoot = join(packagesRoot, '.staging', 'artifacts');
-    this.lockPath = join(packagesRoot, '.artifact-install.lock');
+    this.lockPort = artifactInstallLockPort(packagesRoot);
     this.platform = options.platform ?? process.platform;
     this.arch = options.arch ?? process.arch;
     this.fetcher = options.fetch ?? globalThis.fetch;
@@ -266,16 +272,29 @@ export class CapabilityArtifactManager {
   private async acquireLock(signal?: AbortSignal): Promise<() => Promise<void>> {
     await this.ensure();
     for (let attempt = 0; attempt < 4_800; attempt += 1) {
+      const server = createNetServer();
+      server.unref();
       try {
-        return await lockFile(this.packagesRoot, {
-          lockfilePath: this.lockPath,
-          realpath: false,
-          retries: 0,
-          stale: LOCK_STALE_MS,
-          update: Math.min(30_000, LOCK_STALE_MS / 3),
+        await new Promise<void>((resolveListen, reject) => {
+          const onError = (error: Error) => {
+            server.off('listening', onListening);
+            reject(error);
+          };
+          const onListening = () => {
+            server.off('error', onError);
+            resolveListen();
+          };
+          server.once('error', onError);
+          server.once('listening', onListening);
+          server.listen({ host: '127.0.0.1', port: this.lockPort, exclusive: true });
         });
+        return async () => {
+          await new Promise<void>((resolveClose, reject) => {
+            server.close((error) => error ? reject(error) : resolveClose());
+          });
+        };
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ELOCKED') throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
         await delay(25, signal);
       }
     }

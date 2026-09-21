@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import * as tar from 'tar';
 
 import {
   CapabilityArtifactManager,
+  artifactInstallLockPort,
   capabilityManifestSigningPayload,
   detectMcpOwnershipConflicts,
 } from '../dist/index.mjs';
@@ -232,19 +234,30 @@ test('concurrent first readers initialize state once without truncation', async 
   assert.deepEqual(state, { schemaVersion: 1, packages: {} });
 });
 
-test('reclaims only a stale lock whose recorded process is not alive', async (t) => {
+test('recovers the install lock after its operating-system owner is interrupted', async (t) => {
   const root = await fixtureRoot(t);
   const fixture = await archiveFixture(root);
   const source = await artifactServer(t, new Map([['/artifact', fixture.body]]));
   const packagesRoot = join(root, 'packages');
   await mkdir(packagesRoot, { recursive: true });
-  const lock = join(packagesRoot, '.artifact-install.lock');
-  await mkdir(lock);
-  const old = new Date(Date.now() - 11 * 60 * 1000);
-  await utimes(lock, old, old);
-  const installed = await manager(root).install(
+  const holder = spawn(process.execPath, ['-e', [
+    "const { createServer } = require('node:net')",
+    `const server = createServer().listen(${artifactInstallLockPort(packagesRoot)}, '127.0.0.1', () => console.log('ready'))`,
+    'setInterval(() => {}, 1000)',
+  ].join(';')], { stdio: ['ignore', 'pipe', 'inherit'] });
+  await new Promise((resolve, reject) => {
+    holder.once('error', reject);
+    holder.stdout.once('data', resolve);
+  });
+  t.after(() => { if (!holder.killed) holder.kill('SIGKILL'); });
+  const install = manager(root).install(
     signedManifest({ url: source.url('/artifact'), ...fixture }),
     { healthCheck: healthy },
   );
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(source.requests(), 0);
+  holder.kill('SIGKILL');
+  await new Promise((resolve) => holder.once('exit', resolve));
+  const installed = await install;
   assert.equal(installed.version, '1.0.0');
 });
