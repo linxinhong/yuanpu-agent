@@ -120,7 +120,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-004
     title: "接入受管 Python MCP 示例"
-    status: in_progress
+    status: done
     goal: "真实 Python 子进程通过统一能力入口发现和执行，单源故障可隔离。"
     scope:
       in: ["capabilities MCP client、source 和进程生命周期","新增 apps/python-capabilities 示例及开发依赖锁定","apps/runtime 组合及 SEA 集成测试"]
@@ -149,14 +149,22 @@ tasks:
       owner: "codex-yuanpu"
       attempts: 0
       claimed_at: "2026-09-21T08:23:04.437Z"
-      completed_at: null
+      completed_at: "2026-09-21T09:10:44.934Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-004-python-mcp"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Managed Python MCP implementation and task memory are merged into main through 9d715d3."}
+        - {type: "assert", check: "S1 real SEA path", status: "passed", summary: "YuanpuAgentRuntime --capability-smoke calls search_capabilities then execute_capability against real FastMCP; structuredContent and MCP isError/content are asserted."}
+        - {type: "assert", check: "S3 isolation and lifecycle", status: "passed", summary: "Tests cover source timeout isolation, duplicate identity rejection, independent concurrent cancellation, timeout recovery, direct and inherited-pipe descendants, and abnormal MCP root exit."}
+        - {type: "review", check: "independent security and lifecycle review", status: "passed", summary: "Five review rounds closed annotation-based approval bypass, dirty-CI dependency, cancellation coupling, POSIX process-group, and Windows Job Object/pipe inheritance defects; final verdict PASS."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Full build, typecheck, and tests passed at d749967 using Node 24.15.0/pnpm 11.22.0; clean-venv simulation also passed via uv lock bootstrap."}
+        - {type: "command", check: "pnpm build:native", status: "passed", summary: "darwin-arm64 Node SEA build passed at d749967."}
+        - {type: "command", check: "pnpm smoke:native", status: "passed", summary: "Generated SEA passed greeting/version plus real Python success/error capability smoke at d749967."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-004.md documents contracts, lifecycle boundaries, review history, and cross-platform follow-up evidence."}
       follow_up_candidates: []
   - id: TASK-005
     title: "Python 调用与授权阶段验证"
-    status: pending
+    status: ready
     goal: "以真实服务验证后端最小闭环，阻断不可信授权或进程生命周期缺陷。"
     scope:
       in: ["设计 S1–S3 场景独立复核","真实 SEA 与真实 Python MCP fixture 的证据"]
