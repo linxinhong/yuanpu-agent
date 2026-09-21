@@ -79,7 +79,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('plugins:search', trustedHandler((query: string) => runtime.searchPlugins(query)));
   ipcMain.handle('plugins:list', trustedHandler(() => runtime.listPlugins()));
   ipcMain.handle('skills:local', trustedHandler(() => runtime.listLocalSkills()));
-  ipcMain.handle('plugins:install', trustedHandler((source: string) => runtime.installPlugin(source)));
+  ipcMain.handle('plugins:install', trustedHandler((source: string, artifactManifestDigest?: string) => (
+    runtime.installPlugin(source, artifactManifestDigest)
+  )));
   ipcMain.handle('plugins:state', trustedHandler((name: string, enabled: boolean) => (
     runtime.setPluginEnabled(name, enabled)
   )));
@@ -91,8 +93,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('plugins:rollback', trustedHandler((name: string, version: string) => (
     runtime.rollbackPlugin(name, version)
   )));
-  ipcMain.handle('plugins:mcp-conflicts', trustedHandler((source: string) => (
-    runtime.listMcpOwnershipConflicts(source)
+  ipcMain.handle('plugins:mcp-conflicts', trustedHandler((source: string, artifactManifestDigest: string) => (
+    runtime.listMcpOwnershipConflicts(source, artifactManifestDigest)
   )));
   ipcMain.handle('capabilities:approvals:list', trustedHandler(() => runtime.listCapabilityApprovals()));
   ipcMain.handle('capabilities:approvals:decide', trustedHandler((requestId, decision) => (

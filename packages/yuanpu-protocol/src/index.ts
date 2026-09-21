@@ -135,6 +135,7 @@ export interface PluginSearchResult {
   source: string;
   components?: Array<'skill' | 'agent' | 'workflow' | 'extension' | 'prompt' | 'theme' | 'connector'>;
   permissions?: Array<'instructions' | 'scripts' | 'filesystem' | 'network' | 'credentials' | 'background'>;
+  artifactManifestDigest?: string;
 }
 
 export type SkillCatalogItem = PluginSearchResult;
@@ -202,7 +203,7 @@ export interface DesktopBridge {
   searchPlugins(query: string): Promise<PluginSearchResult[]>;
   listLocalSkills(): Promise<LocalSkillList>;
   listPlugins(): Promise<InstalledPlugin[]>;
-  installPlugin(source: string): Promise<InstalledPlugin>;
+  installPlugin(source: string, artifactManifestDigest?: string): Promise<InstalledPlugin>;
   setPluginEnabled(name: string, enabled: boolean): Promise<InstalledPlugin>;
   uninstallPlugin(name: string): Promise<void>;
   getPluginConfig(name: string, scope: PluginConfigScope): Promise<PluginConfigDocument>;
@@ -210,7 +211,7 @@ export interface DesktopBridge {
   savePluginConfig(input: PluginConfigInput): Promise<PluginConfigDocument>;
   resetPluginConfig(name: string, scope: PluginConfigScope): Promise<PluginConfigDocument>;
   rollbackPlugin(name: string, version: string): Promise<InstalledPlugin>;
-  listMcpOwnershipConflicts(source: string): Promise<McpOwnershipConflict[]>;
+  listMcpOwnershipConflicts(source: string, artifactManifestDigest: string): Promise<McpOwnershipConflict[]>;
   listCapabilityApprovals(): Promise<CapabilityApprovalSummary[]>;
   decideCapabilityApproval(
     requestId: string,

@@ -460,8 +460,14 @@ function SkillPage({ active }: { active: boolean }) {
     const legacyAdapter = installedByName.get('pi-mcp-adapter');
     let legacyDisabled = false;
     try {
+      if (isArtifactSource(source) && !candidate.artifactManifestDigest) {
+        throw new Error('能力清单快照缺失，请重新搜索并确认权限。');
+      }
       if (isArtifactSource(source) && legacyAdapter?.enabled) {
-        const conflicts = await desktop.listMcpOwnershipConflicts(source);
+        const conflicts = await desktop.listMcpOwnershipConflicts(
+          source,
+          candidate.artifactManifestDigest!,
+        );
         if (conflicts.length > 0) {
           const names = conflicts.map((conflict) => conflict.name).join('、');
           const useYuanpu = window.confirm(
@@ -472,7 +478,7 @@ function SkillPage({ active }: { active: boolean }) {
           legacyDisabled = true;
         }
       }
-      await desktop.installPlugin(source);
+      await desktop.installPlugin(source, candidate.artifactManifestDigest);
       await refreshInstalled();
       setInstallFailures((current) => {
         const next = { ...current };
@@ -487,6 +493,10 @@ function SkillPage({ active }: { active: boolean }) {
       }
       setError(message);
       setInstallFailures((current) => ({ ...current, [source]: message }));
+      if (message.includes('能力清单已变化')) {
+        const refreshed = await desktop.searchPlugins(query.trim()).catch(() => undefined);
+        if (refreshed) setResults(refreshed);
+      }
       const current = await desktop.listPlugins().catch(() => []);
       setInstalled(current);
     } finally {
@@ -782,6 +792,9 @@ function SkillPage({ active }: { active: boolean }) {
               <div><dt>版本</dt><dd>{trustCandidate.version}</dd></div>
               <div><dt>来源</dt><dd>{trustCandidate.source}</dd></div>
               <div><dt>发布者</dt><dd>{trustCandidate.publisher ?? '未知发布者'}</dd></div>
+              {trustCandidate.artifactManifestDigest && (
+                <div><dt>清单摘要</dt><dd>{trustCandidate.artifactManifestDigest.slice(0, 16)}…</dd></div>
+              )}
             </dl>
             <div className="skill-badges">
               {trustCandidate.permissions?.map((permission) => (

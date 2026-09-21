@@ -21,6 +21,8 @@
 | S7-CONFLICT | Runtime 从验签 manifest 读取连接名，只报告与旧 adapter 配置重合的 `yuanpu_echo_mcp`，不误报 `unrelated`；UI 要求明确选择，配置保留由 runtime 回归测试覆盖 | PASS |
 | IPC-TRUST | invoke 同时校验当前 webContents、main frame 与配置入口 URL；远端页面实测调用 `runtime:info` 被拒绝；普通导航/webview/新窗有阻断策略 | PASS |
 | TRUST-METADATA | 市场权限、版本与连接名在 Runtime 下载并验签 manifest 后覆盖 catalog 展示数据；配置 schema 同样来自已安装签名版本 | PASS |
+| TRUST-SNAPSHOT | 搜索返回验签 manifest 摘要；冲突检查和安装必须回传同一摘要。注入错误摘要时安装在下载制品前返回“清单已变化，请重新查看权限并确认” | PASS |
+| CONFIG-SCHEMA | 活动版本签名 schema 由 Ajv 编译；合法 `responsePrefix` 通过，额外字段按 `additionalProperties:false` 拒绝 | PASS |
 
 证据：`.tasks/ui/task-007-skill-ui/images/`。其中信任、安装、审批、刷新、失败恢复和回滚均来自真实 Electron，不是浏览器 mock。
 
@@ -36,4 +38,4 @@
 
 本卡只证明 macOS arm64 的界面与真实后端链路。Linux/Windows、系统签名提示、正式发布密钥和三平台离线制品证据仍为 `UNVERIFIED`，由 TASK-008 汇总；不得据此宣称生产发布就绪。
 
-独立安全复核首轮在 `4cced6e` 报告 1 HIGH 与 4 MEDIUM；上述 IPC URL、精确审批、配置、签名元数据及冲突范围问题均已修复，最终 revision 需在修复提交后记录并重新复核。
+独立安全复核首轮在 `4cced6e` 报告 1 HIGH 与 4 MEDIUM；二轮在 `6897c8b` 发现 manifest 快照 TOCTOU 和 schema 双重规则。IPC URL、精确审批、配置、签名元数据、快照绑定、schema 权威来源及冲突范围现均已修复，最终 revision 需在修复提交后记录并重新复核。

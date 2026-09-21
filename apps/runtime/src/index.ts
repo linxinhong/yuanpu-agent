@@ -13,6 +13,8 @@ import {
   PI_UPSTREAM_VERSION,
   PluginManager,
   CapabilityArtifactManager,
+  capabilityManifestDigest,
+  validateCapabilityConfig,
   detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
   type YuanpuChatSession,
@@ -258,25 +260,33 @@ async function serve(): Promise<void> {
     });
     if (!response.ok) throw new Error(`能力 manifest 下载失败：HTTP ${response.status}`);
     const manifest = await readBoundedJsonResponse(response) as CapabilityPackageManifest;
-    return { manifest: artifacts.inspectManifest(manifest), manifestUrl: response.url };
+    const inspected = artifacts.inspectManifest(manifest);
+    const digest = capabilityManifestDigest(inspected);
+    return { manifest: inspected, manifestUrl: response.url, digest };
   };
-  const artifactConfigValidation = (value: Record<string, unknown>): PluginConfigValidation => {
-    const keys = Object.keys(value);
-    const prefix = value.responsePrefix;
-    const valid = keys.every((key) => key === 'responsePrefix')
-      && (prefix === undefined || (typeof prefix === 'string' && prefix.length <= 40));
-    return {
-      valid,
-      errors: valid ? [] : ['responsePrefix 必须是不超过 40 个字符的字符串，且不能包含其他字段。'],
-    };
+  const assertExpectedManifest = (actual: string, expected: unknown) => {
+    if (typeof expected !== 'string' || !/^[a-f0-9]{64}$/.test(expected) || actual !== expected) {
+      throw new Error('能力清单已变化，请重新查看权限并确认安装。');
+    }
   };
-  const readArtifactConfig = async (): Promise<Record<string, unknown>> => {
+  const artifactConfigValidation = (
+    schema: Record<string, unknown>,
+    value: Record<string, unknown>,
+  ): PluginConfigValidation => {
+    return validateCapabilityConfig(schema, value);
+  };
+  const readArtifactConfig = async (schema?: Record<string, unknown>): Promise<Record<string, unknown>> => {
     try {
       const value = JSON.parse(await readFile(pythonConfigFile, 'utf8')) as unknown;
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('能力配置必须是对象。');
       return value as Record<string, unknown>;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { responsePrefix: '' };
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        const defaultValue = schema?.default;
+        return defaultValue && typeof defaultValue === 'object' && !Array.isArray(defaultValue)
+          ? structuredClone(defaultValue as Record<string, unknown>)
+          : {};
+      }
       throw error;
     }
   };
@@ -291,7 +301,7 @@ async function serve(): Promise<void> {
       description: '配置 echo 输出前缀；配置独立于版本目录，更新和回滚不会删除。',
       scope,
       path: pythonConfigFile,
-      value: await readArtifactConfig(),
+      value: await readArtifactConfig(active.configSchema),
       schema: active.configSchema,
       supportsWorkspace: false,
       secretPolicy: 'environment-only',
@@ -506,13 +516,14 @@ async function serve(): Promise<void> {
         const results = await plugins.search(url.searchParams.get('q') ?? '');
         const hydrated = await Promise.all(results.map(async (item) => {
           if (!item.source.startsWith('artifact:')) return item;
-          const { manifest } = await fetchArtifactManifest(item.source);
+          const { manifest, digest } = await fetchArtifactManifest(item.source);
           if (item.id && item.id !== manifest.id) throw new Error('Catalog capability id does not match its signed manifest.');
           return {
             ...item,
             id: manifest.id,
             version: manifest.version,
             permissions: manifest.permissions,
+            artifactManifestDigest: digest,
           };
         }));
         response.end(JSON.stringify(hydrated));
@@ -521,8 +532,10 @@ async function serve(): Promise<void> {
 
       if (url.pathname === RUNTIME_ROUTES.pluginMcpConflicts && request.method === 'GET') {
         const source = url.searchParams.get('source');
+        const expectedDigest = url.searchParams.get('manifestDigest');
         if (!source) throw new Error('能力来源不能为空。');
-        const { manifest } = await fetchArtifactManifest(source);
+        const { manifest, digest } = await fetchArtifactManifest(source);
+        assertExpectedManifest(digest, expectedDigest);
         response.end(JSON.stringify(await detectMcpOwnershipConflicts({
           yuanpuConnections: manifest.connections ?? [],
           agentRoot: home.agentPath,
@@ -546,7 +559,10 @@ async function serve(): Promise<void> {
               installedAt: active.installedAt,
               configurable: Boolean(active.configSchema),
               configStatus: active.configSchema
-                ? artifactConfigValidation(await readArtifactConfig()).valid ? 'valid' as const : 'invalid' as const
+                ? artifactConfigValidation(
+                    active.configSchema,
+                    await readArtifactConfig(active.configSchema),
+                  ).valid ? 'valid' as const : 'invalid' as const
                 : 'unsupported' as const,
               kind: 'python-mcp' as const,
               activeVersion: item.activeVersion,
@@ -574,11 +590,18 @@ async function serve(): Promise<void> {
 
       if (url.pathname === RUNTIME_ROUTES.pluginConfigValidate && request.method === 'POST') {
         const input = readConfigInput(await readJsonBody(request));
-        response.end(JSON.stringify(input.name === 'builtin.python.echo'
-          ? input.scope === 'user'
-            ? artifactConfigValidation(input.value)
-            : { valid: false, errors: ['Python 能力仅支持用户级配置。'] }
-          : await plugins.validateConfig(input)));
+        let validation: PluginConfigValidation;
+        if (input.name === 'builtin.python.echo') {
+          const active = await artifacts?.active(input.name);
+          validation = input.scope !== 'user'
+            ? { valid: false, errors: ['Python 能力仅支持用户级配置。'] }
+            : active?.configSchema
+              ? artifactConfigValidation(active.configSchema, input.value)
+              : { valid: false, errors: ['当前能力版本未声明可管理配置。'] };
+        } else {
+          validation = await plugins.validateConfig(input);
+        }
+        response.end(JSON.stringify(validation));
         return;
       }
 
@@ -587,7 +610,9 @@ async function serve(): Promise<void> {
         let document: PluginConfigDocument;
         if (input.name === 'builtin.python.echo') {
           if (input.scope !== 'user') throw new Error('Python 能力仅支持用户级配置。');
-          const validation = artifactConfigValidation(input.value);
+          const active = await artifacts?.active(input.name);
+          if (!active?.configSchema) throw new Error('当前能力版本未声明可管理配置。');
+          const validation = artifactConfigValidation(active.configSchema, input.value);
           if (!validation.valid) throw new Error(`能力配置无效：${validation.errors.join('；')}`);
           await mkdir(dirname(pythonConfigFile), { recursive: true });
           const temporary = `${pythonConfigFile}.${randomUUID()}.tmp`;
@@ -619,7 +644,7 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.pluginInstall && request.method === 'POST') {
-        const body = await readJsonBody(request) as { source?: unknown };
+        const body = await readJsonBody(request) as { source?: unknown; artifactManifestDigest?: unknown };
         if (typeof body.source !== 'string' || !body.source.trim()) {
           response.statusCode = 400;
           response.end(JSON.stringify({ error: '插件来源不能为空。' }));
@@ -628,7 +653,8 @@ async function serve(): Promise<void> {
         const source = body.source.trim();
         if (source.startsWith('artifact:')) {
           if (!artifacts) throw new Error('当前宿主没有配置能力制品信任根。');
-          const { manifest, manifestUrl } = await fetchArtifactManifest(source);
+          const { manifest, manifestUrl, digest } = await fetchArtifactManifest(source);
+          assertExpectedManifest(digest, body.artifactManifestDigest);
           const installed = await artifacts.install(manifest, {
             manifestUrl,
             healthCheck: async (entrypoint, installPath) => {
@@ -705,7 +731,10 @@ async function serve(): Promise<void> {
           installedAt: active.installedAt,
           configurable: Boolean(active.configSchema),
           configStatus: active.configSchema
-            ? artifactConfigValidation(await readArtifactConfig()).valid ? 'valid' : 'invalid'
+            ? artifactConfigValidation(
+                active.configSchema,
+                await readArtifactConfig(active.configSchema),
+              ).valid ? 'valid' : 'invalid'
             : 'unsupported',
           kind: 'python-mcp',
           activeVersion: active.version,

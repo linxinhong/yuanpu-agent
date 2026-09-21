@@ -11,13 +11,50 @@ import * as tar from 'tar';
 import {
   CapabilityArtifactManager,
   artifactInstallLockPort,
+  capabilityManifestDigest,
   capabilityManifestSigningPayload,
   detectMcpOwnershipConflicts,
+  validateCapabilityConfig,
 } from '../dist/index.mjs';
 
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
 const healthy = async () => {};
+
+test('validates capability configuration against the signed active schema', () => {
+  const schema = {
+    type: 'object',
+    properties: { responsePrefix: { type: 'string', maxLength: 4 } },
+    additionalProperties: false,
+  };
+  assert.deepEqual(validateCapabilityConfig(schema, { responsePrefix: 'ok' }), {
+    valid: true,
+    errors: [],
+  });
+  assert.equal(validateCapabilityConfig(schema, { responsePrefix: 'too-long' }).valid, false);
+  assert.equal(validateCapabilityConfig(schema, { unexpected: true }).valid, false);
+});
+
+test('manifest digest binds the permissions, connections, and configuration snapshot', () => {
+  const base = {
+    manifestVersion: 1,
+    kind: 'python-mcp',
+    id: 'builtin.python.echo',
+    version: '1.0.0',
+    capabilityContractVersion: 1,
+    runtimeCompatibility: { minimum: '0.1.0' },
+    artifacts: [],
+    configSchema: { type: 'object' },
+    permissions: ['background'],
+    connections: ['yuanpu_echo_mcp'],
+    issuedAt: '2026-09-21T00:00:00.000Z',
+    signature: { algorithm: 'ed25519', keyId: 'test-root', value: 'ignored-by-digest' },
+  };
+  const digest = capabilityManifestDigest(base);
+  assert.notEqual(capabilityManifestDigest({ ...base, permissions: ['network'] }), digest);
+  assert.notEqual(capabilityManifestDigest({ ...base, connections: ['other'] }), digest);
+  assert.notEqual(capabilityManifestDigest({ ...base, configSchema: { type: 'string' } }), digest);
+});
 
 async function fixtureRoot(t) {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-artifacts-'));

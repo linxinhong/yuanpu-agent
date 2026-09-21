@@ -1,7 +1,9 @@
 import type {
   CapabilityArtifactTarget,
   CapabilityPackageManifest,
+  PluginConfigValidation,
 } from '@yuanpu-agent/protocol';
+import Ajv from 'ajv';
 import {
   createHash,
   createPublicKey,
@@ -29,6 +31,21 @@ const DEFAULT_MAX_UNPACKED_BYTES = 768 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 20_000;
 const LOCK_PORT_BASE = 12_000;
 const LOCK_PORT_SPAN = 28_000;
+const artifactConfigAjv = new Ajv({ strict: true, allErrors: true });
+
+export function validateCapabilityConfig(
+  schema: Record<string, unknown>,
+  value: Record<string, unknown>,
+): PluginConfigValidation {
+  const validate = artifactConfigAjv.compile<Record<string, unknown>>(schema);
+  const valid = validate(value);
+  return {
+    valid: Boolean(valid),
+    errors: (validate.errors ?? []).map((error) => (
+      `${error.instancePath || '/'} ${error.message ?? '配置无效'}`
+    )),
+  };
+}
 
 export interface ArtifactTrustRoot {
   keyId: string;
@@ -111,6 +128,10 @@ function canonicalize(value: unknown): string {
 export function capabilityManifestSigningPayload(manifest: CapabilityPackageManifest): Uint8Array {
   const { signature: _signature, ...unsigned } = manifest;
   return Buffer.from(canonicalize(unsigned), 'utf8');
+}
+
+export function capabilityManifestDigest(manifest: CapabilityPackageManifest): string {
+  return createHash('sha256').update(capabilityManifestSigningPayload(manifest)).digest('hex');
 }
 
 function compareVersions(left: string, right: string): number {

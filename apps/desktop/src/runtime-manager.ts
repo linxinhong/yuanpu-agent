@@ -322,11 +322,11 @@ export class RuntimeManager {
     return this.request(RUNTIME_ROUTES.localSkills);
   }
 
-  installPlugin(source: string): Promise<InstalledPlugin> {
+  installPlugin(source: string, artifactManifestDigest?: string): Promise<InstalledPlugin> {
     return this.request(RUNTIME_ROUTES.pluginInstall, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ source }),
+      body: JSON.stringify({ source, artifactManifestDigest }),
     });
   }
 
@@ -384,9 +384,12 @@ export class RuntimeManager {
     });
   }
 
-  listMcpOwnershipConflicts(source: string): Promise<McpOwnershipConflict[]> {
+  listMcpOwnershipConflicts(
+    source: string,
+    artifactManifestDigest: string,
+  ): Promise<McpOwnershipConflict[]> {
     return this.request(
-      `${RUNTIME_ROUTES.pluginMcpConflicts}?source=${encodeURIComponent(source)}`,
+      `${RUNTIME_ROUTES.pluginMcpConflicts}?source=${encodeURIComponent(source)}&manifestDigest=${encodeURIComponent(artifactManifestDigest)}`,
     );
   }
 

@@ -10,7 +10,9 @@ const bridge: DesktopBridge = {
   searchPlugins: (query) => ipcRenderer.invoke('plugins:search', query),
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
   listLocalSkills: () => ipcRenderer.invoke('skills:local'),
-  installPlugin: (source) => ipcRenderer.invoke('plugins:install', source),
+  installPlugin: (source, artifactManifestDigest) => (
+    ipcRenderer.invoke('plugins:install', source, artifactManifestDigest)
+  ),
   setPluginEnabled: (name, enabled) => ipcRenderer.invoke('plugins:state', name, enabled),
   uninstallPlugin: (name) => ipcRenderer.invoke('plugins:uninstall', name),
   getPluginConfig: (name, scope) => ipcRenderer.invoke('plugins:config:get', name, scope),
@@ -18,7 +20,9 @@ const bridge: DesktopBridge = {
   savePluginConfig: (input) => ipcRenderer.invoke('plugins:config:save', input),
   resetPluginConfig: (name, scope) => ipcRenderer.invoke('plugins:config:reset', name, scope),
   rollbackPlugin: (name, version) => ipcRenderer.invoke('plugins:rollback', name, version),
-  listMcpOwnershipConflicts: (source) => ipcRenderer.invoke('plugins:mcp-conflicts', source),
+  listMcpOwnershipConflicts: (source, artifactManifestDigest) => (
+    ipcRenderer.invoke('plugins:mcp-conflicts', source, artifactManifestDigest)
+  ),
   listCapabilityApprovals: () => ipcRenderer.invoke('capabilities:approvals:list'),
   decideCapabilityApproval: (requestId, decision) => (
     ipcRenderer.invoke('capabilities:approvals:decide', requestId, decision)

@@ -57,3 +57,6 @@ PyInstaller 入口在处理 `--version` 前导入 MCP 依赖会超过安装健�
 审批原始调用保存在 Runtime 内存中并由宿主精确执行；使用验签 manifest 的权限、配置 schema
 和连接名；只在签名连接名与旧 adapter 配置重合时提示。外部页面实测仍可由 CDP 强制导航，
 但 preload 调用被 main 进程拒绝；普通导航和新窗口也由 webContents 策略阻止。
+签名 manifest 的 SHA-256 摘要随搜索结果进入确认框，并随冲突检查和安装请求返回 Runtime；
+任一阶段源内容变化都会要求用户重新查看并确认，避免确认旧权限却安装新版本。配置编辑器展示和
+保存均使用当前活动版本的签名 JSON Schema，由 Ajv 严格校验，不维护第二份硬编码规则。
