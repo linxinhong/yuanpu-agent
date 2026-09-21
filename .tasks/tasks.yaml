@@ -164,7 +164,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-005
     title: "Python 调用与授权阶段验证"
-    status: in_progress
+    status: done
     goal: "以真实服务验证后端最小闭环，阻断不可信授权或进程生命周期缺陷。"
     scope:
       in: ["设计 S1–S3 场景独立复核","真实 SEA 与真实 Python MCP fixture 的证据"]
@@ -193,14 +193,24 @@ tasks:
       owner: "codex-yuanpu-61529"
       attempts: 0
       claimed_at: "2026-09-21T09:11:27.681Z"
-      completed_at: null
+      completed_at: "2026-09-21T09:25:37.158Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-005-python-verification"
-      evidence: []
-      follow_up_candidates: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Verification harness and evidence were merged into main at 2e4c706; tested branch revision was 8e6c0ad."}
+        - {type: "verification", check: "S1 real SEA and Python", status: "passed", summary: "darwin-arm64 SEA called real FastMCP through exactly search_capabilities and execute_capability; structured success and MCP isError were observed."}
+        - {type: "verification", check: "S2 authorization boundary", status: "passed", summary: "Real Runtime rejected missing/bad bearer, forged signature and nonce replay; binding changes, concurrent consumption and subsequent replay were rejected."}
+        - {type: "verification", check: "persistent consume before dispatch crash", status: "passed", summary: "Real Python fsynced one marker then exited before reply; result_unknown was returned, approval persisted consumed, restart replay was rejected, and marker remained one execution."}
+        - {type: "verification", check: "S3 source and process isolation", status: "passed", summary: "Real unresponsive process did not hide healthy Python MCP; real cancellation, normal close, abnormal root exit and inherited-pipe descendant cleanup passed."}
+        - {type: "review", check: "independent business verification", status: "passed", summary: "Non-author verifier /root/task005_business_verifier independently derived and executed scenarios; final verdict PASS at 8e6c0ad."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Integrated main passed build, typecheck and tests with Node 24.15.0/pnpm 11.22.0; runtime-kit 35/35, runtime 3/3, server 1/1."}
+        - {type: "command", check: "pnpm build:native and pnpm smoke:native", status: "passed", summary: "darwin-arm64 SEA build and real Python capability smoke passed; later revisions only changed tests/evidence."}
+        - {type: "memory", check: "scenario record", status: "passed", summary: "Integrated .tasks/verification/TASK-005/results.md and .tasks/memory/TASK-005.md include revision, diff, OS, commands, sanitized observations and Linux/Windows UNVERIFIED boundary."}
+      follow_up_candidates:
+        - "TASK-008 必须补齐 Linux/Windows 实际 SEA 与 Windows Job Object 生命周期 runner 证据；当前仅 macOS 阶段 PASS。"
   - id: TASK-006
     title: "交付自包含制品与安全更新"
-    status: pending
+    status: ready
     goal: "在没有 Python 的目标机安装、运行和更新完整能力包，自建源失败不破坏旧版本。"
     scope:
       in: ["Python 制品构建、现有 CI 平台矩阵与预装资源","packages 安装类型分流、验证、活动版本和回滚","server 版本元数据、签名发布入口与受控制品源","包配置及旧 pi-mcp-adapter 托管冲突检测 API"]
