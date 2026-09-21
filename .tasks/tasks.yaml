@@ -384,7 +384,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-010
     title: "补齐 SEA Runtime 分阶段更新回归"
-    status: ready
+    status: in_progress
     goal: "用可重复的本地端到端测试证明 Runtime 下载校验、暂存、失败保旧与下次启动激活语义。"
     scope:
       in: ["桌面 Runtime updater 可测试边界","本地 HTTP manifest/二进制 fixture","下载失败、校验失败、版本冒烟与重启 promotion 回归"]
@@ -406,11 +406,11 @@ tasks:
     investigation_hints: ["入口 apps/desktop/src/runtime-manager.ts 的 checkForUpdate/promoteStagedRuntime/command","将文件系统与下载/激活策略提炼为不依赖 Electron 的深模块，并由 RuntimeManager 复用","用 loopback HTTP 和当前 Node 可执行文件或等价本地 fixture；所有等待必须有限"]
     escalation_conditions: ["若需要改变公开 Runtime manifest 契约或放宽校验则停止并报告","若发现现有 promotion 无法安全保旧，先记录复现再做最小修复"]
     result:
-      owner: null
+      owner: "codex-yuanpu-61529-61529-88666-1628"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T16:28:55.300Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-update"
+      branch: "task/task-010-sea-update"
       evidence: []
       follow_up_candidates: []
