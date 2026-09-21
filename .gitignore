@@ -7,4 +7,10 @@ release/
 .DS_Store
 packages/ai/src/providers/data/
 
-.tasks/
+.tasks/*
+!.tasks/README.md
+!.tasks/architecture.md
+!.tasks/tasks.yaml
+!.tasks/memory/
+!.tasks/memory/*.md
+/.worktrees/

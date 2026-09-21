@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-test('runtime CLI prints the default greeting from @yuanpu-agent/core', () => {
+test('runtime CLI prints the default greeting from the Yuanpu runtime kit', () => {
   const output = execFileSync(process.execPath, ['dist/index.cjs'], { encoding: 'utf8' });
   assert.equal(output.trim(), 'Hello, world!');
 });

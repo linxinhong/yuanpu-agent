@@ -27,11 +27,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@yuanpu-agent/core": "workspace:*",
-    "@yuanpu-agent/mcp": "workspace:*",
-    "@yuanpu-agent/mcp-contracts": "workspace:*",
-    "@yuanpu-agent/pi-runtime": "workspace:*",
-    "@yuanpu-agent/plugins": "workspace:*",
+    "@yuanpu-agent/runtime-kit": "workspace:*",
     "@yuanpu-agent/protocol": "workspace:*"
   },
   "devDependencies": {

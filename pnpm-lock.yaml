@@ -87,24 +87,12 @@ importers:
 
   apps/runtime:
     dependencies:
-      '@yuanpu-agent/core':
-        specifier: workspace:*
-        version: link:../../packages/yuanpu-core
-      '@yuanpu-agent/mcp':
-        specifier: workspace:*
-        version: link:../../packages/yuanpu-mcp
-      '@yuanpu-agent/mcp-contracts':
-        specifier: workspace:*
-        version: link:../../packages/yuanpu-mcp-contracts
-      '@yuanpu-agent/pi-runtime':
-        specifier: workspace:*
-        version: link:../../packages/yuanpu-pi-runtime
-      '@yuanpu-agent/plugins':
-        specifier: workspace:*
-        version: link:../../packages/yuanpu-plugins
       '@yuanpu-agent/protocol':
         specifier: workspace:*
         version: link:../../packages/yuanpu-protocol
+      '@yuanpu-agent/runtime-kit':
+        specifier: workspace:*
+        version: link:../../packages/yuanpu-runtime
     devDependencies:
       postject:
         specifier: 1.0.0-alpha.6
@@ -438,30 +426,13 @@ importers:
         specifier: 6.0.0
         version: 6.0.0
 
-  packages/yuanpu-core: {}
+  packages/yuanpu-protocol: {}
 
-  packages/yuanpu-mcp:
-    dependencies:
-      '@yuanpu-agent/mcp-contracts':
-        specifier: workspace:*
-        version: link:../yuanpu-mcp-contracts
-
-  packages/yuanpu-mcp-contracts: {}
-
-  packages/yuanpu-pi-runtime:
+  packages/yuanpu-runtime:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.86.1
         version: link:../coding-agent
-      '@yuanpu-agent/mcp-contracts':
-        specifier: workspace:*
-        version: link:../yuanpu-mcp-contracts
-      typebox:
-        specifier: 1.3.27
-        version: 1.3.27
-
-  packages/yuanpu-plugins:
-    dependencies:
       '@npmcli/arborist':
         specifier: 10.0.2
         version: 10.0.2(supports-color@7.1.0)
@@ -471,12 +442,13 @@ importers:
       npm-package-arg:
         specifier: 14.0.0
         version: 14.0.0
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
     devDependencies:
       '@types/npmcli__arborist':
         specifier: 6.3.3
         version: 6.3.3
-
-  packages/yuanpu-protocol: {}
 
   server:
     dependencies:

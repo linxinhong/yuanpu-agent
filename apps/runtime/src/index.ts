@@ -1,14 +1,16 @@
-import { ensureYuanpuHome, greeting } from '@yuanpu-agent/core';
-import { createDemoCapabilitySource, createYuanpuMcpServer } from '@yuanpu-agent/mcp';
-import { PluginManager } from '@yuanpu-agent/plugins';
 import {
+  createDemoCapabilitySource,
+  createYuanpuMcpServer,
   createYuanpuCapabilityTools,
   createYuanpuChatSession,
+  ensureYuanpuHome,
+  greeting,
   inspectYuanpuExtensions,
   inspectYuanpuSkills,
   PI_UPSTREAM_VERSION,
+  PluginManager,
   type YuanpuChatSession,
-} from '@yuanpu-agent/pi-runtime';
+} from '@yuanpu-agent/runtime-kit';
 import {
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,

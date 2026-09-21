@@ -1,0 +1,289 @@
+version: 1
+project:
+  name: "YuanpuAgent"
+feature:
+  title: "Python 能力包与统一能力入口"
+  status: in_progress
+tasks:
+  - id: TASK-001
+    title: "确认合并基线与回归"
+    status: ready
+    goal: "确认 runtime-kit 合并后的所有消费者可构建，为后续任务建立可追溯基线。"
+    scope:
+      in: ["核对现有未提交合并及旧包引用","README、apps/runtime、锁文件与 runtime-kit 测试"]
+      out: ["Python 功能","修改 Pi 上游"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "合并后只保留现有两个 Yuanpu 包，旧包引用无遗漏；用户既有改动不被覆盖"
+      - type: assertion
+        expect: "记录实际测试 revision 和工作区差异；未集成 main 不标 done"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native"
+      - type: command
+        run: "pnpm smoke:native"
+    dependencies: []
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 packages/yuanpu-runtime、apps/runtime/test/runtime.test.mjs、pnpm-lock.yaml；新包当前未提交","预检 git diff 与依赖引用；复用现有 test，不重做已完成合并"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-002
+    title: "固定能力与制品公共契约"
+    status: pending
+    goal: "固定跨进程、授权和分发数据契约，消除消费者各自解释。"
+    scope:
+      in: ["capabilities/contracts.ts 及 yuanpu-protocol 公共 DTO","source 路由、MCP 结果、授权状态、制品 schema 与兼容策略","对应旧消费者适配和契约测试"]
+      out: ["Python 子进程实现","下载器与 UI 实现"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "工具 ID 无歧义，真实 MCP Schema 校验方言与内容块映射有测试"
+      - type: assertion
+        expect: "旧 demo 和 Pi 调用保持兼容；制品 kind 不混入 Pi 加载器"
+      - type: assertion
+        expect: "确定审批 canonical 参数摘要、错误/取消终态、包版本兼容规则；更新设计文档"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-001"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 packages/yuanpu-runtime/src/capabilities/contracts.ts、src/pi/index.ts、packages/yuanpu-protocol；现有结果只支持 JsonValue","契约卡为共享协议单一修改者；选 SDK/Schema 版本前核对官方文档；向下兼容必须测试"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-003
+    title: "实现宿主一次性授权"
+    status: pending
+    goal: "敏感能力由宿主审批并严格一次执行，移除非空 token 即放行。"
+    scope:
+      in: ["capabilities 授权状态与持久消费","Runtime 认证审批 API、Pi needs_approval 适配","授权回放与并发测试"]
+      out: ["浏览器交互","全局 Pi 沙箱"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "S2 伪造、过期、跨上下文、参数/版本变化、重放均拒绝"
+      - type: assertion
+        expect: "取消或重启后不能恢复为未经确认的可执行请求；并发批准只派发一次"
+      - type: assertion
+        expect: "headless 默认拒绝；审批接口不是模型工具；不记录原始凭据"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-002"]
+    risk_level: L4
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 capabilities/index.ts 非空 approvalToken 判断、pi/index.ts、apps/runtime/src/index.ts；测试 capabilities.test.mjs 和 runtime.test.mjs","现有会话上下文需由宿主解析；独立安全复核问题：模型能否伪造许可或重放产生副作用"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-004
+    title: "接入受管 Python MCP 示例"
+    status: pending
+    goal: "真实 Python 子进程通过统一能力入口发现和执行，单源故障可隔离。"
+    scope:
+      in: ["capabilities MCP client、source 和进程生命周期","新增 apps/python-capabilities 示例及开发依赖锁定","apps/runtime 组合及 SEA 集成测试"]
+      out: ["生产分发","共享 Python 管理器"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "S1 真实 SEA 经两个工具调用 Python echo，保留结构化结果与 MCP 错误"
+      - type: assertion
+        expect: "S3 单源挂起不影响其他源，重名无覆盖、取消/退出清理进程树"
+      - type: assertion
+        expect: "超时、初始化失败和重启预算受控；不重试未知结果的副作用调用"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native"
+      - type: command
+        run: "pnpm smoke:native"
+    dependencies: ["TASK-002"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 capabilities/index.ts Promise.all、apps/runtime/src/index.ts demo 装配、pi/index.ts；新增 apps/python-capabilities 为待建路径","仅开发 fixture 可使用开发机 Python；生产自包含由后续制品卡负责；stdout 仅协议，环境变量最小化"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-005
+    title: "Python 调用与授权阶段验证"
+    status: pending
+    goal: "以真实服务验证后端最小闭环，阻断不可信授权或进程生命周期缺陷。"
+    scope:
+      in: ["设计 S1–S3 场景独立复核","真实 SEA 与真实 Python MCP fixture 的证据"]
+      out: ["新增产品实现","生产安装与 UI 验收"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "实际调用、坏 token/重放、改参数、故障隔离、取消和退出全部给出观察结果"
+      - type: assertion
+        expect: "复核持久授权消费与派发间崩溃不会自动重复执行；不能用 mock-only 测试替代"
+      - type: assertion
+        expect: "证据附 revision、diff、OS、命令和脱敏日志；缺环境标 unverified 不标 done"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native"
+      - type: command
+        run: "pnpm smoke:native"
+    dependencies: ["TASK-003","TASK-004"]
+    risk_level: L4
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["规则 docs/python-capabilities.md；复用 runtime/capabilities 测试和 Python fixture","必须非主要实现者独立执行；当前平台真实 SEA，其他平台生命周期复核由最终门补齐"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-006
+    title: "交付自包含制品与安全更新"
+    status: pending
+    goal: "在没有 Python 的目标机安装、运行和更新完整能力包，自建源失败不破坏旧版本。"
+    scope:
+      in: ["Python 制品构建、现有 CI 平台矩阵与预装资源","packages 安装类型分流、验证、活动版本和回滚","server 版本元数据、签名发布入口与受控制品源","包配置及旧 pi-mcp-adapter 托管冲突检测 API"]
+      out: ["PyPI 镜像","多租户发布后台","共享 venv"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "S4–S6 覆盖坏签名、路径穿越/链接、解压限额、回放、版本不兼容和断网"
+      - type: assertion
+        expect: "无 Python/pip 的目标机运行自包含包；不静默从外网补依赖"
+      - type: assertion
+        expect: "并发安装、Windows 占用、切换中断均可恢复旧版；不删除用户配置"
+      - type: assertion
+        expect: "旧 npm 安装和 settings 保持兼容，Python 不写入 Pi extensions；生产信任根不可被远端元数据替换"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native"
+      - type: command
+        run: "pnpm smoke:native"
+      - type: command
+        run: "pnpm package:desktop"
+    dependencies: ["TASK-005"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 packages/index.ts syncPiSettings、server/src/{catalog,index}.ts、apps/desktop 打包配置、.github/workflows；沿用现有发布矩阵","先检查现有用户数据与 state 迁移；新 artifacts 子目录不得覆盖 npm installed；SEA userData/runtime 位置不变","独立复核恶意归档、签名信任链及崩溃恢复；发布凭据缺失则使用测试签名 fixture 并标生产发布未验证"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-007
+    title: "接通技能管理与审批界面"
+    status: pending
+    goal: "用户通过现有技能入口安装 Python 能力包并批准一次敏感调用。"
+    scope:
+      in: ["apps/app 技能详情/状态/更新与对话审批","desktop main/preload 窄接口及受信窗口验证","UI 操作流、API 联调和浏览器证据"]
+      out: ["全站视觉改版","放宽授权模型"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "S7 用户搜索并确认信任后安装，配置后对话可调用；允许一次与拒绝均正确返回对话"
+      - type: assertion
+        expect: "失败显示仍在使用的版本，可重试/回滚；刷新状态持久，重复点击不重复执行"
+      - type: assertion
+        expect: "旧 adapter 托管冲突需用户明确选择，不能自动删除旧配置"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-006"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 apps/app/src/main.tsx、electron.d.ts，apps/desktop/src/{main,preload}.ts；设计兼容与界面流程节","按 UI Delivery 先展示现有页面上的操作方案并记录决定；新模式/布局先参考图，审批流程不得假定已批准","复用现有技能页，无需新前端框架；真实后端浏览器验证，构建通过不能替代"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-008
+    title: "跨平台技能安装与升级业务验收"
+    status: pending
+    goal: "确认用户完整链路以及三系统离线、更新和回滚达到交付条件。"
+    scope:
+      in: ["S1–S7 真实桌面与自建 catalog/制品源场景","支持平台打包产物及升级失败注入","安全与兼容独立复核报告"]
+      out: ["补写产品功能","自动发布到生产"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","完成需集成并在 main 验证；本轮不自动提交或推送"]
+    forbidden: ["将构建成功当成业务验收通过","将两个元工具描述为完整沙箱"]
+    acceptance:
+      - type: assertion
+        expect: "真实桌面完成搜索、安装、配置、调用、审批、更新/回滚；持久状态与页面一致"
+      - type: assertion
+        expect: "现有 CI 每个支持 OS/架构均有无系统 Python 的制品证据；断外网测试不得用开发源码代替"
+      - type: assertion
+        expect: "验证旧 npm 插件/配置保留、SEA 独立更新回归、无遗留进程；记录系统签名提示"
+      - type: assertion
+        expect: "每场景附版本环境和 pass/fail/unverified；关键未验证不得宣称可发布"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native"
+      - type: command
+        run: "pnpm smoke:native"
+      - type: command
+        run: "pnpm package:desktop"
+    dependencies: ["TASK-007"]
+    risk_level: L4
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口设计验收表、packages/tests、server/test/catalog.test.mjs、apps/runtime/test 和桌面打包产物","由非主要实现者验证；无测试机/真实签名/受控源则报告具体限制，不修改生产资源来绕过","失败转成具体修复卡，再重跑受影响场景；验收卡不暗含新实现"]
+    escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []

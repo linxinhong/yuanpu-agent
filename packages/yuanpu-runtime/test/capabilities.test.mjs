@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CAPABILITY_TOOL_NAMES } from '@yuanpu-agent/mcp-contracts';
-import { CapabilityError, createDemoCapabilitySource, createYuanpuMcpServer } from '../dist/index.mjs';
+import {
+  CAPABILITY_TOOL_NAMES,
+  CapabilityError,
+  createDemoCapabilitySource,
+  createYuanpuMcpServer,
+} from '../dist/index.mjs';
 
 test('the MCP surface always exposes exactly two meta tools', () => {
   const server = createYuanpuMcpServer();

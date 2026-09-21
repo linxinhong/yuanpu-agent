@@ -10,7 +10,9 @@ import {
   type ExecuteCapabilityResult,
   type SearchCapabilitiesInput,
   type SearchCapabilitiesResult,
-} from '@yuanpu-agent/mcp-contracts';
+} from './contracts.js';
+
+export * from './contracts.js';
 
 export interface CapabilitySource {
   list(context: CapabilityContext): Promise<CapabilityDescriptor[]>;

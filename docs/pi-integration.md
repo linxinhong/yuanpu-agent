@@ -21,11 +21,8 @@ The following directories are upstream mirrors and must not contain Yuanpu-speci
 
 Yuanpu-specific behavior belongs in:
 
-- `packages/yuanpu-core`
 - `packages/yuanpu-protocol`
-- `packages/yuanpu-pi-runtime`
-- `packages/yuanpu-mcp`
-- `packages/yuanpu-mcp-contracts`
+- `packages/yuanpu-runtime`
 
 `apps/runtime` is only the composition and Node SEA entry point. Pi and MCP implementation files do not live under that app.
 
@@ -33,12 +30,14 @@ The full tracked Pi package set is retained even when a package is not in today'
 
 ## MCP surface
 
-Pi keeps its local workspace tools. All external capabilities are exposed through exactly two Yuanpu tools:
+Pi keeps its local workspace tools. Yuanpu-managed external capabilities are exposed through exactly two Yuanpu tools:
 
 - `search_capabilities`
 - `execute_capability`
 
-`packages/yuanpu-mcp` owns capability discovery and execution. `packages/yuanpu-pi-runtime` adapts those two calls to Pi custom tools. Discovery is not authorization: execution resolves and validates the capability again.
+`packages/yuanpu-runtime/src/capabilities` owns capability discovery and execution. `packages/yuanpu-runtime/src/pi` adapts those two calls to Pi custom tools. Trusted Pi extensions can register tools separately; the two-tool interface is not a sandbox or a security boundary around Pi's local tools.
+
+Current execution resolves the capability again, but approval checking only tests for a nonempty token. Host-owned authorization, general schema validation and Python MCP sources are planned, not implemented. See [Python capability design](python-capabilities.md) and [task registry](../.tasks/tasks.yaml).
 
 ## Updating Pi
 

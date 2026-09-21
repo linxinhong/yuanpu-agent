@@ -10,14 +10,13 @@ Electron 图形界面与 Node.js SEA Runtime 解耦的 pnpm monorepo。工程组
 - `server`：Yuanpu 技能市场目录服务，提供搜索与详情 API。
 - `packages/agent` 等：从 Pi 上游按固定 commit 同步的原样源码包。
 - `packages/yuanpu-protocol`：Renderer、Electron 和 Runtime 共用的协议版本与类型。
-- `packages/yuanpu-core`：不感知界面的领域逻辑。
-- `packages/yuanpu-pi-runtime`：Yuanpu 对 Pi 的适配边界。
-- `packages/yuanpu-mcp`：进程内 MCP 服务，只暴露能力搜索和执行两个工具。
-- `packages/yuanpu-mcp-contracts`：MCP 能力、风险和错误协议。
+- `packages/yuanpu-runtime`：Yuanpu 后端实现，包含配置、Pi 适配、能力注册表、MCP 与能力包管理。
 
 Electron 首次使用安装包中携带的 Runtime。独立更新会下载到 Electron `userData/runtime/.staging`，校验文件大小和 SHA-256，执行 `--version` 冒烟测试，并在下次启动时原子切换。Runtime API 只监听 `127.0.0.1` 的随机端口。
 
 ## 本地开发
+
+Python 能力包与统一能力入口的目标设计见 [设计文档](docs/python-capabilities.md)，实施顺序与验收见 [任务入口](.tasks/README.md)。这些扩展能力尚待实施，不代表当前已支持 Python 插件。
 
 要求 Node.js 24.15+ 和 pnpm 11。
 

@@ -12,7 +12,7 @@ import {
   CAPABILITY_TOOL_NAMES,
   type CapabilityToolClient,
   type ExecuteCapabilityInput,
-} from '@yuanpu-agent/mcp-contracts';
+} from '../capabilities/contracts.js';
 import { Type } from 'typebox';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';

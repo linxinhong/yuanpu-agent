@@ -26,11 +26,7 @@ export default defineConfig({
   },
   deps: {
     alwaysBundle: [
-      '@yuanpu-agent/core',
-      '@yuanpu-agent/mcp',
-      '@yuanpu-agent/mcp-contracts',
-      '@yuanpu-agent/pi-runtime',
-      '@yuanpu-agent/plugins',
+      '@yuanpu-agent/runtime-kit',
       '@yuanpu-agent/protocol',
     ],
     onlyBundle: false,

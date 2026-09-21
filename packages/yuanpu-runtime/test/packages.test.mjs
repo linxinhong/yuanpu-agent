@@ -8,7 +8,7 @@ import test from 'node:test';
 import { PluginManager } from '../dist/index.mjs';
 
 async function temporaryHome() {
-  return mkdtemp(join(tmpdir(), 'yuanpu-plugins-'));
+  return mkdtemp(join(tmpdir(), 'yuanpu-packages-'));
 }
 
 test('searches the configured npm registry for pi packages', async (t) => {

@@ -1,5 +1,5 @@
 {
-  "name": "@yuanpu-agent/pi-runtime",
+  "name": "@yuanpu-agent/runtime-kit",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,9 @@
       "default": "./dist/index.mjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsdown",
     "test": "node --test test/*.test.mjs",
@@ -18,7 +20,12 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.86.1",
-    "@yuanpu-agent/mcp-contracts": "workspace:*",
+    "@npmcli/arborist": "10.0.2",
+    "ajv": "8.17.1",
+    "npm-package-arg": "14.0.0",
     "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@types/npmcli__arborist": "6.3.3"
   }
 }
