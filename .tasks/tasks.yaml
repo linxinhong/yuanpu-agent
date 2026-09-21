@@ -334,4 +334,37 @@ tasks:
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-008-release-verification"
       evidence: []
+      follow_up_candidates:
+        - "TASK-009 修复干净构建后的冻结 Python MCP 首次冷启动发现超时，再恢复 TASK-008 验收。"
+  - id: TASK-009
+    title: "修复 SEA 冻结 Python 能力冷启动冒烟"
+    status: ready
+    goal: "让干净环境中的首次 SEA 能力冒烟稳定发现冻结 Python MCP，并让根级命令自行准备必需制品。"
+    scope:
+      in: ["Runtime 冻结 Python MCP 启动/发现超时预算","根级 native smoke 前置制品准备","首次冷启动与进程清理回归"]
+      out: ["修改 Pi 上游包","扩大能力授权","跨平台发布签名"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","修复完成后回到 TASK-008 重跑受影响场景；不自动推送"]
+    forbidden: ["用预热或重复运行掩盖首次失败","删除超时与失败隔离"]
+    acceptance:
+      - type: assertion
+        expect: "移走 dist-artifact 与 dist-native 后，首次 pnpm build:native && pnpm smoke:native 即通过冻结 Python MCP 全链路"
+      - type: assertion
+        expect: "冻结能力冷启动有明确且有限的预算，超时后仍终止子进程且不隐藏其他健康能力"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native && pnpm smoke:native"
+    dependencies: ["TASK-007"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 package.json presmoke:native、apps/runtime/scripts/native/smoke.mjs、apps/runtime/src/index.ts createConfiguredPythonSource/createYuanpuMcpServer","TASK-008 在 e51c64c 串行复现：冻结制品首次发现约 3 秒被 CapabilityRegistry 总超时截断，重跑受系统缓存影响可通过","沿用健康检查 20 秒上限；增加针对失败隔离与子进程清理的最小回归"]
+    escalation_conditions: ["若必须改变公共 MCP 契约或 Pi 上游实现则停止并报告","若 20 秒内仍无法稳定冷启动则保留失败证据，不提高为无界等待"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
       follow_up_candidates: []
