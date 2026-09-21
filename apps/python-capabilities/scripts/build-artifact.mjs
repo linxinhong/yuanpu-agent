@@ -18,6 +18,12 @@ const bundleRoot = join(output, 'bundle');
 const frozenRoot = join(bundleRoot, 'YuanpuEchoMcp');
 const archiveName = `YuanpuEchoMcp-${target}.tar.gz`;
 const archivePath = join(output, archiveName);
+const pyproject = await readFile(join(root, 'pyproject.toml'), 'utf8');
+const projectVersion = /^version = "(\d+\.\d+\.\d+)"$/m.exec(pyproject)?.[1];
+const requestedVersion = process.env.YUANPU_CAPABILITY_VERSION
+  ?? (/^v?\d+\.\d+\.\d+$/.test(process.env.GITHUB_REF_NAME ?? '') ? process.env.GITHUB_REF_NAME : undefined);
+const capabilityVersion = requestedVersion?.replace(/^v/, '') ?? projectVersion;
+if (!capabilityVersion) throw new Error('Unable to determine the Python capability version.');
 
 function canonicalize(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -28,6 +34,13 @@ function canonicalize(value) {
 await rm(output, { recursive: true, force: true });
 await rm(work, { recursive: true, force: true });
 await mkdir(bundleRoot, { recursive: true });
+const frozenEntry = join(work, 'frozen-entry.py');
+await mkdir(work, { recursive: true });
+await writeFile(
+  frozenEntry,
+  (await readFile(join(root, 'scripts', 'frozen-entry.py'), 'utf8'))
+    .replace('__YUANPU_CAPABILITY_VERSION__', capabilityVersion),
+);
 
 execFileSync('uv', [
   'run', '--project', root, '--frozen', 'pyinstaller',
@@ -37,7 +50,7 @@ execFileSync('uv', [
   '--workpath', join(work, 'work'),
   '--specpath', join(work, 'spec'),
   '--collect-all', 'pydantic',
-  join(root, 'scripts', 'frozen-entry.py'),
+  frozenEntry,
 ], { stdio: 'inherit' });
 
 // Build machines have Python; target machines consume only the resulting archive.
@@ -57,14 +70,20 @@ execFileSync('uv', [
 
 const archive = await readFile(archivePath);
 const privateKeyFile = process.env.YUANPU_ARTIFACT_SIGNING_KEY_FILE;
-const keyId = process.env.YUANPU_ARTIFACT_SIGNING_KEY_ID ?? (privateKeyFile ? undefined : 'yuanpu-development-ephemeral');
+const privateKeyBase64 = process.env.YUANPU_ARTIFACT_SIGNING_KEY_BASE64;
+if (privateKeyFile && privateKeyBase64) throw new Error('Configure only one artifact signing key source.');
+const hasProductionKey = Boolean(privateKeyFile || privateKeyBase64);
+const keyId = process.env.YUANPU_ARTIFACT_SIGNING_KEY_ID ?? (hasProductionKey ? undefined : 'yuanpu-development-ephemeral');
 if (!keyId) throw new Error('YUANPU_ARTIFACT_SIGNING_KEY_ID is required with a production signing key.');
 
 let privateKey;
 let publicKey;
 let development = false;
-if (privateKeyFile) {
-  privateKey = createPrivateKey(await readFile(resolve(privateKeyFile), 'utf8'));
+if (hasProductionKey) {
+  const pem = privateKeyFile
+    ? await readFile(resolve(privateKeyFile), 'utf8')
+    : Buffer.from(privateKeyBase64, 'base64').toString('utf8');
+  privateKey = createPrivateKey(pem);
   publicKey = createPublicKey(privateKey);
 } else {
   ({ privateKey, publicKey } = generateKeyPairSync('ed25519'));
@@ -75,7 +94,7 @@ const manifest = {
   manifestVersion: 1,
   kind: 'python-mcp',
   id: 'builtin.python.echo',
-  version: '0.1.0',
+  version: capabilityVersion,
   capabilityContractVersion: 1,
   runtimeCompatibility: { minimum: '0.1.0', maximumExclusive: '1.0.0' },
   artifacts: [{

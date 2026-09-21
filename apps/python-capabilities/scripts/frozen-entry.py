@@ -4,8 +4,9 @@ import sys
 
 from yuanpu_echo_mcp.server import main
 
+VERSION = "__YUANPU_CAPABILITY_VERSION__"
 
 if "--version" in sys.argv:
-    print("0.1.0")
+    print(VERSION)
 else:
     main()

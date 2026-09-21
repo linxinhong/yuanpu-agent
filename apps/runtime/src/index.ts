@@ -12,6 +12,8 @@ import {
   inspectYuanpuSkills,
   PI_UPSTREAM_VERSION,
   PluginManager,
+  CapabilityArtifactManager,
+  type ArtifactTrustRoot,
   type YuanpuChatSession,
 } from '@yuanpu-agent/runtime-kit';
 import {
@@ -22,15 +24,18 @@ import {
   type PluginConfigInput,
   type PluginConfigScope,
 } from '@yuanpu-agent/protocol';
+import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
 import { createPublicKey, randomUUID, verify } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
 declare const __APP_VERSION__: string;
 
 const args = process.argv.slice(2);
+const execFileAsync = promisify(execFile);
 
 interface RuntimeBootstrap {
   token: string;
@@ -83,7 +88,7 @@ function createConfiguredPythonSource(privateHome: string): ManagedMcpCapability
   }
   return new ManagedMcpCapabilitySource({
     sourceInstanceId: 'builtin.python.echo',
-    packageVersion: '0.1.0',
+    packageVersion: process.env.YUANPU_PYTHON_MCP_VERSION ?? '0.1.0',
     command: executable,
     args: pythonArgs,
     cwd: root,
@@ -182,6 +187,30 @@ async function serve(): Promise<void> {
     home.config.workingDirectory,
     home.config.catalogUrl,
   );
+  let artifacts: CapabilityArtifactManager | undefined;
+  const trustRootFile = process.env.YUANPU_CAPABILITY_TRUST_ROOT_FILE;
+  if (trustRootFile) {
+    const trustRoot = JSON.parse(await readFile(resolve(trustRootFile), 'utf8')) as ArtifactTrustRoot;
+    artifacts = new CapabilityArtifactManager(home.packagesPath, {
+      runtimeVersion: __APP_VERSION__,
+      trustRoots: [trustRoot],
+    });
+    const active = await artifacts.active('builtin.python.echo');
+    if (active) {
+      process.env.YUANPU_PYTHON_MCP_EXECUTABLE = active.entrypoint;
+      process.env.YUANPU_PYTHON_MCP_ROOT = active.installPath;
+      process.env.YUANPU_PYTHON_MCP_ARGS = '[]';
+      process.env.YUANPU_PYTHON_MCP_VERSION = active.version;
+    } else {
+      const bundledManifest = JSON.parse(
+        await readFile(join(dirname(resolve(trustRootFile)), 'manifest.json'), 'utf8'),
+      ) as { version?: unknown };
+      if (typeof bundledManifest.version !== 'string') {
+        throw new Error('Bundled capability manifest version is invalid.');
+      }
+      process.env.YUANPU_PYTHON_MCP_VERSION = bundledManifest.version;
+    }
+  }
   const approvals = await CapabilityApprovalStore.open(join(home.appPath, 'approvals.json'));
   const capabilitySources = [createDemoCapabilitySource()];
   const pythonSource = createConfiguredPythonSource(
@@ -357,7 +386,24 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.plugins && request.method === 'GET') {
-        response.end(JSON.stringify(await plugins.list()));
+        const installed = await plugins.list();
+        const installedArtifacts = artifacts
+          ? (await artifacts.list()).map((item) => {
+            const active = item.versions[item.activeVersion]!;
+            return {
+              name: item.id,
+              version: active.version,
+              description: '自包含 Python MCP 能力包',
+              source: active.manifestUrl ? `artifact:${active.manifestUrl}` : `artifact:${item.id}`,
+              installPath: active.installPath,
+              enabled: true,
+              installedAt: active.installedAt,
+              configurable: false,
+              configStatus: 'unsupported' as const,
+            };
+          })
+          : [];
+        response.end(JSON.stringify([...installed, ...installedArtifacts]));
         return;
       }
 
@@ -407,7 +453,53 @@ async function serve(): Promise<void> {
           response.end(JSON.stringify({ error: '插件来源不能为空。' }));
           return;
         }
-        const plugin = await plugins.install(body.source.trim());
+        const source = body.source.trim();
+        if (source.startsWith('artifact:')) {
+          if (!artifacts) throw new Error('当前宿主没有配置能力制品信任根。');
+          const manifestUrl = source.slice('artifact:'.length);
+          const parsedManifestUrl = new URL(manifestUrl);
+          if (!['https:', 'http:'].includes(parsedManifestUrl.protocol)) {
+            throw new Error('能力 manifest 必须使用 HTTP(S) 地址。');
+          }
+          const manifestResponse = await fetch(parsedManifestUrl, {
+            headers: { accept: 'application/json', 'user-agent': `YuanpuAgent/${__APP_VERSION__}` },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!manifestResponse.ok) throw new Error(`能力 manifest 下载失败：HTTP ${manifestResponse.status}`);
+          const manifest = await manifestResponse.json() as import('@yuanpu-agent/protocol').CapabilityPackageManifest;
+          const installed = await artifacts.install(manifest, {
+            manifestUrl: manifestResponse.url,
+            healthCheck: async (entrypoint, installPath) => {
+              const { stdout } = await execFileAsync(entrypoint, ['--version'], {
+                cwd: installPath,
+                timeout: 10_000,
+                env: {
+                  PATH: dirname(entrypoint),
+                  ...(process.platform === 'win32' && process.env.SYSTEMROOT
+                    ? { SYSTEMROOT: process.env.SYSTEMROOT }
+                    : {}),
+                },
+              });
+              if (stdout.trim().replace(/^v/, '') !== manifest.version) {
+                throw new Error(`能力健康检查版本不匹配：${stdout.trim()}`);
+              }
+            },
+          });
+          resetChat();
+          response.end(JSON.stringify({
+            name: manifest.id,
+            version: manifest.version,
+            description: '自包含 Python MCP 能力包',
+            source,
+            installPath: installed.installPath,
+            enabled: true,
+            installedAt: installed.installedAt,
+            configurable: Boolean(manifest.configSchema),
+            configStatus: manifest.configSchema ? 'optional' : 'unsupported',
+          }));
+          return;
+        }
+        const plugin = await plugins.install(source);
         const pluginErrors = await inspectPlugin(plugin);
         if (pluginErrors.length > 0) {
           const message = pluginErrors.map((diagnostic) => diagnostic.error).join('\n');

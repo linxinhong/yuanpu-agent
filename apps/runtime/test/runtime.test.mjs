@@ -171,6 +171,12 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     body: JSON.stringify({ source: 'npm:pi-example@latest' }),
   });
   const floatingPluginError = await floatingPluginInstall.json();
+  const artifactInstall = await fetch(`http://${ready.host}:${ready.port}/v1/plugins/install`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'artifact:https://catalog.example.test/manifest.json' }),
+  });
+  const artifactInstallError = await artifactInstall.json();
   const enablePlugin = await fetch(`http://${ready.host}:${ready.port}/v1/plugins/state`, {
     method: 'POST',
     headers: { ...headers, 'content-type': 'application/json' },
@@ -214,6 +220,8 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.equal(invalidPluginInstall.status, 400);
   assert.equal(floatingPluginInstall.status, 500);
   assert.match(floatingPluginError.error, /精确版本/);
+  assert.equal(artifactInstall.status, 500);
+  assert.match(artifactInstallError.error, /信任根/);
   assert.equal('hint' in floatingPluginError, false);
   assert.equal(enablePlugin.status, 200);
   assert.equal(pluginConfig.kind, 'mcp');

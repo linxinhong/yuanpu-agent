@@ -10,14 +10,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  capability-signing-gate:
+    name: Require production capability signing
+    runs-on: ubuntu-24.04
+    env:
+      SIGNING_KEY: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_BASE64 }}
+      SIGNING_KEY_ID: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_ID }}
+      ARTIFACT_BASE_URL: ${{ secrets.YUANPU_ARTIFACT_BASE_URL }}
+    steps:
+      - name: Refuse ephemeral release signing
+        run: |
+          test -n "$SIGNING_KEY"
+          test -n "$SIGNING_KEY_ID"
+          test -n "$ARTIFACT_BASE_URL"
+
   native-artifacts:
+    needs: capability-signing-gate
     uses: ./.github/workflows/runtime-bundle.yml
+    secrets: inherit
     with:
       artifact-prefix: yuanpu-agent-native
       retention-days: 7
 
   desktop-artifacts:
+    needs: capability-signing-gate
     uses: ./.github/workflows/desktop-bundle.yml
+    secrets: inherit
     with:
       artifact-prefix: yuanpu-agent-desktop
       retention-days: 7
@@ -52,6 +70,14 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node apps/runtime/scripts/native/produce-manifest.mjs dist-release "$RELEASE_TAG"
+
+      - name: Produce signed Python capability manifest
+        env:
+          YUANPU_ARTIFACT_SIGNING_KEY_BASE64: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_BASE64 }}
+          YUANPU_ARTIFACT_SIGNING_KEY_ID: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_ID }}
+          YUANPU_ARTIFACT_BASE_URL: ${{ secrets.YUANPU_ARTIFACT_BASE_URL }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node apps/python-capabilities/scripts/produce-release-manifest.mjs dist-release "$RELEASE_TAG"
 
       - name: Create GitHub Release
         env:

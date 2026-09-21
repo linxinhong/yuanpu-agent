@@ -22,7 +22,8 @@ try {
       PATH: isolatedPath,
     },
   }).trim();
-  assert.equal(result, '0.1.0');
+  const manifest = JSON.parse(await readFile(join(root, 'dist-artifact', 'manifest.json'), 'utf8'));
+  assert.equal(result, manifest.version);
   const trust = JSON.parse(await readFile(join(root, 'dist-artifact', 'bundle', 'trust-root.json'), 'utf8'));
   assert.equal(typeof trust.publicKeyPem, 'string');
   console.log(`Self-contained Python artifact smoke passed for ${process.platform}-${process.arch}`);

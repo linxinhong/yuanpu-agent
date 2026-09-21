@@ -42,6 +42,7 @@ export interface InstalledArtifactVersion {
   installedAt: string;
   issuedAt: string;
   target: string;
+  manifestUrl?: string;
 }
 
 export interface InstalledArtifactPackage {
@@ -59,7 +60,7 @@ interface ArtifactState {
 
 export interface ArtifactInstallOptions {
   allowDowngrade?: boolean;
-  healthCheck?: (entrypoint: string, installPath: string) => Promise<void>;
+  healthCheck: (entrypoint: string, installPath: string) => Promise<void>;
   manifestUrl?: string;
   signal?: AbortSignal;
 }
@@ -188,12 +189,35 @@ export class CapabilityArtifactManager {
       mkdir(this.artifactsRoot, { recursive: true }),
       mkdir(this.stagingRoot, { recursive: true }),
     ]);
-    if (!await exists(this.statePath)) await writeJsonAtomic(this.statePath, initialState());
+    if (!await exists(this.statePath)) {
+      try {
+        const handle = await open(this.statePath, 'wx', 0o600);
+        try {
+          await handle.writeFile(`${JSON.stringify(initialState(), null, 2)}\n`);
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+    }
   }
 
   private async readState(): Promise<ArtifactState> {
     await this.ensure();
-    const state = JSON.parse(await readFile(this.statePath, 'utf8')) as ArtifactState;
+    let state: ArtifactState | undefined;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        state = JSON.parse(await readFile(this.statePath, 'utf8')) as ArtifactState;
+        break;
+      } catch (error) {
+        lastError = error;
+        await delay(10);
+      }
+    }
+    if (!state) throw lastError;
     if (state.schemaVersion !== STATE_VERSION || !state.packages || typeof state.packages !== 'object') {
       throw new Error(`Invalid artifact state: ${this.statePath}`);
     }
@@ -210,6 +234,7 @@ export class CapabilityArtifactManager {
     if (manifest.signature.algorithm !== 'ed25519') throw new Error('Unsupported manifest signature algorithm.');
     safeSegment(manifest.id, 'Capability id');
     safeSegment(manifest.version, 'Capability version');
+    compareVersions(manifest.version, manifest.version);
     const trustedKey = this.trustRoots.get(manifest.signature.keyId);
     if (!trustedKey) throw new Error(`Untrusted manifest signing key: ${manifest.signature.keyId}`);
     const valid = verifySignature(
@@ -241,7 +266,7 @@ export class CapabilityArtifactManager {
 
   private async acquireLock(signal?: AbortSignal): Promise<() => Promise<void>> {
     await this.ensure();
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    for (let attempt = 0; attempt < 4_800; attempt += 1) {
       try {
         const handle = await open(this.lockPath, 'wx', 0o600);
         const token = randomUUID();
@@ -272,7 +297,24 @@ export class CapabilityArtifactManager {
         try {
           const lockStat = await stat(this.lockPath);
           if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
-            await rm(this.lockPath, { force: true });
+            const snapshot = await readFile(this.lockPath, 'utf8');
+            const quarantine = `${this.lockPath}.${randomUUID()}.stale`;
+            try {
+              await rename(this.lockPath, quarantine);
+              const moved = await readFile(quarantine, 'utf8');
+              if (moved === snapshot) {
+                await rm(quarantine, { force: true });
+              } else {
+                try {
+                  await rename(quarantine, this.lockPath);
+                } catch {
+                  // A new owner won the path; preserve its lock and discard only our quarantine.
+                  await rm(quarantine, { force: true });
+                }
+              }
+            } catch (reclaimError) {
+              if ((reclaimError as NodeJS.ErrnoException).code !== 'ENOENT') throw reclaimError;
+            }
             continue;
           }
         } catch (statError) {
@@ -367,7 +409,7 @@ export class CapabilityArtifactManager {
 
   async install(
     manifest: CapabilityPackageManifest,
-    installOptions: ArtifactInstallOptions = {},
+    installOptions: ArtifactInstallOptions,
   ): Promise<InstalledArtifactVersion> {
     this.verifyManifest(manifest);
     const target = this.selectTarget(manifest);
@@ -397,7 +439,7 @@ export class CapabilityArtifactManager {
         throw new Error('Artifact entrypoint is missing or outside the package.');
       }
       if (this.platform !== 'win32') await chmod(entrypoint, 0o755);
-      await installOptions.healthCheck?.(entrypoint, unpacked);
+      await installOptions.healthCheck(entrypoint, unpacked);
 
       const targetName = `${this.platform}-${this.arch}`;
       const installPath = join(
@@ -420,6 +462,7 @@ export class CapabilityArtifactManager {
         installedAt: new Date().toISOString(),
         issuedAt: manifest.issuedAt,
         target: targetName,
+        ...(installOptions.manifestUrl ? { manifestUrl: installOptions.manifestUrl } : {}),
       };
       const versions = { ...(previous?.versions ?? {}), [manifest.version]: installed };
       state.packages[manifest.id] = {

@@ -15,6 +15,14 @@ function writeJson(response: import('node:http').ServerResponse, status: number,
   response.end(JSON.stringify(value));
 }
 
+function safeDecode(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface CatalogServerOptions {
   artifactRoot?: string;
 }
@@ -26,11 +34,16 @@ async function serveCapabilityArtifact(
 ): Promise<boolean> {
   const match = pathname.match(/^\/v1\/capability-packages\/([^/]+)\/(manifest|artifacts\/([^/]+))$/);
   if (!match) return false;
-  if (!artifactRoot || decodeURIComponent(match[1]!) !== 'builtin.python.echo') {
+  const packageId = safeDecode(match[1]!);
+  if (packageId === undefined || (match[3] && safeDecode(match[3]) === undefined)) {
+    writeJson(response, 400, { error: 'Malformed capability artifact path' });
+    return true;
+  }
+  if (!artifactRoot || packageId !== 'builtin.python.echo') {
     writeJson(response, 404, { error: 'Capability artifact not published' });
     return true;
   }
-  const filename = match[2] === 'manifest' ? 'manifest.json' : decodeURIComponent(match[3]!);
+  const filename = match[2] === 'manifest' ? 'manifest.json' : safeDecode(match[3]!)!;
   if (basename(filename) !== filename) {
     writeJson(response, 400, { error: 'Invalid artifact filename' });
     return true;
@@ -42,6 +55,23 @@ async function serveCapabilityArtifact(
       const manifest = JSON.parse(await readFile(path, 'utf8')) as { id?: unknown };
       if (manifest.id !== 'builtin.python.echo') throw new Error('Published manifest id mismatch.');
       writeJson(response, 200, manifest);
+      return true;
+    }
+    const manifest = JSON.parse(await readFile(resolve(artifactRoot, 'manifest.json'), 'utf8')) as {
+      artifacts?: Array<{ url?: unknown }>;
+    };
+    const allowedFiles = new Set((manifest.artifacts ?? []).flatMap((artifact) => {
+      if (typeof artifact.url !== 'string') return [];
+      try {
+        const url = new URL(artifact.url, 'https://manifest.invalid/');
+        const allowed = safeDecode(basename(url.pathname));
+        return allowed ? [allowed] : [];
+      } catch {
+        return [];
+      }
+    }));
+    if (!allowedFiles.has(filename)) {
+      writeJson(response, 404, { error: 'Artifact is not referenced by the signed manifest' });
       return true;
     }
     const metadata = await stat(path);
@@ -84,7 +114,11 @@ export function createCatalogServer(
     }
     const match = request.method === 'GET' && url.pathname.match(/^\/v1\/catalog\/items\/([^/]+)$/);
     if (match) {
-      const id = decodeURIComponent(match[1]!);
+      const id = safeDecode(match[1]!);
+      if (id === undefined) {
+        writeJson(response, 400, { error: 'Malformed catalog item id' });
+        return;
+      }
       const item = items.find((candidate) => candidate.id === id);
       writeJson(response, item ? 200 : 404, item ?? { error: 'Skill not found' });
       return;

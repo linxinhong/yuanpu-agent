@@ -410,7 +410,12 @@ export class PluginManager {
       });
       if (!response.ok) throw new Error(`技能市场搜索失败：HTTP ${response.status}`);
       const body = await response.json() as { items?: PluginSearchResult[] };
-      return (body.items ?? []).slice(0, Math.min(Math.max(limit, 1), 20));
+      return (body.items ?? []).slice(0, Math.min(Math.max(limit, 1), 20)).map((item) => ({
+        ...item,
+        source: item.source.startsWith('artifact:')
+          ? `artifact:${new URL(item.source.slice('artifact:'.length), response.url).toString()}`
+          : item.source,
+      }));
     }
     const terms = ['keywords:pi-package', query.trim()].filter(Boolean).join(' ');
     const url = new URL('/-/v1/search', this.registryUrl);

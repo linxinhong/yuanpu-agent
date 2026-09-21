@@ -15,6 +15,7 @@ import {
 
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
+const healthy = async () => {};
 
 async function fixtureRoot(t) {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-artifacts-'));
@@ -103,8 +104,8 @@ test('installs signed artifacts atomically, stays offline after install, and pre
   const instance = manager(root);
   const manifest = signedManifest({ url: 'artifacts/archive', ...fixture });
   const [first, concurrent] = await Promise.all([
-    instance.install(manifest, { manifestUrl: source.url('/manifest') }),
-    instance.install(manifest, { manifestUrl: source.url('/manifest') }),
+    instance.install(manifest, { manifestUrl: source.url('/manifest'), healthCheck: healthy }),
+    instance.install(manifest, { manifestUrl: source.url('/manifest'), healthCheck: healthy }),
   ]);
   assert.equal(first.entrypoint, concurrent.entrypoint);
   assert.equal(source.requests(), 1);
@@ -124,7 +125,7 @@ test('rejects bad signatures, incompatible runtimes, stale replay, and implicit 
   const instance = manager(root);
   const bad = signedManifest({ url: source.url('/artifact'), ...fixture });
   bad.signature.value = Buffer.from('not-a-signature').toString('base64');
-  await assert.rejects(instance.install(bad), /signature is invalid/);
+  await assert.rejects(instance.install(bad, { healthCheck: healthy }), /signature is invalid/);
   assert.equal(source.requests(), 0);
 
   const incompatible = signedManifest({
@@ -132,21 +133,21 @@ test('rejects bad signatures, incompatible runtimes, stale replay, and implicit 
     ...fixture,
     runtimeCompatibility: { minimum: '2.0.0' },
   });
-  await assert.rejects(instance.install(incompatible), /incompatible/);
+  await assert.rejects(instance.install(incompatible, { healthCheck: healthy }), /incompatible/);
   assert.equal(source.requests(), 0);
 
   const current = signedManifest({
     url: source.url('/artifact'), ...fixture, version: '2.0.0', issuedAt: '2026-09-21T02:00:00.000Z',
   });
-  await instance.install(current);
+  await instance.install(current, { healthCheck: healthy });
   const replay = signedManifest({
     url: source.url('/artifact'), ...fixture, version: '3.0.0', issuedAt: '2026-09-21T01:00:00.000Z',
   });
-  await assert.rejects(instance.install(replay), /stale.*replay/i);
+  await assert.rejects(instance.install(replay, { healthCheck: healthy }), /stale.*replay/i);
   const downgrade = signedManifest({
     url: source.url('/artifact'), ...fixture, version: '1.0.0', issuedAt: '2026-09-21T03:00:00.000Z',
   });
-  await assert.rejects(instance.install(downgrade), /downgrade requires explicit/);
+  await assert.rejects(instance.install(downgrade, { healthCheck: healthy }), /downgrade requires explicit/);
   assert.equal((await instance.active('builtin.python.echo')).version, '2.0.0');
 });
 
@@ -162,15 +163,21 @@ test('rejects traversal prefixes, links, and extraction bombs without activating
   ]));
   const instance = manager(root, { maxUnpackedBytes: 32 });
   await assert.rejects(
-    instance.install(signedManifest({ url: source.url('/traversal'), ...traversal })),
+    instance.install(signedManifest({ url: source.url('/traversal'), ...traversal }), { healthCheck: healthy }),
     /Unsafe archive entry/,
   );
   await assert.rejects(
-    instance.install(signedManifest({ url: source.url('/linked'), ...linked, version: '1.0.1' })),
+    instance.install(
+      signedManifest({ url: source.url('/linked'), ...linked, version: '1.0.1' }),
+      { healthCheck: healthy },
+    ),
     /Unsafe archive entry/,
   );
   await assert.rejects(
-    instance.install(signedManifest({ url: source.url('/oversized'), ...oversized, version: '1.0.2' })),
+    instance.install(
+      signedManifest({ url: source.url('/oversized'), ...oversized, version: '1.0.2' }),
+      { healthCheck: healthy },
+    ),
     /extraction exceeded/,
   );
   assert.equal(await instance.active('builtin.python.echo'), undefined);
@@ -182,7 +189,7 @@ test('retains immutable versions for Windows-safe rollback and recovers from fai
   const source = await artifactServer(t, new Map([['/artifact', fixture.body]]));
   const instance = manager(root);
   const first = signedManifest({ url: source.url('/artifact'), ...fixture, version: '1.0.0' });
-  await instance.install(first);
+  await instance.install(first, { healthCheck: healthy });
   const second = signedManifest({
     url: source.url('/artifact'), ...fixture, version: '2.0.0', issuedAt: '2026-09-21T01:00:00.000Z',
   });
@@ -191,7 +198,7 @@ test('retains immutable versions for Windows-safe rollback and recovers from fai
     /crash during switch/,
   );
   assert.equal((await instance.active('builtin.python.echo')).version, '1.0.0');
-  await instance.install(second);
+  await instance.install(second, { healthCheck: healthy });
   assert.equal((await instance.rollback('builtin.python.echo', '1.0.0')).version, '1.0.0');
   assert.equal(await readFile(join(root, 'packages', 'artifacts', 'builtin.python.echo', '2.0.0', `${process.platform}-${process.arch}`, 'server'), 'utf8'), 'x'.repeat(12));
 });
@@ -214,4 +221,13 @@ test('reports duplicate ownership without changing legacy pi-mcp-adapter configu
   assert.deepEqual(JSON.parse(await readFile(join(root, 'agent', 'mcp.json'), 'utf8')), {
     mcpServers: { docs: {}, legacy: {} },
   });
+});
+
+test('concurrent first readers initialize state once without truncation', async (t) => {
+  const root = await fixtureRoot(t);
+  const instances = Array.from({ length: 20 }, () => manager(root));
+  const states = await Promise.all(instances.map((instance) => instance.list()));
+  assert.deepEqual(states, Array.from({ length: 20 }, () => []));
+  const state = JSON.parse(await readFile(join(root, 'packages', 'artifact-state.json'), 'utf8'));
+  assert.deepEqual(state, { schemaVersion: 1, packages: {} });
 });

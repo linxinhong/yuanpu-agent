@@ -161,6 +161,31 @@ export class RuntimeManager {
     return { executable: (await this.managedExecutable()) ?? this.packagedExecutable(), args: [] };
   }
 
+  private capabilityEnvironment(): NodeJS.ProcessEnv {
+    if (this.packaged) {
+      const root = join(this.resourcesPath, 'capabilities', 'builtin.python.echo', 'YuanpuEchoMcp');
+      return {
+        YUANPU_PYTHON_MCP_EXECUTABLE: join(root, process.platform === 'win32' ? 'YuanpuEchoMcp.exe' : 'YuanpuEchoMcp'),
+        YUANPU_PYTHON_MCP_ROOT: root,
+        YUANPU_PYTHON_MCP_ARGS: '[]',
+        YUANPU_CAPABILITY_TRUST_ROOT_FILE: join(
+          this.resourcesPath,
+          'capabilities',
+          'builtin.python.echo',
+          'trust-root.json',
+        ),
+      };
+    }
+    const pythonRoot = resolve(this.appPath, '../python-capabilities');
+    return {
+      YUANPU_PYTHON_MCP_EXECUTABLE: process.platform === 'win32'
+        ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
+        : join(pythonRoot, '.venv', 'bin', 'python'),
+      YUANPU_PYTHON_MCP_ROOT: pythonRoot,
+      YUANPU_PYTHON_MCP_ARGS: JSON.stringify(['-m', 'yuanpu_echo_mcp']),
+    };
+  }
+
   async start(): Promise<RuntimeReady> {
     if (this.ready) return this.ready;
     const command = await this.command();
@@ -170,8 +195,9 @@ export class RuntimeManager {
         command.executable,
         [...command.args, '--serve', '--port', '0'],
         {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: { ...process.env, ...this.capabilityEnvironment() },
         },
       );
       const approvalPublicKey = this.approvalKeyPair.publicKey.export({

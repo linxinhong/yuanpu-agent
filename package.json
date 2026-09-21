@@ -25,7 +25,7 @@
     "start": "pnpm run dev",
     "start:catalog": "pnpm --filter @yuanpu-agent/catalog-server run start",
     "sync:pi": "node scripts/sync-pi-packages.mjs",
-    "test": "pnpm -r --filter '!@earendil-works/*' --if-present run test",
+    "test": "node --test apps/python-capabilities/scripts/*.test.mjs && pnpm -r --filter '!@earendil-works/*' --if-present run test",
     "typecheck": "pnpm run build:pi && pnpm run typecheck:yuanpu",
     "typecheck:yuanpu": "pnpm -r --filter '!@earendil-works/*' run typecheck"
   },
