@@ -58,6 +58,7 @@ Python 制品不会写入 Pi `settings.packages`。`detectMcpOwnershipConflicts(
 - `GET /v1/capability-packages/builtin.python.echo/artifacts/<filename>`
 
 服务端通过 `YUANPU_ARTIFACT_ROOT` 指向已经签名的输出目录；服务只原样返回 manifest 和不可变制品，不代替客户端验签。生产发布时构建使用的签名 URL 必须与实际制品地址一致。
+开发 manifest 使用相对的 `artifacts/<filename>`；安装器以实际 manifest URL 为基址解析，但验签仍针对原始相对 URL，不会通过改写字段破坏签名。
 
 ## CI 平台
 

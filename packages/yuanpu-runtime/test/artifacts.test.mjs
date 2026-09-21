@@ -92,7 +92,7 @@ function manager(root, overrides = {}) {
 test('installs signed artifacts atomically, stays offline after install, and preserves Pi settings/config', async (t) => {
   const root = await fixtureRoot(t);
   const fixture = await archiveFixture(root);
-  const source = await artifactServer(t, new Map([['/artifact', fixture.body]]));
+  const source = await artifactServer(t, new Map([['/artifacts/archive', fixture.body]]));
   const settingsPath = join(root, 'agent', 'settings.json');
   const configPath = join(root, 'packages', 'config', 'builtin.python.echo', 'user.json');
   await mkdir(join(root, 'agent'), { recursive: true });
@@ -101,10 +101,10 @@ test('installs signed artifacts atomically, stays offline after install, and pre
   await writeFile(configPath, JSON.stringify({ token: '${ECHO_TOKEN}' }));
 
   const instance = manager(root);
-  const manifest = signedManifest({ url: source.url('/artifact'), ...fixture });
+  const manifest = signedManifest({ url: 'artifacts/archive', ...fixture });
   const [first, concurrent] = await Promise.all([
-    instance.install(manifest),
-    instance.install(manifest),
+    instance.install(manifest, { manifestUrl: source.url('/manifest') }),
+    instance.install(manifest, { manifestUrl: source.url('/manifest') }),
   ]);
   assert.equal(first.entrypoint, concurrent.entrypoint);
   assert.equal(source.requests(), 1);

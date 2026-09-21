@@ -60,11 +60,13 @@ interface ArtifactState {
 export interface ArtifactInstallOptions {
   allowDowngrade?: boolean;
   healthCheck?: (entrypoint: string, installPath: string) => Promise<void>;
+  manifestUrl?: string;
   signal?: AbortSignal;
 }
 
 export interface CapabilityArtifactManagerOptions {
   runtimeVersion: string;
+  capabilityContractVersion?: number;
   trustRoots: readonly ArtifactTrustRoot[];
   platform?: NodeJS.Platform;
   arch?: string;
@@ -202,6 +204,9 @@ export class CapabilityArtifactManager {
     if (manifest.manifestVersion !== 1 || manifest.kind !== 'python-mcp') {
       throw new Error('Unsupported capability manifest kind or version.');
     }
+    if (manifest.capabilityContractVersion !== (this.options.capabilityContractVersion ?? 1)) {
+      throw new Error(`Unsupported capability contract version: ${manifest.capabilityContractVersion}.`);
+    }
     if (manifest.signature.algorithm !== 'ed25519') throw new Error('Unsupported manifest signature algorithm.');
     safeSegment(manifest.id, 'Capability id');
     safeSegment(manifest.version, 'Capability version');
@@ -280,8 +285,19 @@ export class CapabilityArtifactManager {
     throw new Error('Timed out waiting for the artifact install lock.');
   }
 
-  private async download(target: CapabilityArtifactTarget, path: string, signal?: AbortSignal): Promise<void> {
-    const response = await this.fetcher(target.url, { signal });
+  private async download(
+    target: CapabilityArtifactTarget,
+    path: string,
+    signal?: AbortSignal,
+    manifestUrl?: string,
+  ): Promise<void> {
+    let artifactUrl = target.url;
+    try {
+      artifactUrl = new URL(target.url, manifestUrl).toString();
+    } catch {
+      throw new Error('Relative artifact URL requires the fetched manifest URL.');
+    }
+    const response = await this.fetcher(artifactUrl, { signal });
     if (!response.ok || !response.body) throw new Error(`Artifact download failed with HTTP ${response.status}.`);
     const declared = Number(response.headers.get('content-length'));
     if (Number.isFinite(declared) && declared > target.size) throw new Error('Artifact response exceeds signed size.');
@@ -374,7 +390,7 @@ export class CapabilityArtifactManager {
       }
 
       await mkdir(transaction, { recursive: true });
-      await this.download(target, archive, installOptions.signal);
+      await this.download(target, archive, installOptions.signal, installOptions.manifestUrl);
       await this.extract(archive, unpacked);
       const entrypoint = resolve(unpacked, target.entrypoint);
       if (!isInside(unpacked, entrypoint) || !await exists(entrypoint)) {

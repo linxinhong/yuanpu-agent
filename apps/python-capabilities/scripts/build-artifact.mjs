@@ -84,7 +84,7 @@ const manifest = {
     format: 'tar.gz',
     url: process.env.YUANPU_ARTIFACT_BASE_URL
       ? new URL(archiveName, `${process.env.YUANPU_ARTIFACT_BASE_URL.replace(/\/$/, '')}/`).toString()
-      : archiveName,
+      : `artifacts/${archiveName}`,
     size: archive.length,
     sha256: createHash('sha256').update(archive).digest('hex'),
     entrypoint: relative(bundleRoot, join(frozenRoot, executableName)).replaceAll('\\', '/'),
