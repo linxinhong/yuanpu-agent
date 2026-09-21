@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -230,4 +230,21 @@ test('concurrent first readers initialize state once without truncation', async 
   assert.deepEqual(states, Array.from({ length: 20 }, () => []));
   const state = JSON.parse(await readFile(join(root, 'packages', 'artifact-state.json'), 'utf8'));
   assert.deepEqual(state, { schemaVersion: 1, packages: {} });
+});
+
+test('reclaims only a stale lock whose recorded process is not alive', async (t) => {
+  const root = await fixtureRoot(t);
+  const fixture = await archiveFixture(root);
+  const source = await artifactServer(t, new Map([['/artifact', fixture.body]]));
+  const packagesRoot = join(root, 'packages');
+  await mkdir(packagesRoot, { recursive: true });
+  const lock = join(packagesRoot, '.artifact-install.lock');
+  await writeFile(lock, JSON.stringify({ token: 'crashed', pid: 99_999_999 }));
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  await utimes(lock, old, old);
+  const installed = await manager(root).install(
+    signedManifest({ url: source.url('/artifact'), ...fixture }),
+    { healthCheck: healthy },
+  );
+  assert.equal(installed.version, '1.0.0');
 });

@@ -93,6 +93,16 @@ function safeSegment(value: string, label: string): string {
   return value;
 }
 
+function processIsAlive(pid: unknown): boolean {
+  if (!Number.isSafeInteger(pid) || (pid as number) <= 0) return false;
+  try {
+    process.kill(pid as number, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`;
@@ -298,6 +308,16 @@ export class CapabilityArtifactManager {
           const lockStat = await stat(this.lockPath);
           if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
             const snapshot = await readFile(this.lockPath, 'utf8');
+            let owner: { pid?: unknown } = {};
+            try {
+              owner = JSON.parse(snapshot) as { pid?: unknown };
+            } catch {
+              // A stale, malformed lock has no verifiable live owner.
+            }
+            if (processIsAlive(owner.pid)) {
+              await delay(25, signal);
+              continue;
+            }
             const quarantine = `${this.lockPath}.${randomUUID()}.stale`;
             try {
               await rename(this.lockPath, quarantine);
@@ -307,9 +327,8 @@ export class CapabilityArtifactManager {
               } else {
                 try {
                   await rename(quarantine, this.lockPath);
-                } catch {
-                  // A new owner won the path; preserve its lock and discard only our quarantine.
-                  await rm(quarantine, { force: true });
+                } catch (restoreError) {
+                  throw new Error('Lock ownership changed during stale reclaim.', { cause: restoreError });
                 }
               }
             } catch (reclaimError) {
