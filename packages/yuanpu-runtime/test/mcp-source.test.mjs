@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { access } from 'node:fs/promises';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test, { after } from 'node:test';
 
 import {
   CapabilityError,
+  CapabilityApprovalStore,
   createDemoCapabilitySource,
   createYuanpuMcpServer,
   ManagedMcpCapabilitySource,
@@ -121,6 +121,47 @@ test('an unexpected MCP root exit terminates its process group', async () => {
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 400));
   assert.throws(() => process.kill(childPid, 0));
   await source.close();
+});
+
+test('a persisted approval is consumed before a real dispatch crash and is never replayed', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-mcp-dispatch-crash-'));
+  const approvalPath = join(root, 'approvals.json');
+  const markerPath = join(root, 'marker.txt');
+  const source = pythonSource({ executionTimeoutMs: 1_000 });
+  context.after(async () => {
+    await source.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  let store = await CapabilityApprovalStore.open(approvalPath, {
+    createId: () => 'dispatch-crash-approval',
+  });
+  let server = createYuanpuMcpServer([source], store);
+  const match = (await server.search({ query: 'write marker exit' })).matches
+    .find((capability) => capability.originalName === 'yuanpu_write_marker_and_exit');
+  assert.ok(match);
+  const execution = { name: match.name, arguments: { marker: markerPath } };
+  const hostContext = { sessionId: 'stage-verification', workspaceId: root };
+  let requestId;
+  await assert.rejects(server.execute(execution, hostContext), (error) => {
+    requestId = error.failure.approvalRequestId;
+    return error instanceof CapabilityError && error.failure.error === 'needs_approval';
+  });
+  await store.decide(requestId, 'approved');
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'result_unknown',
+  );
+  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
+  const persisted = JSON.parse(await readFile(approvalPath, 'utf8'));
+  assert.equal(persisted.records[0].status, 'consumed');
+
+  store = await CapabilityApprovalStore.open(approvalPath);
+  server = createYuanpuMcpServer([source], store);
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
+  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
 });
 
 test('untrusted MCP annotations cannot downgrade host approval policy', async (context) => {
