@@ -1,6 +1,7 @@
 # TASK-009 SEA 冻结 Python 能力冷启动修复
 
-- 基线：`b3ab550` 加本卡实现
+- 基线：`b3ab550`
+- 最终实现 revision：`49b73a1`（证据记录提交除外）
 - 环境：macOS 26.5.2 arm64；Node 24.15.0；pnpm 11.22.0；Python 3.13.12；PyInstaller 6.16.0
 - 检索：当前 host 未提供 zvec-grep，使用 scoped `rg` 检查根 scripts、Runtime MCP 启动与 workflow 入口。
 
@@ -12,7 +13,7 @@
 
 - 根级 `smoke:native` 现在先同步锁定依赖、构建冻结 Python 制品并执行其隔离 PATH smoke，因此不依赖遗留生成物。
 - 冻结 Python MCP 初始化预算为 15 秒，包含初始化与工具发现的宿主总预算为 20 秒；均为有限等待。
-- Runtime 正常启动、制品切换和 SEA smoke 使用相同总发现预算；工具发现失败会原子失效当前 client/transport 并终止进程组，下一次调用按既有重启预算重新连接。
+- Runtime 正常启动、制品切换和 SEA smoke 使用相同总发现预算；工具列表请求超时或异常会原子失效当前 client/transport 并终止进程组，下一次调用按既有重启预算重新连接。
 - runtime-bundle 在已经构建并验证 Python 制品后调用 package-level native smoke，避免 CI 重复冻结构建。
 
 ## 结果
@@ -25,3 +26,5 @@
 | 全仓回归 | PASS | `pnpm check`：desktop 2/2、server 2/2、runtime-kit 45/45、runtime 3/3。 |
 
 生产签名与 Linux/Windows hosted runner 不属于本修复卡，继续由 TASK-008 标为 UNVERIFIED。
+
+独立安全复核 `49b73a1` 为 **PASS**，无 HIGH/MEDIUM 残留；复核确认旧连接失败不会误伤并发建立的新连接，caller-only cancellation 也不会误杀共享 discovery。
