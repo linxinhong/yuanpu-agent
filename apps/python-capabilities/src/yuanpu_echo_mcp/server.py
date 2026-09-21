@@ -98,6 +98,16 @@ async def yuanpu_spawn_child_and_exit() -> dict[str, int]:
     return result
 
 
+async def yuanpu_write_marker_and_exit(marker: str) -> None:
+    """Persist one test marker, then exit before an MCP result can be sent."""
+
+    with open(marker, "a", encoding="utf-8") as marker_file:
+        marker_file.write("executed\n")
+        marker_file.flush()
+        os.fsync(marker_file.fileno())
+    os._exit(23)
+
+
 if os.environ.get("YUANPU_MCP_TEST_FIXTURES") == "1":
     mcp.tool(
         name="yuanpu_spawn_child",
@@ -121,6 +131,16 @@ if os.environ.get("YUANPU_MCP_TEST_FIXTURES") == "1":
         ),
         structured_output=True,
     )(yuanpu_spawn_child_and_exit)
+    mcp.tool(
+        name="yuanpu_write_marker_and_exit",
+        annotations=ToolAnnotations(
+            title="Write a lifecycle-test marker and exit",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )(yuanpu_write_marker_and_exit)
 
 
 def main() -> None:

@@ -87,6 +87,9 @@ test('runtime server exposes its protocol and greeting', async (context) => {
 
   const headers = { authorization: `Bearer ${token}` };
   const unauthorized = await fetch(`http://${ready.host}:${ready.port}/v1/health`);
+  const badToken = await fetch(`http://${ready.host}:${ready.port}/v1/health`, {
+    headers: { authorization: 'Bearer invalid-stage-verification-token' },
+  });
   const health = await fetch(`http://${ready.host}:${ready.port}/v1/health`, { headers }).then((response) =>
     response.json(),
   );
@@ -199,6 +202,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const unconfiguredError = await unconfiguredChat.json();
 
   assert.equal(unauthorized.status, 401);
+  assert.equal(badToken.status, 401);
   assert.equal(unauthorizedApprovals.status, 401);
   assert.deepEqual(approvals, []);
   assert.equal(invalidApprovalDecision.status, 400);

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { access } from 'node:fs/promises';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test, { after } from 'node:test';
 
 import {
   CapabilityError,
+  CapabilityApprovalStore,
   createDemoCapabilitySource,
   createYuanpuMcpServer,
   ManagedMcpCapabilitySource,
@@ -123,6 +123,48 @@ test('an unexpected MCP root exit terminates its process group', async () => {
   await source.close();
 });
 
+test('a persisted approval is consumed before a real dispatch crash and is never replayed', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-mcp-dispatch-crash-'));
+  const approvalPath = join(root, 'approvals.json');
+  const markerPath = join(root, 'marker.txt');
+  const source = pythonSource({ executionTimeoutMs: 1_000 });
+  context.after(async () => {
+    await source.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  let store = await CapabilityApprovalStore.open(approvalPath, {
+    createId: () => 'dispatch-crash-approval',
+  });
+  let server = createYuanpuMcpServer([source], store);
+  const search = await server.search({ query: 'write marker exit', limit: 20 });
+  const match = search.matches
+    .find((capability) => capability.originalName === 'yuanpu_write_marker_and_exit');
+  assert.ok(match, JSON.stringify(search));
+  const execution = { name: match.name, arguments: { marker: markerPath } };
+  const hostContext = { sessionId: 'stage-verification', workspaceId: root };
+  let requestId;
+  await assert.rejects(server.execute(execution, hostContext), (error) => {
+    requestId = error.failure.approvalRequestId;
+    return error instanceof CapabilityError && error.failure.error === 'needs_approval';
+  });
+  await store.decide(requestId, 'approved');
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'result_unknown',
+  );
+  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
+  const persisted = JSON.parse(await readFile(approvalPath, 'utf8'));
+  assert.equal(persisted.records[0].status, 'consumed');
+
+  store = await CapabilityApprovalStore.open(approvalPath);
+  server = createYuanpuMcpServer([source], store);
+  await assert.rejects(
+    server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
+  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
+});
+
 test('untrusted MCP annotations cannot downgrade host approval policy', async (context) => {
   const source = pythonSource({ riskPolicy: {} });
   context.after(() => source.close());
@@ -158,6 +200,31 @@ test('one failed source does not hide healthy capabilities', async () => {
   const repeated = await server.search({ query: 'echo' });
   assert.equal(repeated.matches.length, 1);
   assert.equal(hangingCalls, 2, 'a timed-out discovery can recover on a later search');
+});
+
+test('a real unresponsive process does not hide a healthy Python MCP source', async (context) => {
+  const healthy = pythonSource({ sourceInstanceId: 'test.real-python-healthy' });
+  const unresponsive = pythonSource({
+    sourceInstanceId: 'test.real-process-unresponsive',
+    args: ['-c', 'import time; time.sleep(10)'],
+    initializationTimeoutMs: 200,
+    restartLimit: 1,
+  });
+  context.after(async () => {
+    await Promise.all([healthy.close(), unresponsive.close()]);
+  });
+  const server = createYuanpuMcpServer(
+    [unresponsive, healthy],
+    undefined,
+    { discoveryTimeoutMs: 2_000 },
+  );
+  const result = await server.search({ query: 'echo', limit: 20 });
+  assert.equal(
+    result.matches.some((capability) => capability.sourceInstanceId === 'test.real-python-healthy'),
+    true,
+  );
+  assert.equal(result.failures?.[0]?.sourceInstanceId, 'test.real-process-unresponsive');
+  assert.match(result.failures?.[0]?.message ?? '', /initialization failed|timeout/i);
 });
 
 test('concurrent discovery waiters have independent cancellation', async () => {
