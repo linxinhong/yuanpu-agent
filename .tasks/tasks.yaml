@@ -338,7 +338,7 @@ tasks:
         - "TASK-009 修复干净构建后的冻结 Python MCP 首次冷启动发现超时，再恢复 TASK-008 验收。"
   - id: TASK-009
     title: "修复 SEA 冻结 Python 能力冷启动冒烟"
-    status: ready
+    status: in_progress
     goal: "让干净环境中的首次 SEA 能力冒烟稳定发现冻结 Python MCP，并让根级命令自行准备必需制品。"
     scope:
       in: ["Runtime 冻结 Python MCP 启动/发现超时预算","根级 native smoke 前置制品准备","首次冷启动与进程清理回归"]
@@ -360,11 +360,11 @@ tasks:
     investigation_hints: ["入口 package.json presmoke:native、apps/runtime/scripts/native/smoke.mjs、apps/runtime/src/index.ts createConfiguredPythonSource/createYuanpuMcpServer","TASK-008 在 e51c64c 串行复现：冻结制品首次发现约 3 秒被 CapabilityRegistry 总超时截断，重跑受系统缓存影响可通过","沿用健康检查 20 秒上限；增加针对失败隔离与子进程清理的最小回归"]
     escalation_conditions: ["若必须改变公共 MCP 契约或 Pi 上游实现则停止并报告","若 20 秒内仍无法稳定冷启动则保留失败证据，不提高为无界等待"]
     result:
-      owner: null
+      owner: "codex-yuanpu-61529-61529-88666-1628"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T15:59:30.468Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-repair"
+      branch: "task/task-009-sea-cold-start"
       evidence: []
       follow_up_candidates: []
