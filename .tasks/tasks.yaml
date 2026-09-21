@@ -260,7 +260,7 @@ tasks:
         - "TASK-008 补齐 Linux/Windows hosted runner、真实生产签名/公证与跨平台桌面验收；端口租约哈希碰撞仅保守失败。"
   - id: TASK-007
     title: "接通技能管理与审批界面"
-    status: ready
+    status: in_progress
     goal: "用户通过现有技能入口安装 Python 能力包并批准一次敏感调用。"
     scope:
       in: ["apps/app 技能详情/状态/更新与对话审批","desktop main/preload 窄接口及受信窗口验证","UI 操作流、API 联调和浏览器证据"]
@@ -282,12 +282,12 @@ tasks:
     investigation_hints: ["入口 apps/app/src/main.tsx、electron.d.ts，apps/desktop/src/{main,preload}.ts；设计兼容与界面流程节","按 UI Delivery 先展示现有页面上的操作方案并记录决定；新模式/布局先参考图，审批流程不得假定已批准","复用现有技能页，无需新前端框架；真实后端浏览器验证，构建通过不能替代"]
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
-      owner: null
+      owner: "codex-yuanpu-61529-61529"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T14:16:00.919Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
+      branch: "task/task-007-skill-ui"
       evidence: []
       follow_up_candidates: []
   - id: TASK-008
