@@ -1,6 +1,6 @@
 # TASK-008 跨平台技能安装与升级业务验收
 
-- 验收 revision：`bc83168828e5cb12203cfc471d58c969af6811f7`
+- 验收基线：`bc83168828e5cb12203cfc471d58c969af6811f7`；本地修复补充至 TASK-010 集成 revision `3907f35`
 - 本地环境：macOS 26.5.2 arm64；Node 24.15.0；pnpm 11.22.0；uv 0.11.9
 - 独立验收者：`/root/task005_business_verifier`
 - 检索：当前 host 未提供 zvec-grep，按仓库指令使用 scoped `rg` 定位 workflow、发布门、Runtime 更新与既有 S1–S7 证据；未创建索引。
@@ -34,7 +34,7 @@
 
 | 门 | 状态 | 观察 |
 | --- | --- | --- |
-| 当前 revision 的 hosted CI | UNVERIFIED | `bc83168` 相对 `origin/main` 超前 53 个提交，`gh run list --commit bc83168…` 无运行结果。不能用旧 revision 的 workflow 代替。 |
+| 当前 revision 的 hosted CI | UNVERIFIED | 集成 main 尚未推送，当前本地 revision 没有 GitHub Actions 运行结果。不能用旧 revision 的 workflow 代替。 |
 | Linux x64 / Windows x64 bundle | UNVERIFIED | workflow 声明了三平台矩阵，但当前 revision 没有托管 runner 产物与执行证据。 |
 | 生产能力签名 | FAIL-CLOSED / 未配置 | 清空生产密钥、公钥、key id、下载基址后 `verify-release-signing-env.mjs` 以 exit 1 拒绝发布；本地制品使用开发临时信任根，不是生产 Ed25519 信任链。 |
 | macOS Developer ID 与公证 | UNVERIFIED / 不可发布 | 本地 `.app` 为 ad-hoc 签名，`TeamIdentifier=not set`，`spctl` exit 1；没有 Developer ID 或公证票据。 |
@@ -43,7 +43,7 @@
 
 ## 独立复核与后续动作
 
-独立 verifier 在 `bc83168` 上确认 TASK-009 已清除 macOS 首次冷启动与进程清理阻塞，且应用内两个二进制均为 arm64 0.1.0；同时维持 **TASK-008 NOT PASS**。
+独立 verifier 在 `bc83168` 上确认 TASK-009 已清除 macOS 首次冷启动与进程清理阻塞，且应用内两个二进制均为 arm64 0.1.0。TASK-010 随后补齐 macOS 真实 SEA 分阶段更新回归；由于三平台 hosted runner、离线旅程和生产签名仍缺失，结论维持 **TASK-008 NOT PASS**。
 
 解除阻塞需要：
 
