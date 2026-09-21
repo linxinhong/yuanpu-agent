@@ -120,7 +120,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-004
     title: "接入受管 Python MCP 示例"
-    status: ready
+    status: in_progress
     goal: "真实 Python 子进程通过统一能力入口发现和执行，单源故障可隔离。"
     scope:
       in: ["capabilities MCP client、source 和进程生命周期","新增 apps/python-capabilities 示例及开发依赖锁定","apps/runtime 组合及 SEA 集成测试"]
@@ -146,12 +146,12 @@ tasks:
     investigation_hints: ["入口 capabilities/index.ts Promise.all、apps/runtime/src/index.ts demo 装配、pi/index.ts；新增 apps/python-capabilities 为待建路径","仅开发 fixture 可使用开发机 Python；生产自包含由后续制品卡负责；stdout 仅协议，环境变量最小化"]
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
-      owner: null
+      owner: "codex-yuanpu"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T08:23:04.437Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
+      branch: "task/task-004-python-mcp"
       evidence: []
       follow_up_candidates: []
   - id: TASK-005
