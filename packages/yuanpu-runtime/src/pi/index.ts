@@ -4,6 +4,7 @@ import {
   defineTool,
   ModelRuntime,
   SettingsManager,
+  type AgentToolResult,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
   type ToolDefinition,
@@ -27,8 +28,35 @@ const searchParameters = Type.Object({
 const executeParameters = Type.Object({
   name: Type.String({ minLength: 1 }),
   arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-  approvalToken: Type.Optional(Type.String()),
+  approvalRequestId: Type.Optional(Type.String()),
 }, { additionalProperties: false });
+
+function capabilityResultForPi(
+  result: Awaited<ReturnType<CapabilityToolClient['execute']>>,
+): AgentToolResult<Awaited<ReturnType<CapabilityToolClient['execute']>>> {
+  const content: AgentToolResult['content'] = [];
+  for (const block of result.content) {
+    if (block.type === 'text') {
+      content.push({ type: 'text', text: block.text });
+      continue;
+    }
+    if (block.type === 'image') {
+      content.push({ type: 'image', data: block.data, mimeType: block.mimeType });
+      continue;
+    }
+    content.push({
+      type: 'text' as const,
+      text: `[Unsupported MCP ${block.type} content preserved in tool details]`,
+    });
+  }
+  if (content.length === 0 && result.structuredContent) {
+    content.push({ type: 'text', text: JSON.stringify(result.structuredContent) });
+  }
+  if (result.isError) {
+    content.unshift({ type: 'text', text: '[The external capability reported an error]' });
+  }
+  return { content, details: result };
+}
 
 export function createYuanpuCapabilityTools(client: CapabilityToolClient): ToolDefinition[] {
   return [
@@ -54,13 +82,10 @@ export function createYuanpuCapabilityTools(client: CapabilityToolClient): ToolD
         const input = {
           name: params.name,
           arguments: params.arguments,
-          approvalToken: params.approvalToken,
+          approvalRequestId: params.approvalRequestId,
         } as ExecuteCapabilityInput;
         const result = await client.execute(input);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result.content) }],
-          details: result,
-        };
+        return capabilityResultForPi(result);
       },
     }),
   ];

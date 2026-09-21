@@ -1,9 +1,15 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import Ajv2020 from 'ajv/dist/2020.js';
+
 import {
+  CAPABILITY_ID_PREFIX,
   CAPABILITY_TOOL_NAMES,
   type CapabilityContext,
+  type CapabilityDefinition,
   type CapabilityDescriptor,
   type CapabilityFailure,
   type CapabilityRiskLevel,
+  type CapabilitySourceExecuteInput,
   type CapabilityToolClient,
   type CapabilityToolDefinition,
   type ExecuteCapabilityInput,
@@ -15,15 +21,17 @@ import {
 export * from './contracts.js';
 
 export interface CapabilitySource {
-  list(context: CapabilityContext): Promise<CapabilityDescriptor[]>;
+  /** Stable for this configured source, not merely its package display name. */
+  readonly sourceInstanceId: string;
+  list(context: CapabilityContext): Promise<CapabilityDefinition[]>;
   resolve(
-    name: string,
+    originalName: string,
     context: CapabilityContext,
-  ): Promise<CapabilityDescriptor | undefined>;
+  ): Promise<CapabilityDefinition | undefined>;
   execute(
-    input: ExecuteCapabilityInput,
+    input: CapabilitySourceExecuteInput,
     context: CapabilityContext,
-  ): Promise<ExecuteCapabilityResult | undefined>;
+  ): Promise<CallToolResult | undefined>;
 }
 
 export class CapabilityError extends Error {
@@ -45,26 +53,97 @@ const riskOrder: Record<CapabilityRiskLevel, number> = {
   R5: 5,
 };
 
+const schemaValidator = new Ajv2020({ allErrors: true, strict: false });
+
+function encodeCapabilityPart(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64url');
+}
+
+function decodeCapabilityPart(value: string): string | undefined {
+  try {
+    const decoded = Buffer.from(value, 'base64url').toString('utf8');
+    return encodeCapabilityPart(decoded) === value ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function createCapabilityId(sourceInstanceId: string, originalName: string): string {
+  if (!sourceInstanceId.trim() || !originalName.trim()) {
+    throw new Error('Capability source and tool names must be non-empty.');
+  }
+  return `${CAPABILITY_ID_PREFIX}:${encodeCapabilityPart(sourceInstanceId)}:${encodeCapabilityPart(originalName)}`;
+}
+
+export function parseCapabilityId(id: string): {
+  sourceInstanceId: string;
+  originalName: string;
+} | undefined {
+  const [prefix, sourcePart, namePart, extra] = id.split(':');
+  if (prefix !== CAPABILITY_ID_PREFIX || !sourcePart || !namePart || extra !== undefined) return undefined;
+  const sourceInstanceId = decodeCapabilityPart(sourcePart);
+  const originalName = decodeCapabilityPart(namePart);
+  return sourceInstanceId && originalName ? { sourceInstanceId, originalName } : undefined;
+}
+
+function describe(source: CapabilitySource, definition: CapabilityDefinition): CapabilityDescriptor {
+  return {
+    ...definition,
+    name: createCapabilityId(source.sourceInstanceId, definition.name),
+    sourceInstanceId: source.sourceInstanceId,
+    originalName: definition.name,
+  };
+}
+
 function tokenize(value: string): string[] {
-  return value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return value.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 }
 
 function scoreCapability(capability: CapabilityDescriptor, query: string[]): number {
-  const nameTokens = tokenize(capability.name);
+  const nameTokens = tokenize(`${capability.originalName} ${capability.name}`);
   const descriptionTokens = tokenize(capability.description);
   return query.reduce((score, token) => {
     if (nameTokens.includes(token)) return score + 5;
     if (nameTokens.some((candidate) => candidate.startsWith(token))) return score + 3;
     if (descriptionTokens.includes(token)) return score + 2;
+    if (descriptionTokens.some((candidate) => candidate.includes(token))) return score + 1;
     return score;
   }, 0);
 }
 
+function validateArguments(capability: CapabilityDescriptor, value: unknown): void {
+  let validate;
+  try {
+    validate = schemaValidator.compile(capability.inputSchema);
+  } catch (error) {
+    throw new CapabilityError({
+      error: 'execution_failed',
+      message: `Capability ${capability.name} published an invalid input schema: ${error instanceof Error ? error.message : String(error)}`,
+      retry: { search: false, action: 'contact_admin' },
+    });
+  }
+  if (!validate(value ?? {})) {
+    const detail = schemaValidator.errorsText(validate.errors, { separator: '; ' });
+    throw new CapabilityError({
+      error: 'invalid_arguments',
+      message: `Arguments for ${capability.name} do not match its schema: ${detail}`,
+      retry: { search: false, action: 'correct_arguments' },
+    });
+  }
+}
+
 export class CapabilityRegistry implements CapabilityToolClient {
-  readonly #sources: CapabilitySource[];
+  readonly #sources: Map<string, CapabilitySource>;
 
   constructor(sources: CapabilitySource[] = []) {
-    this.#sources = [...sources];
+    this.#sources = new Map();
+    for (const source of sources) {
+      if (!source.sourceInstanceId.trim()) throw new Error('Capability sourceInstanceId must be non-empty.');
+      if (this.#sources.has(source.sourceInstanceId)) {
+        throw new Error(`Duplicate capability source instance: ${source.sourceInstanceId}`);
+      }
+      this.#sources.set(source.sourceInstanceId, source);
+    }
   }
 
   async search(
@@ -73,8 +152,9 @@ export class CapabilityRegistry implements CapabilityToolClient {
   ): Promise<SearchCapabilitiesResult> {
     const limit = Math.min(Math.max(Math.trunc(input.limit ?? 5), 1), 20);
     const query = tokenize(input.query ?? '');
-    const capabilities = (await Promise.all(this.#sources.map((source) => source.list(context))))
-      .flat();
+    const capabilities = (await Promise.all([...this.#sources.values()].map(async (source) => (
+      (await source.list(context)).map((definition) => describe(source, definition))
+    )))).flat();
 
     const matches = query.length === 0
       ? capabilities.sort((left, right) => left.name.localeCompare(right.name)).slice(0, limit)
@@ -94,31 +174,24 @@ export class CapabilityRegistry implements CapabilityToolClient {
     input: ExecuteCapabilityInput,
     context: CapabilityContext = {},
   ): Promise<ExecuteCapabilityResult> {
-    if (!input.name.trim()) {
+    const route = parseCapabilityId(input.name);
+    if (!route) {
       throw new CapabilityError({
         error: 'invalid_arguments',
-        message: 'Capability name is required.',
+        message: 'Capability name must be the exact opaque id returned by search_capabilities.',
         retry: { search: true, action: 'correct_arguments' },
       });
     }
-
-    let resolved: { source: CapabilitySource; capability: CapabilityDescriptor } | undefined;
-    for (const source of this.#sources) {
-      const capability = await source.resolve(input.name, context);
-      if (capability) {
-        resolved = { source, capability };
-        break;
-      }
-    }
-
-    if (!resolved) {
+    const source = this.#sources.get(route.sourceInstanceId);
+    const definition = await source?.resolve(route.originalName, context);
+    if (!source || !definition) {
       throw new CapabilityError({
         error: 'unknown_capability',
         message: `No capability named ${input.name}.`,
         retry: { search: true },
       });
     }
-    const { capability } = resolved;
+    const capability = describe(source, definition);
     if (capability.status === 'denied_by_policy' || capability.status === 'disabled') {
       throw new CapabilityError({
         error: 'policy_blocked',
@@ -126,22 +199,33 @@ export class CapabilityRegistry implements CapabilityToolClient {
         retry: { search: false, action: 'contact_admin' },
       });
     }
-    if ((capability.status === 'needs_approval' || riskOrder[capability.riskLevel] >= riskOrder.R2)
-      && !input.approvalToken) {
+    validateArguments(capability, input.arguments ?? {});
+    if (capability.status === 'needs_approval' || riskOrder[capability.riskLevel] >= riskOrder.R2) {
       throw new CapabilityError({
         error: 'needs_approval',
-        message: `${input.name} requires approval before execution.`,
+        message: `${input.name} requires host approval before execution.`,
         retry: { search: false, action: 'request_approval' },
-        approvalHint: `Approve execution of ${input.name} and retry with a one-time token.`,
+        approvalRequestId: input.approvalRequestId,
       });
     }
 
-    const result = await resolved.source.execute(input, context);
-    if (result) return result;
+    const result = await source.execute({
+      capabilityId: capability.name,
+      originalName: capability.originalName,
+      arguments: input.arguments,
+    }, context);
+    if (result) {
+      return {
+        ...result,
+        capability: capability.name,
+        sourceInstanceId: capability.sourceInstanceId,
+        riskLevel: capability.riskLevel,
+      };
+    }
 
     throw new CapabilityError({
       error: 'unknown_capability',
-      message: `No capability source accepted ${input.name}.`,
+      message: `Capability source ${source.sourceInstanceId} no longer accepts ${route.originalName}.`,
       retry: { search: true },
     });
   }
@@ -150,26 +234,26 @@ export class CapabilityRegistry implements CapabilityToolClient {
 export const YUANPU_MCP_TOOLS: readonly CapabilityToolDefinition[] = [
   {
     name: CAPABILITY_TOOL_NAMES.search,
-    description: 'Find external capabilities available in the current workspace. Use an empty query to list available capabilities.',
+    description: 'Find Yuanpu-managed external capabilities available in the current workspace.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Keywords describing the required capability.' },
-        limit: { type: 'integer', description: 'Maximum matches. Defaults to 5 and is capped at 20.' },
+        limit: { type: 'integer', minimum: 1, maximum: 20 },
       },
       additionalProperties: false,
     },
   },
   {
     name: CAPABILITY_TOOL_NAMES.execute,
-    description: 'Execute a capability by the exact name returned from search_capabilities.',
+    description: 'Execute a capability by the exact opaque id returned from search_capabilities.',
     inputSchema: {
       type: 'object',
       required: ['name'],
       properties: {
-        name: { type: 'string', description: 'Exact capability name returned by search_capabilities.' },
-        arguments: { type: 'object', description: 'Arguments matching the capability input schema.' },
-        approvalToken: { type: 'string', description: 'One-time approval token for sensitive capabilities.' },
+        name: { type: 'string', minLength: 1 },
+        arguments: { type: 'object' },
+        approvalRequestId: { type: 'string', description: 'Host-issued pending approval request id.' },
       },
       additionalProperties: false,
     },
@@ -187,17 +271,11 @@ export class YuanpuMcpServer implements CapabilityToolClient {
     return YUANPU_MCP_TOOLS;
   }
 
-  search(
-    input: SearchCapabilitiesInput,
-    context: CapabilityContext = {},
-  ): Promise<SearchCapabilitiesResult> {
+  search(input: SearchCapabilitiesInput, context: CapabilityContext = {}): Promise<SearchCapabilitiesResult> {
     return this.#registry.search(input, context);
   }
 
-  execute(
-    input: ExecuteCapabilityInput,
-    context: CapabilityContext = {},
-  ): Promise<ExecuteCapabilityResult> {
+  execute(input: ExecuteCapabilityInput, context: CapabilityContext = {}): Promise<ExecuteCapabilityResult> {
     return this.#registry.execute(input, context);
   }
 
@@ -206,12 +284,8 @@ export class YuanpuMcpServer implements CapabilityToolClient {
     input: SearchCapabilitiesInput | ExecuteCapabilityInput,
     context: CapabilityContext = {},
   ): Promise<SearchCapabilitiesResult | ExecuteCapabilityResult> {
-    if (name === CAPABILITY_TOOL_NAMES.search) {
-      return this.search(input as SearchCapabilitiesInput, context);
-    }
-    if (name === CAPABILITY_TOOL_NAMES.execute) {
-      return this.execute(input as ExecuteCapabilityInput, context);
-    }
+    if (name === CAPABILITY_TOOL_NAMES.search) return this.search(input as SearchCapabilitiesInput, context);
+    if (name === CAPABILITY_TOOL_NAMES.execute) return this.execute(input as ExecuteCapabilityInput, context);
     return Promise.reject(new CapabilityError({
       error: 'unknown_capability',
       message: `The MCP server does not expose a tool named ${name}.`,
@@ -224,9 +298,9 @@ export function createYuanpuMcpServer(sources: CapabilitySource[] = []): YuanpuM
   return new YuanpuMcpServer(sources);
 }
 
-const echoCapability: CapabilityDescriptor = {
+const echoCapability: CapabilityDefinition = {
   name: 'yuanpu.echo',
-  description: 'Echo text back unchanged. Use this capability to verify the external MCP execution path.',
+  description: 'Echo text back unchanged. Use this capability to verify the external execution path.',
   type: 'mcp_tool',
   riskLevel: 'R0',
   status: 'available',
@@ -240,6 +314,7 @@ const echoCapability: CapabilityDescriptor = {
 
 export function createDemoCapabilitySource(): CapabilitySource {
   return {
+    sourceInstanceId: 'builtin.demo',
     async list() {
       return [echoCapability];
     },
@@ -247,19 +322,11 @@ export function createDemoCapabilitySource(): CapabilitySource {
       return name === echoCapability.name ? echoCapability : undefined;
     },
     async execute(input) {
-      if (input.name !== echoCapability.name) return undefined;
+      if (input.originalName !== echoCapability.name) return undefined;
       const text = input.arguments?.text;
-      if (typeof text !== 'string') {
-        throw new CapabilityError({
-          error: 'invalid_arguments',
-          message: 'yuanpu.echo requires a string argument named text.',
-          retry: { search: false, action: 'correct_arguments' },
-        });
-      }
       return {
-        capability: echoCapability.name,
-        riskLevel: echoCapability.riskLevel,
-        content: { text },
+        content: [{ type: 'text', text: String(text) }],
+        structuredContent: { text },
       };
     },
   };

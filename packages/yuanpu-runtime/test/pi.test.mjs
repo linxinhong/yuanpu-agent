@@ -22,6 +22,31 @@ test('Pi receives only the two Yuanpu external capability tools', () => {
   assert.deepEqual(tools.map((tool) => tool.name), ['search_capabilities', 'execute_capability']);
 });
 
+test('Pi preserves supported MCP blocks and keeps unsupported blocks in details', async () => {
+  const mcpResult = {
+    capability: 'ypcap:test:result',
+    sourceInstanceId: 'test',
+    riskLevel: 'R0',
+    content: [
+      { type: 'text', text: 'hello' },
+      { type: 'resource_link', name: 'report', uri: 'file:///report.txt' },
+    ],
+    structuredContent: { count: 1 },
+    isError: true,
+  };
+  const tools = createYuanpuCapabilityTools({
+    async search() { return { matches: [] }; },
+    async execute() { return mcpResult; },
+  });
+  const result = await tools[1].execute('call-1', { name: mcpResult.capability });
+  assert.equal(result.details, mcpResult);
+  assert.deepEqual(result.content, [
+    { type: 'text', text: '[The external capability reported an error]' },
+    { type: 'text', text: 'hello' },
+    { type: 'text', text: '[Unsupported MCP resource_link content preserved in tool details]' },
+  ]);
+});
+
 test('skill inspection lists user skills from the Yuanpu Agent directory', async (context) => {
   const agentDir = await mkdtemp(join(tmpdir(), 'yuanpu-pi-skill-'));
   context.after(() => rm(agentDir, { recursive: true, force: true }));

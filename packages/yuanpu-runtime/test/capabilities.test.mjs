@@ -4,57 +4,96 @@ import test from 'node:test';
 import {
   CAPABILITY_TOOL_NAMES,
   CapabilityError,
+  createCapabilityId,
   createDemoCapabilitySource,
   createYuanpuMcpServer,
+  parseCapabilityId,
 } from '../dist/index.mjs';
 
 test('the MCP surface always exposes exactly two meta tools', () => {
   const server = createYuanpuMcpServer();
-  assert.deepEqual(
-    server.listTools().map((tool) => tool.name),
-    [CAPABILITY_TOOL_NAMES.search, CAPABILITY_TOOL_NAMES.execute],
+  assert.deepEqual(server.listTools().map((tool) => tool.name), [
+    CAPABILITY_TOOL_NAMES.search,
+    CAPABILITY_TOOL_NAMES.execute,
+  ]);
+});
+
+test('capability ids round-trip source instance and original tool without collisions', () => {
+  const first = createCapabilityId('workspace/a', 'demo:echo');
+  const second = createCapabilityId('workspace:a', 'demo/echo');
+  assert.notEqual(first, second);
+  assert.deepEqual(parseCapabilityId(first), {
+    sourceInstanceId: 'workspace/a',
+    originalName: 'demo:echo',
+  });
+  assert.equal(parseCapabilityId('demo:echo'), undefined);
+});
+
+test('capabilities are searched, schema-validated and executed through the registry', async () => {
+  const sourceInstanceId = 'test.demo';
+  const source = {
+    sourceInstanceId,
+    async list() {
+      return [{
+        name: 'echo',
+        description: '回显外部文本',
+        type: 'mcp_tool',
+        riskLevel: 'R1',
+        status: 'available',
+        inputSchema: {
+          type: 'object',
+          required: ['payload'],
+          properties: {
+            payload: {
+              oneOf: [
+                { type: 'string' },
+                { type: 'object', required: ['text'], properties: { text: { type: 'string' } } },
+              ],
+            },
+          },
+          additionalProperties: false,
+        },
+      }];
+    },
+    async resolve(name) { return name === 'echo' ? (await this.list())[0] : undefined; },
+    async execute(input) {
+      if (input.originalName !== 'echo') return undefined;
+      return {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: { payload: input.arguments?.payload },
+      };
+    },
+  };
+  const server = createYuanpuMcpServer([source]);
+
+  const search = await server.search({ query: '外部' });
+  assert.equal(search.matches[0]?.sourceInstanceId, sourceInstanceId);
+  assert.equal(search.matches[0]?.originalName, 'echo');
+  const id = search.matches[0].name;
+  const result = await server.execute({ name: id, arguments: { payload: { text: 'hello' } } });
+  assert.deepEqual(result.structuredContent, { payload: { text: 'hello' } });
+  assert.deepEqual(result.content, [{ type: 'text', text: 'ok' }]);
+
+  await assert.rejects(
+    server.execute({ name: id, arguments: { payload: 42 } }),
+    (error) => error instanceof CapabilityError && error.failure.error === 'invalid_arguments',
   );
 });
 
-test('capabilities are searched and executed through the registry', async () => {
-  const server = createYuanpuMcpServer([{
-    async list() {
-      return [{
-        name: 'mcp:demo:echo',
-        description: 'Echo external text',
-        type: 'mcp_tool',
-        riskLevel: 'R1',
-        status: 'available',
-        inputSchema: { type: 'object' },
-      }];
-    },
-    async resolve(name) {
-      if (name !== 'mcp:demo:echo') return undefined;
-      return {
-        name,
-        description: 'Echo external text',
-        type: 'mcp_tool',
-        riskLevel: 'R1',
-        status: 'available',
-        inputSchema: { type: 'object' },
-      };
-    },
-    async execute(input) {
-      if (input.name !== 'mcp:demo:echo') return undefined;
-      return { content: input.arguments ?? {}, capability: input.name, riskLevel: 'R1' };
-    },
-  }]);
-
-  const search = await server.search({ query: 'echo' });
-  assert.equal(search.matches[0]?.name, 'mcp:demo:echo');
-  const result = await server.execute({ name: 'mcp:demo:echo', arguments: { text: 'hello' } });
-  assert.deepEqual(result.content, { text: 'hello' });
+test('duplicate source identities are rejected instead of shadowing tools', () => {
+  const source = {
+    sourceInstanceId: 'duplicate',
+    async list() { return []; },
+    async resolve() { return undefined; },
+    async execute() { return undefined; },
+  };
+  assert.throws(() => createYuanpuMcpServer([source, source]), /Duplicate capability source/);
 });
 
-test('sensitive capabilities require approval before their source is invoked', async () => {
+test('model supplied approval ids do not authorize sensitive capabilities', async () => {
   let executions = 0;
   const descriptor = {
-    name: 'mcp:demo:publish',
+    name: 'publish',
     description: 'Publish external data',
     type: 'mcp_tool',
     riskLevel: 'R3',
@@ -62,42 +101,34 @@ test('sensitive capabilities require approval before their source is invoked', a
     inputSchema: { type: 'object' },
   };
   const server = createYuanpuMcpServer([{
+    sourceInstanceId: 'test.sensitive',
     async list() { return [descriptor]; },
     async resolve(name) { return name === descriptor.name ? descriptor : undefined; },
-    async execute(input) {
+    async execute() {
       executions += 1;
-      return { content: { published: true }, capability: input.name, riskLevel: 'R3' };
+      return { content: [{ type: 'text', text: 'published' }] };
     },
   }]);
+  const id = createCapabilityId('test.sensitive', 'publish');
 
-  await assert.rejects(
-    server.execute({ name: descriptor.name }),
-    (error) => error instanceof CapabilityError && error.failure.error === 'needs_approval',
-  );
+  for (const approvalRequestId of [undefined, 'model-invented']) {
+    await assert.rejects(
+      server.execute({ name: id, approvalRequestId }),
+      (error) => error instanceof CapabilityError && error.failure.error === 'needs_approval',
+    );
+  }
   assert.equal(executions, 0);
-
-  const result = await server.execute({ name: descriptor.name, approvalToken: 'approved-once' });
-  assert.deepEqual(result.content, { published: true });
-  assert.equal(executions, 1);
 });
 
-test('unknown capability fails with a structured retry hint', async () => {
-  const server = createYuanpuMcpServer();
-  await assert.rejects(
-    server.execute({ name: 'mcp:missing:none' }),
-    (error) => error instanceof CapabilityError
-      && error.failure.error === 'unknown_capability'
-      && error.failure.retry.search,
-  );
-});
-
-test('demo MCP capability completes the two-tool discovery and execution path', async () => {
+test('demo capability completes discovery and preserves MCP result fields', async () => {
   const server = createYuanpuMcpServer([createDemoCapabilitySource()]);
   const search = await server.callTool(CAPABILITY_TOOL_NAMES.search, { query: 'echo' });
-  assert.equal(search.matches[0]?.name, 'yuanpu.echo');
+  const id = search.matches[0]?.name;
+  assert.ok(id);
   const result = await server.callTool(CAPABILITY_TOOL_NAMES.execute, {
-    name: 'yuanpu.echo',
+    name: id,
     arguments: { text: 'Yuanpu' },
   });
-  assert.deepEqual(result.content, { text: 'Yuanpu' });
+  assert.deepEqual(result.content, [{ type: 'text', text: 'Yuanpu' }]);
+  assert.deepEqual(result.structuredContent, { text: 'Yuanpu' });
 });

@@ -45,6 +45,35 @@ export interface RuntimeUpdateState {
   message?: string;
 }
 
+export const CAPABILITY_PACKAGE_MANIFEST_VERSION = 1;
+
+export type CapabilityPackageKind = 'pi-extension' | 'python-mcp';
+
+export interface CapabilityArtifactTarget {
+  platform: 'darwin' | 'linux' | 'win32';
+  arch: 'x64' | 'arm64';
+  systemBaseline?: string;
+  format: 'zip' | 'tar.gz';
+  url: string;
+  size: number;
+  sha256: string;
+  entrypoint: string;
+}
+
+export interface CapabilityPackageManifest {
+  manifestVersion: typeof CAPABILITY_PACKAGE_MANIFEST_VERSION;
+  kind: CapabilityPackageKind;
+  id: string;
+  version: string;
+  capabilityContractVersion: number;
+  runtimeCompatibility: { minimum: string; maximumExclusive?: string };
+  artifacts: CapabilityArtifactTarget[];
+  configSchema?: Record<string, unknown>;
+  permissions: Array<'filesystem' | 'network' | 'credentials' | 'background'>;
+  issuedAt: string;
+  signature: { algorithm: 'ed25519'; keyId: string; value: string };
+}
+
 export interface PluginSearchResult {
   id?: string;
   name: string;
