@@ -164,7 +164,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-005
     title: "Python 调用与授权阶段验证"
-    status: ready
+    status: in_progress
     goal: "以真实服务验证后端最小闭环，阻断不可信授权或进程生命周期缺陷。"
     scope:
       in: ["设计 S1–S3 场景独立复核","真实 SEA 与真实 Python MCP fixture 的证据"]
@@ -190,12 +190,12 @@ tasks:
     investigation_hints: ["规则 docs/python-capabilities.md；复用 runtime/capabilities 测试和 Python fixture","必须非主要实现者独立执行；当前平台真实 SEA，其他平台生命周期复核由最终门补齐"]
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
-      owner: null
+      owner: "codex-yuanpu-61529"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T09:11:27.681Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
+      branch: "task/task-005-python-verification"
       evidence: []
       follow_up_candidates: []
   - id: TASK-006
