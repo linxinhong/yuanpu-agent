@@ -382,3 +382,35 @@ tasks:
         - {type: "review", check: "independent security review", status: "passed", summary: "Independent reviewer returned PASS at 49b73a1 with no HIGH/MEDIUM findings after verifying connection identity guards, shared discovery cancellation and process-group cleanup."}
         - {type: "memory", check: "verification record", status: "passed", summary: "Integrated .tasks/verification/TASK-009/results.md and .tasks/memory/TASK-009.md record reproduction, bounded timeout design, commands and release boundary."}
       follow_up_candidates: []
+  - id: TASK-010
+    title: "补齐 SEA Runtime 分阶段更新回归"
+    status: ready
+    goal: "用可重复的本地端到端测试证明 Runtime 下载校验、暂存、失败保旧与下次启动激活语义。"
+    scope:
+      in: ["桌面 Runtime updater 可测试边界","本地 HTTP manifest/二进制 fixture","下载失败、校验失败、版本冒烟与重启 promotion 回归"]
+      out: ["生产发布签名凭据","Electron 壳自动更新","修改 Pi 上游包","GitHub hosted runner 运行"]
+    constraints: ["保留用户工作区改动；Pi 上游与兄弟仓库不修改","测试不得访问公网或依赖系统 Python；不自动推送"]
+    forbidden: ["把源码检查当作更新回归","为测试关闭大小、SHA-256 或版本校验","失败时覆盖当前可执行文件"]
+    acceptance:
+      - type: assertion
+        expect: "本地受控源下载合法 Runtime 后只写入 staging；模拟下一次启动才激活，并持久记录新版本"
+      - type: assertion
+        expect: "坏大小、坏 SHA-256、坏版本或损坏 staged metadata 均保留旧版本并清理不可用暂存内容"
+      - type: assertion
+        expect: "测试使用真实可执行文件完成 --version 冒烟，结束后无子进程和临时服务遗留"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-009"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["入口 apps/desktop/src/runtime-manager.ts 的 checkForUpdate/promoteStagedRuntime/command","将文件系统与下载/激活策略提炼为不依赖 Electron 的深模块，并由 RuntimeManager 复用","用 loopback HTTP 和当前 Node 可执行文件或等价本地 fixture；所有等待必须有限"]
+    escalation_conditions: ["若需要改变公开 Runtime manifest 契约或放宽校验则停止并报告","若发现现有 promotion 无法安全保旧，先记录复现再做最小修复"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
