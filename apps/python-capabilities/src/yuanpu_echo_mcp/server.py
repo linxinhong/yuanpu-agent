@@ -1,6 +1,8 @@
 """Minimal stdio MCP server used to verify Yuanpu's managed Python path."""
 
 import asyncio
+import subprocess
+import sys
 
 from typing import Annotated, TypedDict
 
@@ -75,6 +77,29 @@ async def yuanpu_wait(
 
     await asyncio.sleep(seconds)
     return f"waited {seconds:g} seconds"
+
+
+@mcp.tool(
+    name="yuanpu_spawn_child",
+    annotations=ToolAnnotations(
+        title="Spawn a lifecycle-test child",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+    structured_output=True,
+)
+async def yuanpu_spawn_child() -> dict[str, int]:
+    """Spawn a sleeping descendant used only to verify process-tree cleanup."""
+
+    child = subprocess.Popen(  # noqa: S603 - fixed interpreter and fixed test program
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return {"pid": child.pid}
 
 
 def main() -> None:

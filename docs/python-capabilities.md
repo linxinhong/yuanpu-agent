@@ -68,9 +68,11 @@ Yuanpu 的两个工具是代理接口，不要求再起一层网络 MCP Server�
 
 Python 包按需启动，复用一个受管进程；stdio stdout 仅承载协议。当前首版丢弃子进程 stderr，避免未受信日志阻塞管道或泄露凭据；以后若接入宿主诊断面，必须先实现有上限且脱敏的日志汇聚。使用已验证的绝对可执行路径、固定参数数组、不经 shell；子进程仅得到必需环境变量与明确工作目录，不继承整份宿主凭据。
 
-当前开发态接入使用 MCP Python SDK `1.26.0` 与 TypeScript SDK `1.25.2` 的兼容协议面。Runtime 通过 `ManagedMcpCapabilitySource` 延迟启动子进程，限制初始化、发现与执行时限以及重启预算；工具调用派发后断线只返回 `result_unknown`，不会自动重试可能有副作用的操作。发现按 source 隔离，单个 source 超时不会隐藏健康 source。取消信号下传到 MCP SDK，Runtime 退出时关闭 client/transport 并回收子进程。
+当前开发态接入使用 MCP Python SDK `1.26.0` 与 TypeScript SDK `1.25.2` 的兼容协议面。Runtime 通过 `ManagedMcpCapabilitySource` 延迟启动子进程，限制初始化、发现与执行时限以及重启预算；工具调用派发后断线只返回 `result_unknown`，不会自动重试可能有副作用的操作。发现按 source 隔离，单个 source 超时不会隐藏健康 source；同一挂起发现会被复用而非无限累积。取消信号下传到 MCP SDK，Runtime 退出时关闭 client/transport，并按平台清理已发现的后代进程。
 
-开发与 CI 可设置 `YUANPU_PYTHON_MCP_EXECUTABLE`、`YUANPU_PYTHON_MCP_ROOT`，再运行 `YuanpuAgentRuntime --capability-smoke`。该入口实际依次调用唯一公开的 `search_capabilities`、`execute_capability`，验证 SEA、Node MCP client 和 Python FastMCP 的完整链路；它不绕过能力注册表，也不需要模型 API。
+MCP `ToolAnnotations` 只是未受信提示，不能降低风险等级。未知工具默认 R2；只有宿主随已验证能力包提供的风险策略才能把特定工具降为 R0/R1。执行前重新发现当前定义，避免永久使用陈旧 schema 或撤销前状态。SDK 会补入少量基础用户环境变量，因此宿主把 HOME、USERPROFILE、APPDATA 与 LOCALAPPDATA 覆盖到能力私有目录；这用于阻断对用户凭据目录的默认发现，不构成操作系统沙箱。
+
+开发与 CI 先执行 `uv sync --frozen --project apps/python-capabilities`，再设置 `YUANPU_PYTHON_MCP_EXECUTABLE`、`YUANPU_PYTHON_MCP_ROOT` 并运行 `YuanpuAgentRuntime --capability-smoke`。该入口实际依次调用唯一公开的 `search_capabilities`、`execute_capability`，验证 SEA、Node MCP client 和 Python FastMCP 的完整链路，同时断言结构化成功结果与 MCP `isError` 错误保真；它不绕过能力注册表，也不需要模型 API。
 
 初始化、发现、调用均有独立超时与取消；发现采用逐源容错，返回可用结果和故障摘要，缓存有界且更新/停用会失效。工具重名不覆盖。进程崩溃只影响对应 source；重启有预算和退避，停用/卸载/Runtime 退出清理进程树。取消失败的操作标记结果未知，不自动重试可能有副作用的调用。
 

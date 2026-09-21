@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   CapabilityError,
@@ -15,6 +18,8 @@ const pythonRoot = resolve('../../apps/python-capabilities');
 const pythonExecutable = process.platform === 'win32'
   ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
   : join(pythonRoot, '.venv', 'bin', 'python');
+const testPrivateHome = await mkdtemp(join(tmpdir(), 'yuanpu-mcp-test-'));
+after(() => rm(testPrivateHome, { recursive: true, force: true }));
 
 function pythonSource(overrides = {}) {
   return new ManagedMcpCapabilitySource({
@@ -23,6 +28,13 @@ function pythonSource(overrides = {}) {
     command: pythonExecutable,
     args: ['-m', 'yuanpu_echo_mcp'],
     cwd: pythonRoot,
+    privateHome: join(testPrivateHome, randomUUID()),
+    riskPolicy: {
+      yuanpu_echo_text: 'R0',
+      yuanpu_diagnostic_error: 'R0',
+      yuanpu_wait: 'R0',
+      yuanpu_spawn_child: 'R0',
+    },
     env: {
       PATH: dirname(pythonExecutable),
       PYTHONPATH: join(pythonRoot, 'src'),
@@ -79,10 +91,39 @@ test('cancellation reaches a real Python MCP call and close terminates the child
   assert.throws(() => process.kill(pid, 0));
 });
 
+test('close terminates descendants instead of only the MCP server pid', async () => {
+  const source = pythonSource();
+  const server = createYuanpuMcpServer([source]);
+  const match = (await server.search({ query: 'spawn child' })).matches
+    .find((capability) => capability.originalName === 'yuanpu_spawn_child');
+  assert.ok(match);
+  const result = await server.execute({ name: match.name });
+  const childPid = result.structuredContent?.pid;
+  assert.equal(typeof childPid, 'number');
+  process.kill(childPid, 0);
+  await source.close();
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+  assert.throws(() => process.kill(childPid, 0));
+});
+
+test('untrusted MCP annotations cannot downgrade host approval policy', async (context) => {
+  const source = pythonSource({ riskPolicy: {} });
+  context.after(() => source.close());
+  const match = (await createYuanpuMcpServer([source]).search({ query: 'echo' })).matches
+    .find((capability) => capability.originalName === 'yuanpu_echo_text');
+  assert.ok(match);
+  assert.equal(match.riskLevel, 'R2');
+  assert.equal(match.status, 'needs_approval');
+});
+
 test('one failed source does not hide healthy capabilities', async () => {
+  let hangingCalls = 0;
   const hanging = {
     sourceInstanceId: 'test.hanging',
-    async list() { return new Promise(() => undefined); },
+    async list() {
+      hangingCalls += 1;
+      return new Promise(() => undefined);
+    },
     async resolve() { return undefined; },
     async execute() { return undefined; },
   };
@@ -95,6 +136,9 @@ test('one failed source does not hide healthy capabilities', async () => {
   assert.equal(result.matches.length, 1);
   assert.equal(result.failures?.[0]?.sourceInstanceId, 'test.hanging');
   assert.equal(result.failures?.[0]?.error, 'timeout');
+  const repeated = await server.search({ query: 'echo' });
+  assert.equal(repeated.matches.length, 1);
+  assert.equal(hangingCalls, 1, 'a timed-out discovery must not accumulate background calls');
 });
 
 test('initialization failures respect the restart budget', async () => {
@@ -136,4 +180,28 @@ test('an unknown side-effect outcome is never retried by the registry', async ()
     (error) => error instanceof CapabilityError && error.failure.error === 'result_unknown',
   );
   assert.equal(attempts, 1);
+});
+
+test('resolve failures use the stable capability error contract', async () => {
+  const definition = {
+    name: 'unstable',
+    description: 'Unstable capability',
+    type: 'mcp_tool',
+    riskLevel: 'R0',
+    status: 'available',
+    inputSchema: { type: 'object' },
+    packageVersion: '1.0.0',
+  };
+  const source = {
+    sourceInstanceId: 'test.resolve-error',
+    async list() { return [definition]; },
+    async resolve() { throw new ManagedMcpSourceError('timeout', 'resolve timed out'); },
+    async execute() { throw new Error('must not execute'); },
+  };
+  const server = createYuanpuMcpServer([source]);
+  const capability = (await server.search({})).matches[0];
+  await assert.rejects(
+    server.execute({ name: capability.name }),
+    (error) => error instanceof CapabilityError && error.failure.error === 'timeout',
+  );
 });

@@ -150,6 +150,10 @@ export class CapabilityRegistry implements CapabilityToolClient {
     expiresAt: number;
     definitions: CapabilityDefinition[];
   }>();
+  readonly #discoveries = new Map<string, {
+    promise: Promise<CapabilityDefinition[]>;
+    abort: AbortController;
+  }>();
 
   constructor(
     sources: CapabilitySource[] = [],
@@ -171,6 +175,30 @@ export class CapabilityRegistry implements CapabilityToolClient {
     }
   }
 
+  #discover(
+    source: CapabilitySource,
+    context: CapabilityContext,
+    contextKey: string,
+  ): { promise: Promise<CapabilityDefinition[]>; abort: AbortController } {
+    const key = `${source.sourceInstanceId}\0${contextKey}`;
+    const existing = this.#discoveries.get(key);
+    if (existing) return existing;
+
+    const abort = new AbortController();
+    const signal = context.signal
+      ? AbortSignal.any([context.signal, abort.signal])
+      : abort.signal;
+    const entry = {
+      abort,
+      promise: Promise.resolve([]) as Promise<CapabilityDefinition[]>,
+    };
+    entry.promise = source.list({ ...context, signal }).finally(() => {
+      if (this.#discoveries.get(key) === entry) this.#discoveries.delete(key);
+    });
+    this.#discoveries.set(key, entry);
+    return entry;
+  }
+
   async search(
     input: SearchCapabilitiesInput,
     context: CapabilityContext = {},
@@ -190,14 +218,20 @@ export class CapabilityRegistry implements CapabilityToolClient {
         return cached.definitions.map((definition) => describe(source, definition));
       }
       let timer: NodeJS.Timeout | undefined;
+      let timedOut = false;
       try {
+        const discovery = this.#discover(source, context, contextKey);
         const definitions = await Promise.race([
-          source.list(context),
+          discovery.promise,
           new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => reject(new ManagedMcpSourceError(
-              'timeout',
-              `Capability discovery timed out for ${source.sourceInstanceId}.`,
-            )), this.#options.discoveryTimeoutMs);
+            timer = setTimeout(() => {
+              timedOut = true;
+              discovery.abort.abort(new Error('Capability discovery timed out.'));
+              reject(new ManagedMcpSourceError(
+                'timeout',
+                `Capability discovery timed out for ${source.sourceInstanceId}.`,
+              ));
+            }, this.#options.discoveryTimeoutMs);
             timer.unref?.();
           }),
         ]);
@@ -210,7 +244,7 @@ export class CapabilityRegistry implements CapabilityToolClient {
       } catch (error) {
         failures.push({
           sourceInstanceId: source.sourceInstanceId,
-          error: error instanceof ManagedMcpSourceError && error.code === 'timeout'
+          error: timedOut || (error instanceof ManagedMcpSourceError && error.code === 'timeout')
             ? 'timeout'
             : 'unavailable',
           message: error instanceof Error ? error.message : String(error),
@@ -251,7 +285,19 @@ export class CapabilityRegistry implements CapabilityToolClient {
       });
     }
     const source = this.#sources.get(route.sourceInstanceId);
-    const definition = await source?.resolve(route.originalName, context);
+    let definition: CapabilityDefinition | undefined;
+    try {
+      definition = await source?.resolve(route.originalName, context);
+    } catch (error) {
+      if (error instanceof ManagedMcpSourceError) {
+        throw new CapabilityError({
+          error: error.code === 'unavailable' ? 'execution_failed' : error.code,
+          message: error.message,
+          retry: { search: error.code === 'unavailable' },
+        });
+      }
+      throw error;
+    }
     if (!source || !definition) {
       throw new CapabilityError({
         error: 'unknown_capability',

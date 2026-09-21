@@ -36,4 +36,6 @@ assert.deepEqual(capabilitySmoke.result.structuredContent, {
   text: 'YuanpuAgent SEA',
   length: 15,
 });
+assert.equal(capabilitySmoke.errorResult.isError, true);
+assert.match(capabilitySmoke.errorResult.content[0].text, /diagnostic error/i);
 console.log(`Smoke test passed for ${target}`);

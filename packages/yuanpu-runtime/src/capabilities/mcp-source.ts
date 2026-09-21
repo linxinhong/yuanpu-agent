@@ -1,7 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
-import { isAbsolute } from 'node:path';
+import { execFile } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
+import { promisify } from 'node:util';
 
 import type {
   CapabilityContext,
@@ -18,6 +21,8 @@ export interface ManagedMcpSourceOptions {
   args?: string[];
   cwd: string;
   env?: Record<string, string>;
+  privateHome: string;
+  riskPolicy?: Record<string, CapabilityRiskLevel>;
   initializationTimeoutMs?: number;
   discoveryTimeoutMs?: number;
   executionTimeoutMs?: number;
@@ -36,10 +41,56 @@ export class ManagedMcpSourceError extends Error {
   }
 }
 
-function riskFor(tool: Tool): CapabilityRiskLevel {
-  if (tool.annotations?.readOnlyHint) return 'R0';
-  if (tool.annotations?.destructiveHint === false) return 'R1';
-  return 'R2';
+const execFileAsync = promisify(execFile);
+
+async function descendantPids(rootPid: number): Promise<number[]> {
+  if (process.platform === 'win32') return [];
+  try {
+    const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,ppid='], {
+      encoding: 'utf8',
+      timeout: 2_000,
+      maxBuffer: 1024 * 1024,
+    });
+    const children = new Map<number, number[]>();
+    for (const line of stdout.split('\n')) {
+      const [pidText, parentText] = line.trim().split(/\s+/);
+      const pid = Number(pidText);
+      const parent = Number(parentText);
+      if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
+      const siblings = children.get(parent) ?? [];
+      siblings.push(pid);
+      children.set(parent, siblings);
+    }
+    const result: number[] = [];
+    const visit = (parent: number) => {
+      for (const child of children.get(parent) ?? []) {
+        visit(child);
+        result.push(child);
+      }
+    };
+    visit(rootPid);
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+async function terminateDescendants(rootPid: number): Promise<void> {
+  if (process.platform === 'win32') {
+    await execFileAsync('taskkill', ['/PID', String(rootPid), '/T', '/F'], {
+      timeout: 5_000,
+      windowsHide: true,
+    }).catch(() => undefined);
+    return;
+  }
+  const descendants = await descendantPids(rootPid);
+  for (const pid of descendants) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+  }
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  for (const pid of descendants) {
+    try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  }
 }
 
 export class ManagedMcpCapabilitySource {
@@ -47,11 +98,13 @@ export class ManagedMcpCapabilitySource {
   readonly #options: Required<Omit<ManagedMcpSourceOptions, 'args' | 'env'>> & {
     args: string[];
     env: Record<string, string>;
+    riskPolicy: Record<string, CapabilityRiskLevel>;
   };
   #client?: Client;
   #transport?: StdioClientTransport;
   #connecting?: Promise<Client>;
   #tools = new Map<string, Tool>();
+  #toolsExpiresAt = 0;
   #restartAttempts: number[] = [];
   #disabledUntil = 0;
   #closing = false;
@@ -61,11 +114,13 @@ export class ManagedMcpCapabilitySource {
     if (!options.packageVersion.trim()) throw new Error('MCP packageVersion is required.');
     if (!isAbsolute(options.command)) throw new Error('Managed MCP command must be an absolute path.');
     if (!isAbsolute(options.cwd)) throw new Error('Managed MCP cwd must be an absolute path.');
+    if (!isAbsolute(options.privateHome)) throw new Error('Managed MCP privateHome must be an absolute path.');
     this.sourceInstanceId = options.sourceInstanceId;
     this.#options = {
       ...options,
       args: [...(options.args ?? [])],
       env: { ...(options.env ?? {}) },
+      riskPolicy: { ...(options.riskPolicy ?? {}) },
       initializationTimeoutMs: options.initializationTimeoutMs ?? 5_000,
       discoveryTimeoutMs: options.discoveryTimeoutMs ?? 3_000,
       executionTimeoutMs: options.executionTimeoutMs ?? 30_000,
@@ -94,11 +149,21 @@ export class ManagedMcpCapabilitySource {
     }
     this.#restartAttempts.push(Date.now());
     this.#connecting = (async () => {
+      await mkdir(this.#options.privateHome, { recursive: true });
+      const appData = join(this.#options.privateHome, 'app-data');
+      const localAppData = join(this.#options.privateHome, 'local-app-data');
+      await Promise.all([mkdir(appData, { recursive: true }), mkdir(localAppData, { recursive: true })]);
       const transport = new StdioClientTransport({
         command: this.#options.command,
         args: this.#options.args,
         cwd: this.#options.cwd,
-        env: this.#options.env,
+        env: {
+          ...this.#options.env,
+          HOME: this.#options.privateHome,
+          USERPROFILE: this.#options.privateHome,
+          APPDATA: appData,
+          LOCALAPPDATA: localAppData,
+        },
         // Do not inherit or buffer an untrusted child process's diagnostics. A
         // future host logger may expose a redacted, bounded diagnostic sink.
         stderr: 'ignore',
@@ -109,6 +174,7 @@ export class ManagedMcpCapabilitySource {
           this.#transport = undefined;
           this.#client = undefined;
           this.#tools.clear();
+          this.#toolsExpiresAt = 0;
         }
       };
       transport.onerror = () => undefined;
@@ -156,12 +222,15 @@ export class ManagedMcpCapabilitySource {
     if (cursor) throw new ManagedMcpSourceError('unavailable', 'MCP tool listing exceeded 20 pages.');
     if (tools.length > 1_000) throw new ManagedMcpSourceError('unavailable', 'MCP source exposed too many tools.');
     this.#tools = new Map(tools.map((tool) => [tool.name, tool]));
+    this.#toolsExpiresAt = Date.now() + 1_000;
     return tools;
   }
 
   async list(context: CapabilityContext): Promise<CapabilityDefinition[]> {
     return (await this.#refreshTools(context)).map((tool) => {
-      const riskLevel = riskFor(tool);
+      // MCP annotations are untrusted hints. Only host policy may downgrade the
+      // default approval-required risk level.
+      const riskLevel = this.#options.riskPolicy[tool.name] ?? 'R2';
       return {
         name: tool.name,
         description: tool.description ?? tool.title ?? tool.name,
@@ -176,10 +245,12 @@ export class ManagedMcpCapabilitySource {
   }
 
   async resolve(originalName: string, context: CapabilityContext): Promise<CapabilityDefinition | undefined> {
-    if (!this.#tools.has(originalName)) await this.#refreshTools(context);
+    // Re-discover before policy enforcement so revoked tools and changed
+    // schemas are not authorized from an indefinitely stale cache.
+    await this.#refreshTools(context);
     const tool = this.#tools.get(originalName);
     if (!tool) return undefined;
-    const riskLevel = riskFor(tool);
+    const riskLevel = this.#options.riskPolicy[tool.name] ?? 'R2';
     return {
       name: tool.name,
       description: tool.description ?? tool.title ?? tool.name,
@@ -193,7 +264,9 @@ export class ManagedMcpCapabilitySource {
   }
 
   async execute(input: CapabilitySourceExecuteInput, context: CapabilityContext): Promise<CallToolResult | undefined> {
-    if (!this.#tools.has(input.originalName)) await this.#refreshTools(context);
+    if (!this.#tools.has(input.originalName) || Date.now() >= this.#toolsExpiresAt) {
+      await this.#refreshTools(context);
+    }
     if (!this.#tools.has(input.originalName)) return undefined;
     const client = await this.#connect();
     try {
@@ -217,9 +290,12 @@ export class ManagedMcpCapabilitySource {
     await this.#connecting?.catch(() => undefined);
     const client = this.#client;
     const transport = this.#transport;
+    const pid = transport?.pid ?? null;
     this.#client = undefined;
     this.#transport = undefined;
     this.#tools.clear();
+    this.#toolsExpiresAt = 0;
+    if (pid) await terminateDescendants(pid);
     if (client) await client.close().catch(() => undefined);
     else if (transport) await transport.close().catch(() => undefined);
   }
