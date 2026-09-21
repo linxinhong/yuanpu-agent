@@ -202,6 +202,31 @@ test('one failed source does not hide healthy capabilities', async () => {
   assert.equal(hangingCalls, 2, 'a timed-out discovery can recover on a later search');
 });
 
+test('a real unresponsive process does not hide a healthy Python MCP source', async (context) => {
+  const healthy = pythonSource({ sourceInstanceId: 'test.real-python-healthy' });
+  const unresponsive = pythonSource({
+    sourceInstanceId: 'test.real-process-unresponsive',
+    args: ['-c', 'import time; time.sleep(10)'],
+    initializationTimeoutMs: 200,
+    restartLimit: 1,
+  });
+  context.after(async () => {
+    await Promise.all([healthy.close(), unresponsive.close()]);
+  });
+  const server = createYuanpuMcpServer(
+    [unresponsive, healthy],
+    undefined,
+    { discoveryTimeoutMs: 2_000 },
+  );
+  const result = await server.search({ query: 'echo', limit: 20 });
+  assert.equal(
+    result.matches.some((capability) => capability.sourceInstanceId === 'test.real-python-healthy'),
+    true,
+  );
+  assert.equal(result.failures?.[0]?.sourceInstanceId, 'test.real-process-unresponsive');
+  assert.match(result.failures?.[0]?.message ?? '', /initialization failed|timeout/i);
+});
+
 test('concurrent discovery waiters have independent cancellation', async () => {
   let calls = 0;
   const definition = {
