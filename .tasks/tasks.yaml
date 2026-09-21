@@ -7,7 +7,7 @@ feature:
 tasks:
   - id: TASK-001
     title: "确认合并基线与回归"
-    status: in_progress
+    status: done
     goal: "确认 runtime-kit 合并后的所有消费者可构建，为后续任务建立可追溯基线。"
     scope:
       in: ["核对现有未提交合并及旧包引用","README、apps/runtime、锁文件与 runtime-kit 测试"]
@@ -34,14 +34,19 @@ tasks:
       owner: "codex-yuanpu"
       attempts: 0
       claimed_at: "2026-09-21T07:49:03.317Z"
-      completed_at: null
+      completed_at: "2026-09-21T07:52:20.268Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-001-baseline"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "TASK-001 branch merged into main at fd3f103; consolidation baseline is badd659."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Passed on macOS arm64 with Node 24.15.0 and pnpm 11.22.0 after reusing the ignored Pi model-data cache."}
+        - {type: "command", check: "pnpm build:native", status: "passed", summary: "Node SEA build passed for darwin-arm64."}
+        - {type: "command", check: "pnpm smoke:native", status: "passed", summary: "Generated SEA executable passed its smoke test."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-001.md with entry points, environment, initial environment failure, and verification limits."}
       follow_up_candidates: []
   - id: TASK-002
     title: "固定能力与制品公共契约"
-    status: pending
+    status: ready
     goal: "固定跨进程、授权和分发数据契约，消除消费者各自解释。"
     scope:
       in: ["capabilities/contracts.ts 及 yuanpu-protocol 公共 DTO","source 路由、MCP 结果、授权状态、制品 schema 与兼容策略","对应旧消费者适配和契约测试"]
