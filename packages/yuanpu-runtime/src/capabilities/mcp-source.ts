@@ -89,6 +89,8 @@ public static class YuanpuJob {
   [DllImport("kernel32.dll")]
   public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll")]
+  public static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll")]
   public static extern bool CloseHandle(IntPtr handle);
 }
 '@
@@ -107,6 +109,10 @@ try {
 } finally {
   [Runtime.InteropServices.Marshal]::FreeHGlobal($pointer)
 }
+if (-not [YuanpuJob]::AssignProcessToJobObject($job, [YuanpuJob]::GetCurrentProcess())) {
+  [YuanpuJob]::CloseHandle($job) | Out-Null
+  throw 'Assign supervisor to Job Object failed'
+}
 
 $process = New-Object Diagnostics.Process
 $process.StartInfo.FileName = $env:YUANPU_MCP_CHILD_COMMAND
@@ -118,21 +124,16 @@ $process.StartInfo.RedirectStandardError = $true
 $process.StartInfo.CreateNoWindow = $true
 try {
   if (-not $process.Start()) { throw 'MCP child failed to start' }
-  if (-not [YuanpuJob]::AssignProcessToJobObject($job, $process.Handle)) {
-    $process.Kill()
-    throw 'AssignProcessToJobObject failed'
-  }
   $stdout = $process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
   $stderr = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
   $stdin = [Console]::OpenStandardInput().CopyToAsync($process.StandardInput.BaseStream)
   $process.WaitForExit()
-  $process.StandardInput.Close()
-  $stdout.GetAwaiter().GetResult()
-  $stderr.GetAwaiter().GetResult()
   $exitCode = $process.ExitCode
 } finally {
+  # Closing the last Job handle terminates this supervisor and every inherited
+  # descendant. Do this before waiting for pipe EOF: descendants may hold the
+  # inherited stdout/stderr handles open indefinitely.
   [YuanpuJob]::CloseHandle($job) | Out-Null
-  $process.Dispose()
 }
 exit $exitCode
 `;
@@ -210,7 +211,9 @@ class ProcessGroupStdioTransport implements Transport {
         }
       });
       child.stdout?.on('error', (error) => this.onerror?.(error));
-      child.once('close', () => {
+      // `exit` is intentionally used instead of `close`: a descendant may
+      // inherit stdout and keep the pipe open after the MCP root has exited.
+      child.once('exit', () => {
         this.#process = undefined;
         const groupId = this.#groupId;
         this.#groupId = undefined;

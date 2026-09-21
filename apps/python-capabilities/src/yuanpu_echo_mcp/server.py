@@ -86,8 +86,6 @@ async def yuanpu_spawn_child() -> dict[str, int]:
     child = subprocess.Popen(  # noqa: S603 - fixed interpreter and fixed test program
         [sys.executable, "-c", "import time; time.sleep(60)"],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
     )
     return {"pid": child.pid}
 
