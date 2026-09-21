@@ -338,7 +338,7 @@ tasks:
         - "TASK-009 修复干净构建后的冻结 Python MCP 首次冷启动发现超时，再恢复 TASK-008 验收。"
   - id: TASK-009
     title: "修复 SEA 冻结 Python 能力冷启动冒烟"
-    status: in_progress
+    status: done
     goal: "让干净环境中的首次 SEA 能力冒烟稳定发现冻结 Python MCP，并让根级命令自行准备必需制品。"
     scope:
       in: ["Runtime 冻结 Python MCP 启动/发现超时预算","根级 native smoke 前置制品准备","首次冷启动与进程清理回归"]
@@ -363,8 +363,13 @@ tasks:
       owner: "codex-yuanpu-61529-61529-88666-1628"
       attempts: 0
       claimed_at: "2026-09-21T15:59:30.468Z"
-      completed_at: null
+      completed_at: "2026-09-21T16:16:08.976Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-repair"
       branch: "task/task-009-sea-cold-start"
-      evidence: []
+      evidence:
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Integrated main 4e47d31 passed full build, Yuanpu typecheck and tests on Node 24.15.0: runtime-kit 45/45, runtime 3/3, desktop 2/2 and server 2/2."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "From removed dist-native/dist-artifact outputs, the first root-level run rebuilt the frozen Python artifact, passed isolated-PATH smoke, built darwin-arm64 SEA and completed capability search/call/error smoke without a warm-up retry. Repeated on integrated main."}
+        - {type: "test", check: "initialized tools/list timeout cleanup", status: "passed", summary: "A real JSON-RPC child completes MCP initialize then hangs tools/list; discovery timeout atomically invalidates client/transport and the test confirms the PID no longer exists."}
+        - {type: "review", check: "independent security review", status: "passed", summary: "Independent reviewer returned PASS at 49b73a1 with no HIGH/MEDIUM findings after verifying connection identity guards, shared discovery cancellation and process-group cleanup."}
+        - {type: "memory", check: "verification record", status: "passed", summary: "Integrated .tasks/verification/TASK-009/results.md and .tasks/memory/TASK-009.md record reproduction, bounded timeout design, commands and release boundary."}
       follow_up_candidates: []
