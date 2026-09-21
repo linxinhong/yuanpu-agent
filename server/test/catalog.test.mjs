@@ -29,10 +29,13 @@ test('catalog server exposes controlled signed metadata and immutable artifacts'
   const body = Buffer.from('signed-fixture');
   await writeFile(join(root, 'manifest.json'), JSON.stringify({
     id: 'builtin.python.echo',
-    artifacts: [{ url: 'artifacts/echo.tar.gz' }],
+    artifacts: [
+      { url: 'artifacts/YuanpuEchoMcp-linux-x64.tar.gz' },
+      { url: 'artifacts/private.pem' },
+    ],
     signature: { value: 'fixture' },
   }));
-  await writeFile(join(root, 'echo.tar.gz'), body);
+  await writeFile(join(root, 'YuanpuEchoMcp-linux-x64.tar.gz'), body);
   await writeFile(join(root, 'private.pem'), 'must-not-leak');
   const server = createCatalogServer(undefined, { artifactRoot: root });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -43,7 +46,7 @@ test('catalog server exposes controlled signed metadata and immutable artifacts'
 
   const manifest = await fetch(`${origin}/v1/capability-packages/builtin.python.echo/manifest`).then((response) => response.json());
   assert.equal(manifest.signature.value, 'fixture');
-  const artifact = await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/echo.tar.gz`);
+  const artifact = await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/YuanpuEchoMcp-linux-x64.tar.gz`);
   assert.equal(artifact.headers.get('cache-control'), 'public, max-age=31536000, immutable');
   assert.deepEqual(Buffer.from(await artifact.arrayBuffer()), body);
   assert.equal((await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/..%2Fsecret`)).status, 400);

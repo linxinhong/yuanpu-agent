@@ -57,6 +57,10 @@ async function serveCapabilityArtifact(
       writeJson(response, 200, manifest);
       return true;
     }
+    if (!/^YuanpuEchoMcp-(?:darwin|linux|win32)-(?:arm64|x64)\.tar\.gz$/.test(filename)) {
+      writeJson(response, 404, { error: 'Artifact filename is outside the published capability layout' });
+      return true;
+    }
     const manifest = JSON.parse(await readFile(resolve(artifactRoot, 'manifest.json'), 'utf8')) as {
       artifacts?: Array<{ url?: unknown }>;
     };
