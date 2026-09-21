@@ -1,6 +1,7 @@
 # TASK-007 验证结果
 
-- 基线 revision：`5deefc8caafc6148e11ffa6d7f59091cf9d879f7` 加本卡未提交实现
+- 基线 revision：`5deefc8caafc6148e11ffa6d7f59091cf9d879f7`
+- 最终实现 revision：`7566b78`（证据记录提交除外）
 - 环境：macOS 26.5.2 arm64；Node 24.15.0；pnpm 11.22.0
 - 真实界面：Electron 43.7.3，通过 CDP 9333 操作；renderer 为本地 Vite，Runtime 为真实独立进程
 - catalog：本地 `@yuanpu-agent/catalog-server`，制品为真实 PyInstaller onedir tar.gz
@@ -38,4 +39,4 @@
 
 本卡只证明 macOS arm64 的界面与真实后端链路。Linux/Windows、系统签名提示、正式发布密钥和三平台离线制品证据仍为 `UNVERIFIED`，由 TASK-008 汇总；不得据此宣称生产发布就绪。
 
-独立安全复核首轮在 `4cced6e` 报告 1 HIGH 与 4 MEDIUM；二轮在 `6897c8b` 发现 manifest 快照 TOCTOU 和 schema 双重规则。IPC URL、精确审批、配置、签名元数据、快照绑定、schema 权威来源及冲突范围现均已修复，最终 revision 需在修复提交后记录并重新复核。
+独立安全复核首轮在 `4cced6e` 报告 1 HIGH 与 4 MEDIUM；二轮在 `6897c8b` 发现 manifest 快照 TOCTOU 和 schema 双重规则。IPC URL、精确审批、配置、签名元数据、快照绑定、schema 权威来源及冲突范围均已修复。第三轮独立复核 `7566b78` 为 **PASS**，无 HIGH/MEDIUM 残留；复核者另行通过 runtime-kit 44/44、runtime build、app 与 desktop typecheck。
