@@ -19,7 +19,7 @@
 | `packages/yuanpu-runtime/src/capabilities/index.ts` | 有 CapabilitySource 与两个元工具；并行发现使用 Promise.all，单源失败会连带失败；审批只判断 token 非空 |
 | `packages/yuanpu-runtime/src/capabilities/contracts.ts` | Schema 与结果表达较窄；没有完整 MCP 内容块、取消和宿主授权契约 |
 | `packages/yuanpu-runtime/src/pi/index.ts` | Pi 保留 read/write/edit/bash，并加载可信扩展；工具结果转为 JSON 文本 |
-| `apps/runtime/src/index.ts` | 仅注册 demo source，尚无 Python 子进程装配 |
+| `apps/runtime/src/index.ts` | 已支持通过显式环境配置装配受管 Python MCP source；生产制品路径由分发任务接管 |
 | `packages/yuanpu-runtime/src/packages/index.ts` | npm/Git 安装与 Pi settings 同步；不能把 Python 包目录直接加入 Pi extensions |
 | `server/src/catalog.ts`、`server/src/index.ts` | 静态目录搜索/详情，不是完整二进制制品发布服务 |
 | `apps/desktop/src/runtime-manager.ts` | SEA 独立更新已有校验、暂存和版本切换路径；此次保留现有存储位置 |
@@ -45,7 +45,7 @@ Yuanpu 的两个工具是代理接口，不要求再起一层网络 MCP Server�
 | `packages/yuanpu-runtime/src/capabilities` | source、MCP client、进程管理、路由、授权与执行 |
 | `packages/yuanpu-runtime/src/packages` | 制品下载、验证、安装状态、切换/回滚与包类型分流 |
 | `packages/yuanpu-protocol` | 跨 renderer/desktop/runtime DTO；不向前端泄漏运行时实现 |
-| `apps/python-capabilities`（待建） | 官方 Python 能力包源码、锁文件、构建配置；首版一个示例，不是共享 Python 守护进程 |
+| `apps/python-capabilities` | 官方 Python echo MCP 示例的源码、`uv.lock` 与构建配置；它是独立能力进程，不是共享 Python 守护进程 |
 | `server` | 能力包目录、不可变版本元数据；文件由受控对象存储/CDN 提供 |
 
 不增加 yuanpu-* workspace 包，不改任何 Pi 上游包，不修改兄弟 kimi-code/openwork/pi 仓库。
@@ -66,7 +66,13 @@ Yuanpu 的两个工具是代理接口，不要求再起一层网络 MCP Server�
 
 ## 进程与故障隔离
 
-Python 包按需启动，复用一个受管进程；stdio stdout 仅承载协议，stderr 为有上限、脱敏的诊断日志。使用已验证的绝对可执行路径、固定参数数组、不经 shell；子进程仅得到必需环境变量与明确工作目录，不继承整份宿主凭据。
+Python 包按需启动，复用一个受管进程；stdio stdout 仅承载协议。当前首版丢弃子进程 stderr，避免未受信日志阻塞管道或泄露凭据；以后若接入宿主诊断面，必须先实现有上限且脱敏的日志汇聚。使用已验证的绝对可执行路径、固定参数数组、不经 shell；子进程仅得到必需环境变量与明确工作目录，不继承整份宿主凭据。
+
+当前开发态接入使用 MCP Python SDK `1.26.0` 与 TypeScript SDK `1.25.2` 的兼容协议面。Runtime 通过 `ManagedMcpCapabilitySource` 延迟启动子进程，限制初始化、发现与执行时限以及重启预算；工具调用派发后断线只返回 `result_unknown`，不会自动重试可能有副作用的操作。发现按 source 隔离，单个 source 超时不会隐藏健康 source；并发调用共享底层发现，但每个等待者保留独立取消语义。取消信号下传到 MCP SDK。自有 stdio transport 在 POSIX 为每个 source 建立独立进程组；Windows 由内置 supervisor 把 MCP 进程放入带 `KILL_ON_JOB_CLOSE` 的 Job Object。正常关闭、根进程异常退出或 supervisor 退出都会触发整树回收，三平台 Runtime Bundle 矩阵运行真实生命周期测试。
+
+MCP `ToolAnnotations` 只是未受信提示，不能降低风险等级。未知工具默认 R2；只有宿主随已验证能力包提供的风险策略才能把特定工具降为 R0/R1。执行前重新发现当前定义，避免永久使用陈旧 schema 或撤销前状态。SDK 会补入少量基础用户环境变量，因此宿主把 HOME、USERPROFILE、APPDATA 与 LOCALAPPDATA 覆盖到能力私有目录；这用于阻断对用户凭据目录的默认发现，不构成操作系统沙箱。
+
+开发与 CI 先执行 `uv sync --frozen --project apps/python-capabilities`，再设置 `YUANPU_PYTHON_MCP_EXECUTABLE`、`YUANPU_PYTHON_MCP_ROOT` 并运行 `YuanpuAgentRuntime --capability-smoke`。该入口实际依次调用唯一公开的 `search_capabilities`、`execute_capability`，验证 SEA、Node MCP client 和 Python FastMCP 的完整链路，同时断言结构化成功结果与 MCP `isError` 错误保真；它不绕过能力注册表，也不需要模型 API。
 
 初始化、发现、调用均有独立超时与取消；发现采用逐源容错，返回可用结果和故障摘要，缓存有界且更新/停用会失效。工具重名不覆盖。进程崩溃只影响对应 source；重启有预算和退避，停用/卸载/Runtime 退出清理进程树。取消失败的操作标记结果未知，不自动重试可能有副作用的调用。
 

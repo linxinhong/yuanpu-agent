@@ -79,8 +79,8 @@ export function createYuanpuCapabilityTools(
       label: 'Search capabilities',
       description: 'Find external capabilities available to the current workspace. Use an empty query to list available capabilities.',
       parameters: searchParameters,
-      execute: async (_toolCallId, params) => {
-        const result = await client.search(params, context);
+      execute: async (_toolCallId, params, signal) => {
+        const result = await client.search(params, { ...context, signal });
         return {
           content: [{ type: 'text', text: JSON.stringify(result) }],
           details: result,
@@ -94,14 +94,14 @@ export function createYuanpuCapabilityTools(
       label: 'Execute capability',
       description: 'Execute an external capability by its exact name from search_capabilities.',
       parameters: executeParameters,
-      execute: async (_toolCallId, params) => {
+      execute: async (_toolCallId, params, signal) => {
         const input = {
           name: params.name,
           arguments: params.arguments,
           approvalRequestId: params.approvalRequestId,
         } as ExecuteCapabilityInput;
         try {
-          const result = await client.execute(input, context);
+          const result = await client.execute(input, { ...context, signal });
           return capabilityResultForPi(result);
         } catch (error) {
           const failure = capabilityFailureFrom(error);

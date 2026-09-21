@@ -1,0 +1,22 @@
+[project]
+name = "yuanpu-echo-mcp"
+version = "0.1.0"
+description = "YuanpuAgent managed Python MCP fixture"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "mcp==1.26.0",
+  "pydantic==2.12.5",
+]
+
+[project.scripts]
+yuanpu-echo-mcp = "yuanpu_echo_mcp.server:main"
+
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yuanpu_echo_mcp"]
+
+[tool.uv]
+package = true

@@ -1,9 +1,11 @@
 import {
   createDemoCapabilitySource,
   CapabilityApprovalStore,
+  ManagedMcpCapabilitySource,
   createYuanpuMcpServer,
   createYuanpuCapabilityTools,
   createYuanpuChatSession,
+  CAPABILITY_TOOL_NAMES,
   ensureYuanpuHome,
   greeting,
   inspectYuanpuExtensions,
@@ -22,7 +24,9 @@ import {
 } from '@yuanpu-agent/protocol';
 import { createServer, type IncomingMessage } from 'node:http';
 import { createPublicKey, randomUUID, verify } from 'node:crypto';
-import { join } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 
 declare const __APP_VERSION__: string;
 
@@ -63,6 +67,78 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     chunks.push(bytes);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+}
+
+function createConfiguredPythonSource(privateHome: string): ManagedMcpCapabilitySource | undefined {
+  const pythonExecutable = process.env.YUANPU_PYTHON_MCP_EXECUTABLE;
+  const pythonRoot = process.env.YUANPU_PYTHON_MCP_ROOT;
+  if (!pythonExecutable || !pythonRoot) return undefined;
+
+  const executable = resolve(pythonExecutable);
+  const root = resolve(pythonRoot);
+  const configuredArgs = process.env.YUANPU_PYTHON_MCP_ARGS;
+  const pythonArgs = configuredArgs ? JSON.parse(configuredArgs) as unknown : ['-m', 'yuanpu_echo_mcp'];
+  if (!Array.isArray(pythonArgs) || pythonArgs.some((value) => typeof value !== 'string')) {
+    throw new Error('YUANPU_PYTHON_MCP_ARGS must be a JSON string array.');
+  }
+  return new ManagedMcpCapabilitySource({
+    sourceInstanceId: 'builtin.python.echo',
+    packageVersion: '0.1.0',
+    command: executable,
+    args: pythonArgs,
+    cwd: root,
+    privateHome,
+    riskPolicy: {
+      yuanpu_echo_text: 'R0',
+      yuanpu_diagnostic_error: 'R0',
+      yuanpu_wait: 'R0',
+    },
+    env: {
+      PATH: dirname(executable),
+      PYTHONPATH: join(root, 'src'),
+      PYTHONUNBUFFERED: '1',
+      ...(process.platform === 'win32' && process.env.SYSTEMROOT
+        ? { SYSTEMROOT: process.env.SYSTEMROOT }
+        : {}),
+    },
+  });
+}
+
+async function capabilitySmoke(): Promise<void> {
+  const privateHome = await mkdtemp(join(tmpdir(), 'yuanpu-mcp-smoke-'));
+  const pythonSource = createConfiguredPythonSource(privateHome);
+  if (!pythonSource) {
+    await rm(privateHome, { recursive: true, force: true });
+    throw new Error('Python MCP smoke requires YUANPU_PYTHON_MCP_EXECUTABLE and YUANPU_PYTHON_MCP_ROOT.');
+  }
+  try {
+    const mcp = createYuanpuMcpServer([pythonSource]);
+    const search = await mcp.callTool(CAPABILITY_TOOL_NAMES.search, {});
+    if (!('matches' in search) || !Array.isArray(search.matches)) {
+      throw new Error('Capability search returned an invalid result.');
+    }
+    const matches = search.matches as Array<{ name: string; originalName: string }>;
+    const match = matches.find((item) => item.originalName === 'yuanpu_echo_text');
+    if (!match) throw new Error('Python echo capability was not discovered.');
+    const diagnostic = matches.find((item) => item.originalName === 'yuanpu_diagnostic_error');
+    if (!diagnostic) throw new Error('Python diagnostic capability was not discovered.');
+    const result = await mcp.callTool(CAPABILITY_TOOL_NAMES.execute, {
+      name: match.name,
+      arguments: { text: 'YuanpuAgent SEA' },
+    });
+    const errorResult = await mcp.callTool(CAPABILITY_TOOL_NAMES.execute, {
+      name: diagnostic.name,
+    });
+    console.log(JSON.stringify({
+      tools: [CAPABILITY_TOOL_NAMES.search, CAPABILITY_TOOL_NAMES.execute],
+      capability: match.name,
+      result,
+      errorResult,
+    }));
+  } finally {
+    await pythonSource.close();
+    await rm(privateHome, { recursive: true, force: true });
+  }
 }
 
 function readConfigScope(value: unknown): PluginConfigScope {
@@ -107,7 +183,12 @@ async function serve(): Promise<void> {
     home.config.catalogUrl,
   );
   const approvals = await CapabilityApprovalStore.open(join(home.appPath, 'approvals.json'));
-  const mcp = createYuanpuMcpServer([createDemoCapabilitySource()], approvals);
+  const capabilitySources = [createDemoCapabilitySource()];
+  const pythonSource = createConfiguredPythonSource(
+    join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
+  );
+  if (pythonSource) capabilitySources.push(pythonSource);
+  const mcp = createYuanpuMcpServer(capabilitySources, approvals);
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   let chatPromise: Promise<YuanpuChatSession> | undefined;
   let chatSessionId: string | undefined;
@@ -424,7 +505,10 @@ async function serve(): Promise<void> {
     resetChat();
     activePrompts = 0;
     disposeRetiredChats();
-    server.close(() => process.exit(0));
+    server.close(() => {
+      void pythonSource?.close().finally(() => process.exit(0));
+      if (!pythonSource) process.exit(0);
+    });
   };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
@@ -434,6 +518,11 @@ if (args.includes('--version') || args.includes('-v')) {
   console.log(__APP_VERSION__);
 } else if (args.includes('--serve')) {
   void serve().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+} else if (args.includes('--capability-smoke')) {
+  void capabilitySmoke().catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });

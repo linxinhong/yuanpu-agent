@@ -1,5 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import Ajv2020 from 'ajv/dist/2020.js';
+import { ManagedMcpSourceError } from './mcp-source.js';
 
 import {
   CAPABILITY_ID_PREFIX,
@@ -21,6 +22,7 @@ import {
 
 export * from './contracts.js';
 export * from './approval.js';
+export * from './mcp-source.js';
 
 export interface CapabilitySource {
   /** Stable for this configured source, not merely its package display name. */
@@ -34,6 +36,11 @@ export interface CapabilitySource {
     input: CapabilitySourceExecuteInput,
     context: CapabilityContext,
   ): Promise<CallToolResult | undefined>;
+}
+
+export interface CapabilityRegistryOptions {
+  discoveryTimeoutMs?: number;
+  discoveryCacheTtlMs?: number;
 }
 
 export class CapabilityError extends Error {
@@ -137,10 +144,28 @@ function validateArguments(capability: CapabilityDescriptor, value: unknown): vo
 export class CapabilityRegistry implements CapabilityToolClient {
   readonly #sources: Map<string, CapabilitySource>;
   readonly #authorizer?: CapabilityAuthorizer;
+  readonly #options: Required<CapabilityRegistryOptions>;
+  readonly #discoveryCache = new Map<string, {
+    contextKey: string;
+    expiresAt: number;
+    definitions: CapabilityDefinition[];
+  }>();
+  readonly #discoveries = new Map<string, {
+    promise: Promise<CapabilityDefinition[]>;
+    abort: AbortController;
+  }>();
 
-  constructor(sources: CapabilitySource[] = [], authorizer?: CapabilityAuthorizer) {
+  constructor(
+    sources: CapabilitySource[] = [],
+    authorizer?: CapabilityAuthorizer,
+    options: CapabilityRegistryOptions = {},
+  ) {
     this.#sources = new Map();
     this.#authorizer = authorizer;
+    this.#options = {
+      discoveryTimeoutMs: options.discoveryTimeoutMs ?? 3_000,
+      discoveryCacheTtlMs: options.discoveryCacheTtlMs ?? 5_000,
+    };
     for (const source of sources) {
       if (!source.sourceInstanceId.trim()) throw new Error('Capability sourceInstanceId must be non-empty.');
       if (this.#sources.has(source.sourceInstanceId)) {
@@ -150,15 +175,97 @@ export class CapabilityRegistry implements CapabilityToolClient {
     }
   }
 
+  #discover(
+    source: CapabilitySource,
+    context: CapabilityContext,
+    contextKey: string,
+  ): { promise: Promise<CapabilityDefinition[]>; abort: AbortController } {
+    const key = `${source.sourceInstanceId}\0${contextKey}`;
+    const existing = this.#discoveries.get(key);
+    if (existing) return existing;
+
+    const abort = new AbortController();
+    const entry = {
+      abort,
+      promise: Promise.resolve([]) as Promise<CapabilityDefinition[]>,
+    };
+    let timeout: NodeJS.Timeout | undefined;
+    entry.promise = Promise.race([
+      source.list({ ...context, signal: abort.signal }),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          abort.abort(new Error('Capability discovery timed out.'));
+          reject(new ManagedMcpSourceError(
+            'timeout',
+            `Capability discovery timed out for ${source.sourceInstanceId}.`,
+          ));
+        }, this.#options.discoveryTimeoutMs);
+        timeout.unref?.();
+      }),
+    ]).finally(() => {
+      if (timeout) clearTimeout(timeout);
+      if (this.#discoveries.get(key) === entry) this.#discoveries.delete(key);
+    });
+    this.#discoveries.set(key, entry);
+    return entry;
+  }
+
   async search(
     input: SearchCapabilitiesInput,
     context: CapabilityContext = {},
   ): Promise<SearchCapabilitiesResult> {
     const limit = Math.min(Math.max(Math.trunc(input.limit ?? 5), 1), 20);
     const query = tokenize(input.query ?? '');
-    const capabilities = (await Promise.all([...this.#sources.values()].map(async (source) => (
-      (await source.list(context)).map((definition) => describe(source, definition))
-    )))).flat();
+    const contextKey = JSON.stringify([
+      context.sessionId ?? '',
+      context.workspaceId ?? '',
+      context.userId ?? '',
+      [...(context.roles ?? [])].sort(),
+    ]);
+    const failures: SearchCapabilitiesResult['failures'] = [];
+    const groups = await Promise.all([...this.#sources.values()].map(async (source) => {
+      const cached = this.#discoveryCache.get(source.sourceInstanceId);
+      if (cached && cached.contextKey === contextKey && cached.expiresAt > Date.now()) {
+        return cached.definitions.map((definition) => describe(source, definition));
+      }
+      let abortListener: (() => void) | undefined;
+      try {
+        const discovery = this.#discover(source, context, contextKey);
+        const cancellation = context.signal
+          ? new Promise<never>((_resolve, reject) => {
+              abortListener = () => reject(new ManagedMcpSourceError(
+                'cancelled',
+                'Capability discovery was cancelled.',
+              ));
+              if (context.signal?.aborted) abortListener();
+              else context.signal?.addEventListener('abort', abortListener, { once: true });
+            })
+          : new Promise<never>(() => undefined);
+        const definitions = await Promise.race([
+          discovery.promise,
+          cancellation,
+        ]);
+        this.#discoveryCache.set(source.sourceInstanceId, {
+          contextKey,
+          expiresAt: Date.now() + this.#options.discoveryCacheTtlMs,
+          definitions,
+        });
+        return definitions.map((definition) => describe(source, definition));
+      } catch (error) {
+        if (error instanceof ManagedMcpSourceError && error.code === 'cancelled') throw error;
+        failures.push({
+          sourceInstanceId: source.sourceInstanceId,
+          error: error instanceof ManagedMcpSourceError && error.code === 'timeout'
+            ? 'timeout'
+            : 'unavailable',
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      } finally {
+        if (abortListener) context.signal?.removeEventListener('abort', abortListener);
+      }
+    }));
+    const capabilities = groups.flat();
 
     const matches = query.length === 0
       ? capabilities.sort((left, right) => left.name.localeCompare(right.name)).slice(0, limit)
@@ -169,9 +276,11 @@ export class CapabilityRegistry implements CapabilityToolClient {
           .slice(0, limit)
           .map((item) => item.capability);
 
-    return matches.length > 0
-      ? { matches }
-      : { matches, hint: 'No capability matched. Try broader keywords.' };
+    return {
+      matches,
+      ...(failures.length ? { failures } : {}),
+      ...(matches.length === 0 ? { hint: 'No capability matched. Try broader keywords.' } : {}),
+    };
   }
 
   async execute(
@@ -187,7 +296,19 @@ export class CapabilityRegistry implements CapabilityToolClient {
       });
     }
     const source = this.#sources.get(route.sourceInstanceId);
-    const definition = await source?.resolve(route.originalName, context);
+    let definition: CapabilityDefinition | undefined;
+    try {
+      definition = await source?.resolve(route.originalName, context);
+    } catch (error) {
+      if (error instanceof ManagedMcpSourceError) {
+        throw new CapabilityError({
+          error: error.code === 'unavailable' ? 'execution_failed' : error.code,
+          message: error.message,
+          retry: { search: error.code === 'unavailable' },
+        });
+      }
+      throw error;
+    }
     if (!source || !definition) {
       throw new CapabilityError({
         error: 'unknown_capability',
@@ -245,11 +366,23 @@ export class CapabilityRegistry implements CapabilityToolClient {
       }
     }
 
-    const result = await source.execute({
-      capabilityId: capability.name,
-      originalName: capability.originalName,
-      arguments: input.arguments,
-    }, context);
+    let result: CallToolResult | undefined;
+    try {
+      result = await source.execute({
+        capabilityId: capability.name,
+        originalName: capability.originalName,
+        arguments: input.arguments,
+      }, context);
+    } catch (error) {
+      if (error instanceof ManagedMcpSourceError) {
+        throw new CapabilityError({
+          error: error.code === 'unavailable' ? 'execution_failed' : error.code,
+          message: error.message,
+          retry: { search: error.code === 'unavailable' },
+        });
+      }
+      throw error;
+    }
     if (result) {
       return {
         ...result,
@@ -299,8 +432,12 @@ export const YUANPU_MCP_TOOLS: readonly CapabilityToolDefinition[] = [
 export class YuanpuMcpServer implements CapabilityToolClient {
   readonly #registry: CapabilityRegistry;
 
-  constructor(sources: CapabilitySource[] = [], authorizer?: CapabilityAuthorizer) {
-    this.#registry = new CapabilityRegistry(sources, authorizer);
+  constructor(
+    sources: CapabilitySource[] = [],
+    authorizer?: CapabilityAuthorizer,
+    options?: CapabilityRegistryOptions,
+  ) {
+    this.#registry = new CapabilityRegistry(sources, authorizer, options);
   }
 
   listTools(): readonly CapabilityToolDefinition[] {
@@ -333,8 +470,9 @@ export class YuanpuMcpServer implements CapabilityToolClient {
 export function createYuanpuMcpServer(
   sources: CapabilitySource[] = [],
   authorizer?: CapabilityAuthorizer,
+  options?: CapabilityRegistryOptions,
 ): YuanpuMcpServer {
-  return new YuanpuMcpServer(sources, authorizer);
+  return new YuanpuMcpServer(sources, authorizer, options);
 }
 
 const echoCapability: CapabilityDefinition = {

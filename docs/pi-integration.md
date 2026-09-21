@@ -37,7 +37,7 @@ Pi keeps its local workspace tools. Yuanpu-managed external capabilities are exp
 
 `packages/yuanpu-runtime/src/capabilities` owns capability discovery and execution. `packages/yuanpu-runtime/src/pi` adapts those two calls to Pi custom tools. Trusted Pi extensions can register tools separately; the two-tool interface is not a sandbox or a security boundary around Pi's local tools.
 
-Current execution resolves the capability again, but approval checking only tests for a nonempty token. Host-owned authorization, general schema validation and Python MCP sources are planned, not implemented. See [Python capability design](python-capabilities.md) and [task registry](../.tasks/tasks.yaml).
+Execution re-resolves the capability, validates arguments against JSON Schema 2020-12 and consumes a host-signed, one-time authorization for sensitive calls. A managed Python MCP source is available for development and SEA smoke testing; frozen cross-platform Python artifacts and desktop installation remain follow-up work. See [Python capability design](python-capabilities.md) and [task registry](../.tasks/tasks.yaml).
 
 ## Updating Pi
 
