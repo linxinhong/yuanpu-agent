@@ -133,19 +133,28 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     issuedAt: Date.now(),
     nonce: randomBytes(16).toString('base64url'),
   };
+  const signedUnknownBody = JSON.stringify({
+    ...signedUnknown,
+    signature: sign(
+      null,
+      capabilityApprovalSigningPayload(signedUnknown),
+      approvalKeyPair.privateKey,
+    ).toString('base64url'),
+  });
   const signedUnknownDecision = await fetch(
     `http://${ready.host}:${ready.port}/v1/capabilities/approvals/decision`,
     {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ...signedUnknown,
-        signature: sign(
-          null,
-          capabilityApprovalSigningPayload(signedUnknown),
-          approvalKeyPair.privateKey,
-        ).toString('base64url'),
-      }),
+      body: signedUnknownBody,
+    },
+  );
+  const replayedSignedDecision = await fetch(
+    `http://${ready.host}:${ready.port}/v1/capabilities/approvals/decision`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: signedUnknownBody,
     },
   );
   const invalidPluginInstall = await fetch(`http://${ready.host}:${ready.port}/v1/plugins/install`, {
@@ -195,6 +204,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.equal(invalidApprovalDecision.status, 400);
   assert.equal(forgedApprovalDecision.status, 403);
   assert.equal(signedUnknownDecision.status, 409);
+  assert.equal(replayedSignedDecision.status, 403);
   assert.equal(child.spawnargs.includes(token), false);
   assert.equal(invalidChat.status, 400);
   assert.equal(invalidPluginInstall.status, 400);

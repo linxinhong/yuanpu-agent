@@ -165,6 +165,15 @@ test('sensitive capabilities without immutable package versions are blocked', as
     }, { sessionId: 'session', workspaceId: '/workspace' }),
     (error) => error instanceof CapabilityError && error.failure.error === 'policy_blocked',
   );
+
+  definition.packageVersion = '   ';
+  await assert.rejects(
+    server.execute({
+      name: createCapabilityId(source.sourceInstanceId, definition.name),
+      arguments: { target: 'release' },
+    }, { sessionId: 'session', workspaceId: '/workspace' }),
+    (error) => error instanceof CapabilityError && error.failure.error === 'policy_blocked',
+  );
 });
 
 test('host approval is bound, atomically consumed once, and replay-safe', async (context) => {
