@@ -25,10 +25,12 @@
     "@yuanpu-agent/protocol": "workspace:*",
     "ajv": "8.17.1",
     "npm-package-arg": "14.0.0",
+    "proper-lockfile": "4.1.2",
     "tar": "7.5.2",
     "typebox": "1.3.27"
   },
   "devDependencies": {
-    "@types/npmcli__arborist": "6.3.3"
+    "@types/npmcli__arborist": "6.3.3",
+    "@types/proper-lockfile": "4.1.4"
   }
 }

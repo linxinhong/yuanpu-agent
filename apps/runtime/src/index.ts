@@ -20,6 +20,7 @@ import {
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,
   capabilityApprovalSigningPayload,
+  type CapabilityPackageManifest,
   type CapabilityApprovalDecisionInput,
   type PluginConfigInput,
   type PluginConfigScope,
@@ -72,6 +73,28 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     chunks.push(bytes);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+}
+
+async function readBoundedJsonResponse(response: Response, maximumBytes = 256 * 1024): Promise<unknown> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maximumBytes) {
+    throw new Error(`能力 manifest 超过 ${maximumBytes} 字节限制。`);
+  }
+  if (!response.body) throw new Error('能力 manifest 响应为空。');
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maximumBytes) {
+      await reader.cancel();
+      throw new Error(`能力 manifest 超过 ${maximumBytes} 字节限制。`);
+    }
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8')) as unknown;
 }
 
 function createConfiguredPythonSource(privateHome: string): ManagedMcpCapabilitySource | undefined {
@@ -466,7 +489,7 @@ async function serve(): Promise<void> {
             signal: AbortSignal.timeout(15_000),
           });
           if (!manifestResponse.ok) throw new Error(`能力 manifest 下载失败：HTTP ${manifestResponse.status}`);
-          const manifest = await manifestResponse.json() as import('@yuanpu-agent/protocol').CapabilityPackageManifest;
+          const manifest = await readBoundedJsonResponse(manifestResponse) as CapabilityPackageManifest;
           const installed = await artifacts.install(manifest, {
             manifestUrl: manifestResponse.url,
             healthCheck: async (entrypoint, installPath) => {

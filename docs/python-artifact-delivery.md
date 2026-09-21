@@ -25,6 +25,7 @@ manifest 使用 Ed25519 对去掉 `signature` 字段后的确定性 JSON 签名�
 
 - `YUANPU_ARTIFACT_SIGNING_KEY_FILE`：Ed25519 私钥 PEM 文件；
 - `YUANPU_ARTIFACT_SIGNING_KEY_ID`：与客户端预置公钥匹配的稳定 ID；
+- `YUANPU_ARTIFACT_TRUST_ROOT_PUBLIC_KEY_BASE64`：供 Desktop/Runtime 构建矩阵预置的公钥 PEM（Base64）；
 - `YUANPU_ARTIFACT_BASE_URL`：不可变制品发布基址。
 
 GitHub Release 场景的基址应指向 tag 目录之前，例如
@@ -32,7 +33,7 @@ GitHub Release 场景的基址应指向 tag 目录之前，例如
 
 没有发布凭据时，构建脚本只生成一次性的开发密钥和 `development: true` 的本地 trust-root 文件，用于测试及本次桌面包内部装配。它不具备生产发布资格。当前生产密钥托管、轮换和正式发布仍为 **UNVERIFIED**，不得把开发根上传为生产根。
 
-Tag Release 采用 fail-closed 门禁：三个生产变量任一缺失即停止发布，不允许把临时开发根带入正式 Release。Runtime 矩阵上传各平台能力归档，发布任务再汇总目标、重新计算大小与 SHA-256，并生成一个生产密钥签名的 `YuanpuEchoMcp-manifest.json`。本地或手动 CI 仍可使用明确标记的临时根做构建验证。
+Tag Release 采用 fail-closed 门禁：私钥、公钥、key ID、下载基址任一缺失或公私钥不匹配即停止发布，不允许把临时开发根带入正式 Release。六个 Runtime/Desktop 构建 runner 只接收公钥，不接收长期私钥；私钥仅进入最终 publish job。Runtime 矩阵上传各平台能力归档，发布任务再汇总目标、重新计算大小与 SHA-256，并生成一个生产密钥签名的 `YuanpuEchoMcp-manifest.json`。本地或手动 CI 仍可使用明确标记的临时根做构建验证。
 
 ## 安装和恢复
 

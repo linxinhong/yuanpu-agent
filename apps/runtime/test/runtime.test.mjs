@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -60,11 +61,25 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const approvalKeyPair = generateKeyPairSync('ed25519');
   const approvalPublicKey = approvalKeyPair.publicKey.export({ type: 'spki', format: 'der' })
     .toString('base64');
+  const capabilityResourceRoot = join(home, 'capability-resource');
+  const capabilityTrustRoot = join(capabilityResourceRoot, 'trust-root.json');
+  await mkdir(capabilityResourceRoot, { recursive: true });
+  await writeFile(capabilityTrustRoot, JSON.stringify({
+    keyId: 'runtime-test',
+    publicKeyPem: approvalKeyPair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  }));
+  await writeFile(join(capabilityResourceRoot, 'manifest.json'), JSON.stringify({ version: '0.1.0' }));
   const child = spawn(process.execPath, [
     'dist/index.cjs', '--serve', '--port', '0',
   ], {
     stdio: ['pipe', 'pipe', 'inherit'],
-    env: { ...process.env, YUANPU_HOME: home },
+    env: {
+      ...process.env,
+      YUANPU_HOME: home,
+      YUANPU_CAPABILITY_TRUST_ROOT_FILE: capabilityTrustRoot,
+      YUANPU_PYTHON_MCP_EXECUTABLE: '',
+      YUANPU_PYTHON_MCP_ROOT: '',
+    },
   });
   child.stdin.end(`${JSON.stringify({ token, approvalPublicKey })}\n`);
   context.after(async () => {
@@ -171,10 +186,28 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     body: JSON.stringify({ source: 'npm:pi-example@latest' }),
   });
   const floatingPluginError = await floatingPluginInstall.json();
+  const oversizedManifest = createServer((_request, response) => {
+    const body = JSON.stringify({ padding: 'x'.repeat(300 * 1024) });
+    response.writeHead(200, {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+    });
+    response.end(body);
+  });
+  await new Promise((resolve, reject) => {
+    oversizedManifest.once('error', reject);
+    oversizedManifest.listen(0, '127.0.0.1', resolve);
+  });
+  context.after(() => oversizedManifest.close());
+  const manifestAddress = oversizedManifest.address();
+  assert.notEqual(manifestAddress, null);
+  assert.equal(typeof manifestAddress, 'object');
   const artifactInstall = await fetch(`http://${ready.host}:${ready.port}/v1/plugins/install`, {
     method: 'POST',
     headers: { ...headers, 'content-type': 'application/json' },
-    body: JSON.stringify({ source: 'artifact:https://catalog.example.test/manifest.json' }),
+    body: JSON.stringify({
+      source: `artifact:http://127.0.0.1:${manifestAddress.port}/manifest.json`,
+    }),
   });
   const artifactInstallError = await artifactInstall.json();
   const enablePlugin = await fetch(`http://${ready.host}:${ready.port}/v1/plugins/state`, {
@@ -221,7 +254,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.equal(floatingPluginInstall.status, 500);
   assert.match(floatingPluginError.error, /精确版本/);
   assert.equal(artifactInstall.status, 500);
-  assert.match(artifactInstallError.error, /信任根/);
+  assert.match(artifactInstallError.error, /超过 262144 字节限制/);
   assert.equal('hint' in floatingPluginError, false);
   assert.equal(enablePlugin.status, 200);
   assert.equal(pluginConfig.kind, 'mcp');

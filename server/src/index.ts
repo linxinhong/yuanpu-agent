@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs';
-import { access, readFile, stat } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { access, lstat, readFile, realpath, stat } from 'node:fs/promises';
+import { basename, relative, resolve, sep } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +20,16 @@ function safeDecode(value: string): string | undefined {
     return decodeURIComponent(value);
   } catch {
     return undefined;
+  }
+}
+
+async function assertRegularArtifactFile(root: string, path: string): Promise<void> {
+  const entry = await lstat(path);
+  if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('Artifact must be a regular file.');
+  const [resolvedRoot, resolvedPath] = await Promise.all([realpath(root), realpath(path)]);
+  const child = relative(resolvedRoot, resolvedPath);
+  if (child === '..' || child.startsWith(`..${sep}`)) {
+    throw new Error('Artifact resolved outside the publication root.');
   }
 }
 
@@ -51,6 +61,7 @@ async function serveCapabilityArtifact(
   const path = resolve(artifactRoot, filename);
   try {
     await access(path);
+    await assertRegularArtifactFile(artifactRoot, path);
     if (filename === 'manifest.json') {
       const manifest = JSON.parse(await readFile(path, 'utf8')) as { id?: unknown };
       if (manifest.id !== 'builtin.python.echo') throw new Error('Published manifest id mismatch.');

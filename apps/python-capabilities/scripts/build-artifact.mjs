@@ -71,10 +71,13 @@ execFileSync('uv', [
 const archive = await readFile(archivePath);
 const privateKeyFile = process.env.YUANPU_ARTIFACT_SIGNING_KEY_FILE;
 const privateKeyBase64 = process.env.YUANPU_ARTIFACT_SIGNING_KEY_BASE64;
+const publicKeyBase64 = process.env.YUANPU_ARTIFACT_TRUST_ROOT_PUBLIC_KEY_BASE64;
 if (privateKeyFile && privateKeyBase64) throw new Error('Configure only one artifact signing key source.');
 const hasProductionKey = Boolean(privateKeyFile || privateKeyBase64);
-const keyId = process.env.YUANPU_ARTIFACT_SIGNING_KEY_ID ?? (hasProductionKey ? undefined : 'yuanpu-development-ephemeral');
-if (!keyId) throw new Error('YUANPU_ARTIFACT_SIGNING_KEY_ID is required with a production signing key.');
+const hasProductionTrustRoot = Boolean(hasProductionKey || publicKeyBase64);
+const keyId = process.env.YUANPU_ARTIFACT_SIGNING_KEY_ID
+  ?? (hasProductionTrustRoot ? undefined : 'yuanpu-development-ephemeral');
+if (!keyId) throw new Error('YUANPU_ARTIFACT_SIGNING_KEY_ID is required with a production trust root.');
 
 let privateKey;
 let publicKey;
@@ -85,6 +88,8 @@ if (hasProductionKey) {
     : Buffer.from(privateKeyBase64, 'base64').toString('utf8');
   privateKey = createPrivateKey(pem);
   publicKey = createPublicKey(privateKey);
+} else if (publicKeyBase64) {
+  publicKey = createPublicKey(Buffer.from(publicKeyBase64, 'base64').toString('utf8'));
 } else {
   ({ privateKey, publicKey } = generateKeyPairSync('ed25519'));
   development = true;
@@ -115,7 +120,9 @@ const manifest = {
   signature: { algorithm: 'ed25519', keyId, value: '' },
 };
 const { signature: _signature, ...unsigned } = manifest;
-manifest.signature.value = sign(null, Buffer.from(canonicalize(unsigned)), privateKey).toString('base64');
+if (privateKey) {
+  manifest.signature.value = sign(null, Buffer.from(canonicalize(unsigned)), privateKey).toString('base64');
+}
 
 await writeFile(join(output, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 await writeFile(join(bundleRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -124,7 +131,9 @@ await writeFile(join(bundleRoot, 'trust-root.json'), `${JSON.stringify({
   keyId,
   publicKeyPem: publicKey.export({ format: 'pem', type: 'spki' }).toString(),
   development,
+  embeddedManifestSigned: Boolean(privateKey),
 }, null, 2)}\n`);
 await writeFile(join(output, `${archiveName}.sha256`), `${manifest.artifacts[0].sha256}  ${basename(archivePath)}\n`);
 console.log(`Built self-contained Python artifact ${archivePath}`);
 if (development) console.warn('Built with an ephemeral development trust root; production publishing is not authorized.');
+if (publicKeyBase64 && !privateKey) console.log('Embedded production trust root without exposing its private signing key.');

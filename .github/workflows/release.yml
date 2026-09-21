@@ -14,15 +14,16 @@ jobs:
     name: Require production capability signing
     runs-on: ubuntu-24.04
     env:
-      SIGNING_KEY: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_BASE64 }}
-      SIGNING_KEY_ID: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_ID }}
-      ARTIFACT_BASE_URL: ${{ secrets.YUANPU_ARTIFACT_BASE_URL }}
+      YUANPU_ARTIFACT_SIGNING_KEY_BASE64: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_BASE64 }}
+      YUANPU_ARTIFACT_TRUST_ROOT_PUBLIC_KEY_BASE64: ${{ secrets.YUANPU_ARTIFACT_TRUST_ROOT_PUBLIC_KEY_BASE64 }}
+      YUANPU_ARTIFACT_SIGNING_KEY_ID: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_ID }}
+      YUANPU_ARTIFACT_BASE_URL: ${{ secrets.YUANPU_ARTIFACT_BASE_URL }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Refuse ephemeral release signing
-        run: |
-          test -n "$SIGNING_KEY"
-          test -n "$SIGNING_KEY_ID"
-          test -n "$ARTIFACT_BASE_URL"
+        run: node apps/python-capabilities/scripts/verify-release-signing-env.mjs
 
   native-artifacts:
     needs: capability-signing-gate

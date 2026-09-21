@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -52,4 +52,14 @@ test('catalog server exposes controlled signed metadata and immutable artifacts'
   assert.equal((await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/..%2Fsecret`)).status, 400);
   assert.equal((await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/private.pem`)).status, 404);
   assert.equal((await fetch(`${origin}/v1/capability-packages/%/manifest`)).status, 400);
+
+  const linkName = 'YuanpuEchoMcp-darwin-arm64.tar.gz';
+  await symlink(join(root, 'private.pem'), join(root, linkName));
+  const currentManifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8'));
+  currentManifest.artifacts.push({ url: `artifacts/${linkName}` });
+  await writeFile(join(root, 'manifest.json'), JSON.stringify(currentManifest));
+  assert.equal(
+    (await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/${linkName}`)).status,
+    404,
+  );
 });

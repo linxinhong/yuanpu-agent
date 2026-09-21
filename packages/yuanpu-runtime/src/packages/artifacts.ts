@@ -16,12 +16,11 @@ import {
   readFile,
   rename,
   rm,
-  stat,
-  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
+import { lock as lockFile } from 'proper-lockfile';
 import * as tar from 'tar';
 
 const STATE_VERSION = 1;
@@ -91,16 +90,6 @@ function safeSegment(value: string, label: string): string {
     throw new Error(`${label} contains unsafe characters.`);
   }
   return value;
-}
-
-function processIsAlive(pid: unknown): boolean {
-  if (!Number.isSafeInteger(pid) || (pid as number) <= 0) return false;
-  try {
-    process.kill(pid as number, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
 }
 
 function canonicalize(value: unknown): string {
@@ -278,68 +267,15 @@ export class CapabilityArtifactManager {
     await this.ensure();
     for (let attempt = 0; attempt < 4_800; attempt += 1) {
       try {
-        const handle = await open(this.lockPath, 'wx', 0o600);
-        const token = randomUUID();
-        try {
-          await handle.writeFile(JSON.stringify({ token, pid: process.pid, createdAt: new Date().toISOString() }));
-        } catch (error) {
-          await handle.close();
-          await rm(this.lockPath, { force: true });
-          throw error;
-        }
-        const heartbeat = setInterval(() => {
-          const now = new Date();
-          void utimes(this.lockPath, now, now).catch(() => undefined);
-        }, Math.min(30_000, LOCK_STALE_MS / 3));
-        heartbeat.unref();
-        return async () => {
-          clearInterval(heartbeat);
-          await handle.close();
-          try {
-            const current = JSON.parse(await readFile(this.lockPath, 'utf8')) as { token?: unknown };
-            if (current.token === token) await rm(this.lockPath, { force: true });
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-          }
-        };
+        return await lockFile(this.packagesRoot, {
+          lockfilePath: this.lockPath,
+          realpath: false,
+          retries: 0,
+          stale: LOCK_STALE_MS,
+          update: Math.min(30_000, LOCK_STALE_MS / 3),
+        });
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        try {
-          const lockStat = await stat(this.lockPath);
-          if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
-            const snapshot = await readFile(this.lockPath, 'utf8');
-            let owner: { pid?: unknown } = {};
-            try {
-              owner = JSON.parse(snapshot) as { pid?: unknown };
-            } catch {
-              // A stale, malformed lock has no verifiable live owner.
-            }
-            if (processIsAlive(owner.pid)) {
-              await delay(25, signal);
-              continue;
-            }
-            const quarantine = `${this.lockPath}.${randomUUID()}.stale`;
-            try {
-              await rename(this.lockPath, quarantine);
-              const moved = await readFile(quarantine, 'utf8');
-              if (moved === snapshot) {
-                await rm(quarantine, { force: true });
-              } else {
-                try {
-                  await rename(quarantine, this.lockPath);
-                } catch (restoreError) {
-                  throw new Error('Lock ownership changed during stale reclaim.', { cause: restoreError });
-                }
-              }
-            } catch (reclaimError) {
-              if ((reclaimError as NodeJS.ErrnoException).code !== 'ENOENT') throw reclaimError;
-            }
-            continue;
-          }
-        } catch (statError) {
-          if ((statError as NodeJS.ErrnoException).code === 'ENOENT') continue;
-          throw statError;
-        }
+        if ((error as NodeJS.ErrnoException).code !== 'ELOCKED') throw error;
         await delay(25, signal);
       }
     }

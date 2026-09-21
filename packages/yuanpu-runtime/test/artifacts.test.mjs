@@ -239,7 +239,7 @@ test('reclaims only a stale lock whose recorded process is not alive', async (t)
   const packagesRoot = join(root, 'packages');
   await mkdir(packagesRoot, { recursive: true });
   const lock = join(packagesRoot, '.artifact-install.lock');
-  await writeFile(lock, JSON.stringify({ token: 'crashed', pid: 99_999_999 }));
+  await mkdir(lock);
   const old = new Date(Date.now() - 11 * 60 * 1000);
   await utimes(lock, old, old);
   const installed = await manager(root).install(
