@@ -100,7 +100,9 @@ jobs:
         # The Python artifact was built and smoked above. Use the package-level
         # entry here to avoid rebuilding it; the root command stays standalone
         # for local clean-checkout verification.
-        run: pnpm --filter @yuanpu-agent/runtime run smoke:native
+        run: |
+          pnpm --filter @yuanpu-agent/runtime run smoke:native
+          pnpm smoke:runtime-update
 
       - name: Package native artifact
         run: pnpm package:native
