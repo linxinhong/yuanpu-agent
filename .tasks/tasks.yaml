@@ -297,7 +297,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-008
     title: "跨平台技能安装与升级业务验收"
-    status: ready
+    status: in_progress
     goal: "确认用户完整链路以及三系统离线、更新和回滚达到交付条件。"
     scope:
       in: ["S1–S7 真实桌面与自建 catalog/制品源场景","支持平台打包产物及升级失败注入","安全与兼容独立复核报告"]
@@ -327,11 +327,11 @@ tasks:
     investigation_hints: ["入口设计验收表、packages/tests、server/test/catalog.test.mjs、apps/runtime/test 和桌面打包产物","由非主要实现者验证；无测试机/真实签名/受控源则报告具体限制，不修改生产资源来绕过","失败转成具体修复卡，再重跑受影响场景；验收卡不暗含新实现"]
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
-      owner: null
+      owner: "codex-yuanpu-61529-61529-88666"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T15:51:07.008Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
+      branch: "task/task-008-release-verification"
       evidence: []
       follow_up_candidates: []
