@@ -15,6 +15,8 @@ import {
 } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
+export * from './artifacts.js';
+
 const STATE_SCHEMA_VERSION = 1;
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 const LIFECYCLE_SCRIPTS = ['preinstall', 'install', 'postinstall'] as const;

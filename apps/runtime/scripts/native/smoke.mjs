@@ -15,16 +15,18 @@ const { version } = JSON.parse(await readFile(resolve(appRoot, 'package.json'), 
 
 const greeting = execFileSync(binary, [], { encoding: 'utf8' }).trim();
 const reportedVersion = execFileSync(binary, ['--version'], { encoding: 'utf8' }).trim();
-const pythonRoot = resolve(appRoot, '../python-capabilities');
-const pythonExecutable = process.platform === 'win32'
-  ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
-  : join(pythonRoot, '.venv', 'bin', 'python');
+const pythonRoot = resolve(appRoot, '../python-capabilities/dist-artifact/bundle/YuanpuEchoMcp');
+const pythonExecutable = join(
+  pythonRoot,
+  process.platform === 'win32' ? 'YuanpuEchoMcp.exe' : 'YuanpuEchoMcp',
+);
 const capabilitySmoke = JSON.parse(execFileSync(binary, ['--capability-smoke'], {
   encoding: 'utf8',
   env: {
     ...process.env,
     YUANPU_PYTHON_MCP_EXECUTABLE: pythonExecutable,
     YUANPU_PYTHON_MCP_ROOT: pythonRoot,
+    YUANPU_PYTHON_MCP_ARGS: '[]',
     PATH: `${dirname(pythonExecutable)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
   },
 }).trim());

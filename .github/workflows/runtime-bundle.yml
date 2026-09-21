@@ -80,6 +80,11 @@ jobs:
           pnpm --filter @yuanpu-agent/runtime-kit run build
           pnpm --filter @yuanpu-agent/runtime-kit test
 
+      - name: Build self-contained Python capability
+        run: |
+          pnpm build:python-artifact
+          pnpm smoke:python-artifact
+
       - name: Build native executable
         run: pnpm build:native
 

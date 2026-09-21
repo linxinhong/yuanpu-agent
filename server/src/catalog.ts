@@ -2,6 +2,17 @@ import type { SkillCatalogItem } from '@yuanpu-agent/protocol';
 
 export const catalog: SkillCatalogItem[] = [
   {
+    id: 'builtin.python.echo',
+    name: 'yuanpu-echo-mcp',
+    displayName: 'Python 示例能力',
+    version: '0.1.0',
+    description: '进程外运行的自包含 Python 能力包，用于验证安全安装、调用与更新链路。',
+    publisher: 'yuanpu',
+    source: 'artifact:/v1/capability-packages/builtin.python.echo/manifest',
+    components: ['connector'],
+    permissions: ['background'],
+  },
+  {
     id: 'works.earendil.dynamic-workflows',
     name: '@quintinshaw/pi-dynamic-workflows',
     displayName: '工作流编排',

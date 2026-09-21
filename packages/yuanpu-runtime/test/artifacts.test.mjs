@@ -1,0 +1,217 @@
+import assert from 'node:assert/strict';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import * as tar from 'tar';
+
+import {
+  CapabilityArtifactManager,
+  capabilityManifestSigningPayload,
+  detectMcpOwnershipConflicts,
+} from '../dist/index.mjs';
+
+const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
+
+async function fixtureRoot(t) {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-artifacts-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  return root;
+}
+
+async function archiveFixture(root, { prefix, size = 12, symlinkEntry = false } = {}) {
+  const input = join(root, `input-${Math.random()}`);
+  await mkdir(input, { recursive: true });
+  await writeFile(join(input, 'server'), 'x'.repeat(size));
+  if (symlinkEntry) await symlink('server', join(input, 'linked-server'));
+  const archive = join(root, `fixture-${Math.random()}.tar.gz`);
+  await tar.c({ cwd: input, file: archive, gzip: true, prefix }, ['server', ...(symlinkEntry ? ['linked-server'] : [])]);
+  const body = await readFile(archive);
+  return { body, sha256: createHash('sha256').update(body).digest('hex') };
+}
+
+function signedManifest({ url, body, sha256, version = '1.0.0', issuedAt = '2026-09-21T00:00:00.000Z', runtimeCompatibility } = {}) {
+  const manifest = {
+    manifestVersion: 1,
+    kind: 'python-mcp',
+    id: 'builtin.python.echo',
+    version,
+    capabilityContractVersion: 1,
+    runtimeCompatibility: runtimeCompatibility ?? { minimum: '0.1.0', maximumExclusive: '1.0.0' },
+    artifacts: [{
+      platform: process.platform,
+      arch: process.arch,
+      format: 'tar.gz',
+      url,
+      size: body.length,
+      sha256,
+      entrypoint: 'server',
+    }],
+    permissions: [],
+    issuedAt,
+    signature: { algorithm: 'ed25519', keyId: 'test-root', value: '' },
+  };
+  manifest.signature.value = sign(null, capabilityManifestSigningPayload(manifest), privateKey).toString('base64');
+  return manifest;
+}
+
+async function artifactServer(t, bodies) {
+  let requests = 0;
+  const server = createServer((request, response) => {
+    requests += 1;
+    const body = bodies.get(request.url);
+    if (!body) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.setHeader('content-length', body.length);
+    response.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { if (server.listening) server.close(); });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  return {
+    url: (path) => `http://127.0.0.1:${address.port}${path}`,
+    requests: () => requests,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+
+function manager(root, overrides = {}) {
+  return new CapabilityArtifactManager(join(root, 'packages'), {
+    runtimeVersion: '0.1.0',
+    trustRoots: [{ keyId: 'test-root', publicKeyPem }],
+    ...overrides,
+  });
+}
+
+test('installs signed artifacts atomically, stays offline after install, and preserves Pi settings/config', async (t) => {
+  const root = await fixtureRoot(t);
+  const fixture = await archiveFixture(root);
+  const source = await artifactServer(t, new Map([['/artifact', fixture.body]]));
+  const settingsPath = join(root, 'agent', 'settings.json');
+  const configPath = join(root, 'packages', 'config', 'builtin.python.echo', 'user.json');
+  await mkdir(join(root, 'agent'), { recursive: true });
+  await mkdir(join(root, 'packages', 'config', 'builtin.python.echo'), { recursive: true });
+  await writeFile(settingsPath, JSON.stringify({ packages: ['./existing-plugin'] }));
+  await writeFile(configPath, JSON.stringify({ token: '${ECHO_TOKEN}' }));
+
+  const instance = manager(root);
+  const manifest = signedManifest({ url: source.url('/artifact'), ...fixture });
+  const [first, concurrent] = await Promise.all([
+    instance.install(manifest),
+    instance.install(manifest),
+  ]);
+  assert.equal(first.entrypoint, concurrent.entrypoint);
+  assert.equal(source.requests(), 1);
+  assert.equal(await readFile(first.entrypoint, 'utf8'), 'x'.repeat(12));
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, 'utf8')), { packages: ['./existing-plugin'] });
+  assert.deepEqual(JSON.parse(await readFile(configPath, 'utf8')), { token: '${ECHO_TOKEN}' });
+
+  await source.close();
+  const active = await instance.active('builtin.python.echo');
+  assert.equal(active.version, '1.0.0');
+});
+
+test('rejects bad signatures, incompatible runtimes, stale replay, and implicit downgrade', async (t) => {
+  const root = await fixtureRoot(t);
+  const fixture = await archiveFixture(root);
+  const source = await artifactServer(t, new Map([['/artifact', fixture.body]]));
+  const instance = manager(root);
+  const bad = signedManifest({ url: source.url('/artifact'), ...fixture });
+  bad.signature.value = Buffer.from('not-a-signature').toString('base64');
+  await assert.rejects(instance.install(bad), /signature is invalid/);
+  assert.equal(source.requests(), 0);
+
+  const incompatible = signedManifest({
+    url: source.url('/artifact'),
+    ...fixture,
+    runtimeCompatibility: { minimum: '2.0.0' },
+  });
+  await assert.rejects(instance.install(incompatible), /incompatible/);
+  assert.equal(source.requests(), 0);
+
+  const current = signedManifest({
+    url: source.url('/artifact'), ...fixture, version: '2.0.0', issuedAt: '2026-09-21T02:00:00.000Z',
+  });
+  await instance.install(current);
+  const replay = signedManifest({
+    url: source.url('/artifact'), ...fixture, version: '3.0.0', issuedAt: '2026-09-21T01:00:00.000Z',
+  });
+  await assert.rejects(instance.install(replay), /stale.*replay/i);
+  const downgrade = signedManifest({
+    url: source.url('/artifact'), ...fixture, version: '1.0.0', issuedAt: '2026-09-21T03:00:00.000Z',
+  });
+  await assert.rejects(instance.install(downgrade), /downgrade requires explicit/);
+  assert.equal((await instance.active('builtin.python.echo')).version, '2.0.0');
+});
+
+test('rejects traversal prefixes, links, and extraction bombs without activating a package', async (t) => {
+  const root = await fixtureRoot(t);
+  const traversal = await archiveFixture(root, { prefix: '../escape' });
+  const linked = await archiveFixture(root, { symlinkEntry: true });
+  const oversized = await archiveFixture(root, { size: 64 });
+  const source = await artifactServer(t, new Map([
+    ['/traversal', traversal.body],
+    ['/linked', linked.body],
+    ['/oversized', oversized.body],
+  ]));
+  const instance = manager(root, { maxUnpackedBytes: 32 });
+  await assert.rejects(
+    instance.install(signedManifest({ url: source.url('/traversal'), ...traversal })),
+    /Unsafe archive entry/,
+  );
+  await assert.rejects(
+    instance.install(signedManifest({ url: source.url('/linked'), ...linked, version: '1.0.1' })),
+    /Unsafe archive entry/,
+  );
+  await assert.rejects(
+    instance.install(signedManifest({ url: source.url('/oversized'), ...oversized, version: '1.0.2' })),
+    /extraction exceeded/,
+  );
+  assert.equal(await instance.active('builtin.python.echo'), undefined);
+});
+
+test('retains immutable versions for Windows-safe rollback and recovers from failed health checks', async (t) => {
+  const root = await fixtureRoot(t);
+  const fixture = await archiveFixture(root);
+  const source = await artifactServer(t, new Map([['/artifact', fixture.body]]));
+  const instance = manager(root);
+  const first = signedManifest({ url: source.url('/artifact'), ...fixture, version: '1.0.0' });
+  await instance.install(first);
+  const second = signedManifest({
+    url: source.url('/artifact'), ...fixture, version: '2.0.0', issuedAt: '2026-09-21T01:00:00.000Z',
+  });
+  await assert.rejects(
+    instance.install(second, { healthCheck: async () => { throw new Error('crash during switch'); } }),
+    /crash during switch/,
+  );
+  assert.equal((await instance.active('builtin.python.echo')).version, '1.0.0');
+  await instance.install(second);
+  assert.equal((await instance.rollback('builtin.python.echo', '1.0.0')).version, '1.0.0');
+  assert.equal(await readFile(join(root, 'packages', 'artifacts', 'builtin.python.echo', '2.0.0', `${process.platform}-${process.arch}`, 'server'), 'utf8'), 'x'.repeat(12));
+});
+
+test('reports duplicate ownership without changing legacy pi-mcp-adapter configuration', async (t) => {
+  const root = await fixtureRoot(t);
+  await mkdir(join(root, 'agent'), { recursive: true });
+  await mkdir(join(root, 'workspace', '.pi'), { recursive: true });
+  await writeFile(join(root, 'agent', 'mcp.json'), JSON.stringify({ mcpServers: { docs: {}, legacy: {} } }));
+  await writeFile(join(root, 'workspace', '.pi', 'mcp.json'), JSON.stringify({ mcpServers: { docs: {} } }));
+  const conflicts = await detectMcpOwnershipConflicts({
+    yuanpuConnections: ['docs'],
+    agentRoot: join(root, 'agent'),
+    workspaceRoot: join(root, 'workspace'),
+  });
+  assert.deepEqual(conflicts, [{
+    name: 'docs',
+    owners: ['yuanpu', 'pi-mcp-adapter-user', 'pi-mcp-adapter-workspace'],
+  }]);
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'agent', 'mcp.json'), 'utf8')), {
+    mcpServers: { docs: {}, legacy: {} },
+  });
+});

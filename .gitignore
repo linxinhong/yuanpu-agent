@@ -1,11 +1,13 @@
 node_modules/
 dist/
 dist-native/
+dist-artifact/
 dist-release/
 release/
 *.log
 __pycache__/
 .venv/
+.pyinstaller/
 .DS_Store
 packages/ai/src/providers/data/
 

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { createCatalogServer } from '../dist/index.mjs';
@@ -11,11 +14,32 @@ test('catalog server searches skills and returns item details', async (context) 
   assert.ok(address && typeof address !== 'string');
   const origin = `http://127.0.0.1:${address.port}`;
 
-  const search = await fetch(`${origin}/v1/catalog/search?q=MCP`).then((response) => response.json());
+  const search = await fetch(`${origin}/v1/catalog/search?q=%E5%A4%96%E9%83%A8%20MCP`).then((response) => response.json());
   assert.equal(search.schemaVersion, 1);
   assert.equal(search.items.length, 1);
   assert.equal(search.items[0].displayName, 'MCP 服务连接');
 
   const detail = await fetch(`${origin}/v1/catalog/items/${search.items[0].id}`).then((response) => response.json());
   assert.deepEqual(detail.components, ['connector', 'extension']);
+});
+
+test('catalog server exposes controlled signed metadata and immutable artifacts', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-catalog-artifact-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const body = Buffer.from('signed-fixture');
+  await writeFile(join(root, 'manifest.json'), JSON.stringify({ id: 'builtin.python.echo', signature: { value: 'fixture' } }));
+  await writeFile(join(root, 'echo.tar.gz'), body);
+  const server = createCatalogServer(undefined, { artifactRoot: root });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const origin = `http://127.0.0.1:${address.port}`;
+
+  const manifest = await fetch(`${origin}/v1/capability-packages/builtin.python.echo/manifest`).then((response) => response.json());
+  assert.equal(manifest.signature.value, 'fixture');
+  const artifact = await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/echo.tar.gz`);
+  assert.equal(artifact.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.deepEqual(Buffer.from(await artifact.arrayBuffer()), body);
+  assert.equal((await fetch(`${origin}/v1/capability-packages/builtin.python.echo/artifacts/..%2Fsecret`)).status, 400);
 });
