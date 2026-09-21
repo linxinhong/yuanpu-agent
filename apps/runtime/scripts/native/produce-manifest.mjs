@@ -1,6 +1,8 @@
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import { PROTOCOL_VERSION } from '@yuanpu-agent/protocol';
+
 import { sha256File } from './lib.mjs';
 
 const appRoot = resolve(import.meta.dirname, '../..');
@@ -40,7 +42,7 @@ for (const filename of files.sort()) {
 
 const manifest = {
   schemaVersion: 1,
-  protocolVersion: 1,
+  protocolVersion: PROTOCOL_VERSION,
   minDesktopVersion: '0.1.0',
   version,
   tag,

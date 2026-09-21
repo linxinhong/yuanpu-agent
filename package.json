@@ -12,23 +12,25 @@
     "build:pi": "node scripts/hydrate-pi-model-data.mjs && pnpm --dir packages/chord run build && pnpm --dir packages/tui run build && pnpm --dir packages/telemetry run build && pnpm --dir packages/ai run build:offline && pnpm --dir packages/durable run build && pnpm --dir packages/agent run build && pnpm --dir packages/session-backends/sqlite-node run build && pnpm --dir packages/protocol run build && pnpm --dir packages/client run build && pnpm --dir packages/server run build && pnpm --dir packages/coding-agent run build",
     "check": "pnpm run build && pnpm run typecheck:yuanpu && pnpm run test",
     "dev": "pnpm build:runtime && pnpm build:desktop && pnpm --filter @yuanpu-agent/desktop run dev",
+    "dev:catalog": "pnpm --filter @yuanpu-agent/catalog-server run dev",
     "package:desktop": "pnpm run build && pnpm run build:native && pnpm run smoke:native && pnpm --filter @yuanpu-agent/desktop run package",
     "package:native": "pnpm --filter @yuanpu-agent/runtime run package:native",
     "release:manifest": "pnpm --filter @yuanpu-agent/runtime run release:manifest",
     "smoke:native": "pnpm --filter @yuanpu-agent/runtime run smoke:native",
     "start": "pnpm run dev",
+    "start:catalog": "pnpm --filter @yuanpu-agent/catalog-server run start",
     "sync:pi": "node scripts/sync-pi-packages.mjs",
     "test": "pnpm -r --filter '!@earendil-works/*' --if-present run test",
     "typecheck": "pnpm run build:pi && pnpm run typecheck:yuanpu",
     "typecheck:yuanpu": "pnpm -r --filter '!@earendil-works/*' run typecheck"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.15.0 <25"
   },
   "packageManager": "pnpm@11.22.0",
   "devDependencies": {
     "@typescript/native-preview": "7.0.0-dev.20260120.1",
-    "@types/node": "^22.15.3",
+    "@types/node": "^24.13.6",
     "@smithy/types": "4.18.0",
     "esbuild": "0.28.2",
     "https-proxy-agent": "9.1.0",

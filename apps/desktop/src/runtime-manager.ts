@@ -2,6 +2,13 @@ import {
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,
   type ChatResponse,
+  type InstalledPlugin,
+  type LocalSkillList,
+  type PluginConfigDocument,
+  type PluginConfigInput,
+  type PluginConfigScope,
+  type PluginConfigValidation,
+  type PluginSearchResult,
   type RuntimeGreeting,
   type RuntimeInfo,
   type RuntimeUpdateState,
@@ -231,6 +238,72 @@ export class RuntimeManager {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message }),
+    });
+  }
+
+  searchPlugins(query: string): Promise<PluginSearchResult[]> {
+    return this.request(`${RUNTIME_ROUTES.pluginSearch}?q=${encodeURIComponent(query)}`);
+  }
+
+  listPlugins(): Promise<InstalledPlugin[]> {
+    return this.request(RUNTIME_ROUTES.plugins);
+  }
+
+  listLocalSkills(): Promise<LocalSkillList> {
+    return this.request(RUNTIME_ROUTES.localSkills);
+  }
+
+  installPlugin(source: string): Promise<InstalledPlugin> {
+    return this.request(RUNTIME_ROUTES.pluginInstall, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source }),
+    });
+  }
+
+  setPluginEnabled(name: string, enabled: boolean): Promise<InstalledPlugin> {
+    return this.request(RUNTIME_ROUTES.pluginState, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, enabled }),
+    });
+  }
+
+  async uninstallPlugin(name: string): Promise<void> {
+    await this.request(RUNTIME_ROUTES.pluginUninstall, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  getPluginConfig(name: string, scope: PluginConfigScope): Promise<PluginConfigDocument> {
+    return this.request(
+      `${RUNTIME_ROUTES.pluginConfig}?name=${encodeURIComponent(name)}&scope=${encodeURIComponent(scope)}`,
+    );
+  }
+
+  validatePluginConfig(input: PluginConfigInput): Promise<PluginConfigValidation> {
+    return this.request(RUNTIME_ROUTES.pluginConfigValidate, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  savePluginConfig(input: PluginConfigInput): Promise<PluginConfigDocument> {
+    return this.request(RUNTIME_ROUTES.pluginConfigSave, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  resetPluginConfig(name: string, scope: PluginConfigScope): Promise<PluginConfigDocument> {
+    return this.request(RUNTIME_ROUTES.pluginConfigReset, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, scope }),
     });
   }
 

@@ -96,6 +96,72 @@ export interface YuanpuChatResult {
   tools: Array<{ name: string; status: 'completed' | 'failed' }>;
 }
 
+export interface YuanpuExtensionDiagnostic {
+  path: string;
+  error: string;
+}
+
+export interface YuanpuLocalSkill {
+  name: string;
+  description: string;
+  filePath: string;
+  disableModelInvocation: boolean;
+}
+
+export interface YuanpuSkillDiagnostic {
+  path: string;
+  message: string;
+}
+
+export async function inspectYuanpuSkills(options: {
+  agentDir: string;
+  cwd: string;
+}): Promise<{ skills: YuanpuLocalSkill[]; diagnostics: YuanpuSkillDiagnostic[] }> {
+  const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    settingsManager,
+    noExtensions: true,
+    noThemes: true,
+  });
+  await resourceLoader.reload();
+  const result = resourceLoader.getSkills();
+  const localSkillsRoot = join(options.agentDir, 'skills');
+  return {
+    skills: result.skills.filter((skill) => skill.filePath.startsWith(localSkillsRoot)).map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+      filePath: skill.filePath,
+      disableModelInvocation: skill.disableModelInvocation,
+    })),
+    diagnostics: result.diagnostics.filter((diagnostic) => (
+      !diagnostic.path || diagnostic.path.startsWith(localSkillsRoot)
+    )).map((diagnostic) => ({
+      path: diagnostic.path ?? '',
+      message: diagnostic.message,
+    })),
+  };
+}
+
+export async function inspectYuanpuExtensions(options: {
+  agentDir: string;
+  cwd: string;
+}): Promise<YuanpuExtensionDiagnostic[]> {
+  const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    settingsManager,
+    noThemes: true,
+  });
+  await resourceLoader.reload();
+  const result = resourceLoader.getExtensions();
+  const diagnostics = result.errors.map(({ path, error }) => ({ path, error }));
+  result.runtime.invalidate('Extension inspection completed.');
+  return diagnostics;
+}
+
 export interface CreateYuanpuChatOptions {
   capabilityClient: CapabilityToolClient;
   agentDir: string;
@@ -154,6 +220,7 @@ export async function createYuanpuChatSession(
   const modelRuntime = await ModelRuntime.create({
     authPath: join(options.agentDir, 'auth.json'),
     modelsPath,
+    modelsStorePath: join(options.agentDir, 'models-store.json'),
   });
   if (options.apiKey) await modelRuntime.setRuntimeApiKey(options.provider, options.apiKey);
   const model = modelRuntime.getModel(options.provider, options.model);

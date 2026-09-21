@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -7,6 +7,8 @@ import test from 'node:test';
 import {
   createYuanpuCapabilityTools,
   createYuanpuChatSession,
+  inspectYuanpuExtensions,
+  inspectYuanpuSkills,
   PI_UPSTREAM_VERSION,
 } from '../dist/index.mjs';
 
@@ -18,6 +20,39 @@ test('Pi receives only the two Yuanpu external capability tools', () => {
   const tools = createYuanpuCapabilityTools(client);
   assert.equal(PI_UPSTREAM_VERSION, '0.86.1');
   assert.deepEqual(tools.map((tool) => tool.name), ['search_capabilities', 'execute_capability']);
+});
+
+test('skill inspection lists user skills from the Yuanpu Agent directory', async (context) => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'yuanpu-pi-skill-'));
+  context.after(() => rm(agentDir, { recursive: true, force: true }));
+  const skillDir = join(agentDir, 'skills', 'meeting-notes');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(skillDir, { recursive: true }));
+  await writeFile(join(skillDir, 'SKILL.md'), [
+    '---',
+    'name: meeting-notes',
+    'description: Turn meeting notes into action items.',
+    '---',
+    '',
+    '# Meeting notes',
+  ].join('\n'));
+
+  const result = await inspectYuanpuSkills({ agentDir, cwd: agentDir });
+  assert.equal(result.diagnostics.length, 0);
+  assert.equal(result.skills.length, 1);
+  assert.equal(result.skills[0].name, 'meeting-notes');
+});
+
+test('extension inspection reports a broken user plugin without modifying Pi upstream', async (context) => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'yuanpu-pi-extension-'));
+  context.after(() => rm(agentDir, { recursive: true, force: true }));
+  const extensionPath = join(agentDir, 'broken-extension.js');
+  await writeFile(extensionPath, 'export default function () { throw new Error("broken extension fixture"); }\n');
+  await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ packages: [extensionPath] }));
+
+  const diagnostics = await inspectYuanpuExtensions({ agentDir, cwd: agentDir });
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].path, extensionPath);
+  assert.match(diagnostics[0].error, /broken extension fixture/);
 });
 
 test('custom OpenAI-compatible model config is materialized outside Pi upstream packages', async (context) => {

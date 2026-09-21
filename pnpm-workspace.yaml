@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - packages/session-backends/*
+  - server
 
 linkWorkspacePackages: true
 preferWorkspacePackages: true

@@ -1,12 +1,20 @@
 import { ensureYuanpuHome, greeting } from '@yuanpu-agent/core';
 import { createDemoCapabilitySource, createYuanpuMcpServer } from '@yuanpu-agent/mcp';
+import { PluginManager } from '@yuanpu-agent/plugins';
 import {
   createYuanpuCapabilityTools,
   createYuanpuChatSession,
+  inspectYuanpuExtensions,
+  inspectYuanpuSkills,
   PI_UPSTREAM_VERSION,
   type YuanpuChatSession,
 } from '@yuanpu-agent/pi-runtime';
-import { PROTOCOL_VERSION, RUNTIME_ROUTES } from '@yuanpu-agent/protocol';
+import {
+  PROTOCOL_VERSION,
+  RUNTIME_ROUTES,
+  type PluginConfigInput,
+  type PluginConfigScope,
+} from '@yuanpu-agent/protocol';
 import { createServer, type IncomingMessage } from 'node:http';
 
 declare const __APP_VERSION__: string;
@@ -25,6 +33,26 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
 }
 
+function readConfigScope(value: unknown): PluginConfigScope {
+  if (value !== 'user' && value !== 'workspace') throw new Error('插件配置作用域无效。');
+  return value;
+}
+
+function readConfigInput(value: unknown): PluginConfigInput {
+  if (!value || typeof value !== 'object') throw new Error('插件配置请求无效。');
+  const input = value as Partial<PluginConfigInput>;
+  if (
+    typeof input.name !== 'string'
+    || !input.name.trim()
+    || !input.value
+    || typeof input.value !== 'object'
+    || Array.isArray(input.value)
+  ) {
+    throw new Error('插件名称或配置内容无效。');
+  }
+  return { name: input.name, scope: readConfigScope(input.scope), value: input.value };
+}
+
 async function serve(): Promise<void> {
   const portIndex = args.indexOf('--port');
   const requestedPort = portIndex >= 0 ? Number(args[portIndex + 1]) : 0;
@@ -33,13 +61,37 @@ async function serve(): Promise<void> {
   if (!token) throw new Error('Runtime server requires --token');
 
   const home = await ensureYuanpuHome(process.env.YUANPU_HOME);
+  process.env.PI_CODING_AGENT_DIR = home.agentPath;
+  process.env.PI_CODING_AGENT_SESSION_DIR = home.sessionsPath;
+  const plugins = new PluginManager(
+    home.packagesPath,
+    home.agentPath,
+    process.env.YUANPU_PLUGIN_REGISTRY_URL,
+    home.config.workingDirectory,
+    home.config.catalogUrl,
+  );
   const mcp = createYuanpuMcpServer([createDemoCapabilitySource()]);
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   let chatPromise: Promise<YuanpuChatSession> | undefined;
+  let activePrompts = 0;
+  const retiredChats = new Set<Promise<YuanpuChatSession>>();
+  const disposeRetiredChats = () => {
+    if (activePrompts > 0) return;
+    for (const retired of retiredChats) {
+      retiredChats.delete(retired);
+      void retired.then((chat) => chat.dispose(), () => undefined);
+    }
+  };
+  const resetChat = () => {
+    const previous = chatPromise;
+    chatPromise = undefined;
+    if (previous) retiredChats.add(previous);
+    disposeRetiredChats();
+  };
   const getChat = () => {
     chatPromise ??= createYuanpuChatSession({
       capabilityClient: mcp,
-      agentDir: home.root,
+      agentDir: home.agentPath,
       cwd: home.config.workingDirectory,
       provider: home.config.provider,
       model: home.config.model,
@@ -49,6 +101,13 @@ async function serve(): Promise<void> {
       api: home.config.api,
     });
     return chatPromise;
+  };
+  const inspectPlugin = async (plugin: { installPath: string }) => {
+    const diagnostics = await inspectYuanpuExtensions({
+      agentDir: home.agentPath,
+      cwd: home.config.workingDirectory,
+    });
+    return diagnostics.filter((diagnostic) => diagnostic.path.startsWith(plugin.installPath));
   };
 
   const server = createServer(async (request, response) => {
@@ -87,8 +146,134 @@ async function serve(): Promise<void> {
           response.end(JSON.stringify({ error: 'A non-empty message is required.' }));
           return;
         }
-        const result = await (await getChat()).prompt(body.message.trim());
-        response.end(JSON.stringify(result));
+        activePrompts += 1;
+        try {
+          const result = await (await getChat()).prompt(body.message.trim());
+          response.end(JSON.stringify(result));
+        } finally {
+          activePrompts -= 1;
+          disposeRetiredChats();
+        }
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.localSkills && request.method === 'GET') {
+        response.end(JSON.stringify(await inspectYuanpuSkills({
+          agentDir: home.agentPath,
+          cwd: home.config.workingDirectory,
+        })));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginSearch && request.method === 'GET') {
+        response.end(JSON.stringify(await plugins.search(url.searchParams.get('q') ?? '')));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.plugins && request.method === 'GET') {
+        response.end(JSON.stringify(await plugins.list()));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginConfig && request.method === 'GET') {
+        const name = url.searchParams.get('name');
+        if (!name) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: '插件名称不能为空。' }));
+          return;
+        }
+        const scope = readConfigScope(url.searchParams.get('scope'));
+        response.end(JSON.stringify(await plugins.getConfig(name, scope)));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginConfigValidate && request.method === 'POST') {
+        const input = readConfigInput(await readJsonBody(request));
+        response.end(JSON.stringify(await plugins.validateConfig(input)));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginConfigSave && request.method === 'POST') {
+        const input = readConfigInput(await readJsonBody(request));
+        const document = await plugins.saveConfig(input);
+        resetChat();
+        response.end(JSON.stringify(document));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginConfigReset && request.method === 'POST') {
+        const body = await readJsonBody(request) as { name?: unknown; scope?: unknown };
+        if (typeof body.name !== 'string' || !body.name.trim()) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: '插件名称不能为空。' }));
+          return;
+        }
+        const document = await plugins.resetConfig(body.name, readConfigScope(body.scope));
+        resetChat();
+        response.end(JSON.stringify(document));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginInstall && request.method === 'POST') {
+        const body = await readJsonBody(request) as { source?: unknown };
+        if (typeof body.source !== 'string' || !body.source.trim()) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: '插件来源不能为空。' }));
+          return;
+        }
+        const plugin = await plugins.install(body.source.trim());
+        const pluginErrors = await inspectPlugin(plugin);
+        if (pluginErrors.length > 0) {
+          const message = pluginErrors.map((diagnostic) => diagnostic.error).join('\n');
+          await plugins.markLoadError(plugin.name, message);
+          resetChat();
+          response.statusCode = 422;
+          response.end(JSON.stringify({
+            error: `插件已安装但加载失败，已自动停用：${message}`,
+          }));
+          return;
+        }
+        resetChat();
+        response.end(JSON.stringify(plugin));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginState && request.method === 'POST') {
+        const body = await readJsonBody(request) as { name?: unknown; enabled?: unknown };
+        if (typeof body.name !== 'string' || typeof body.enabled !== 'boolean') {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: '插件名称和启用状态无效。' }));
+          return;
+        }
+        const plugin = await plugins.setEnabled(body.name, body.enabled);
+        if (body.enabled) {
+          const pluginErrors = await inspectPlugin(plugin);
+          if (pluginErrors.length > 0) {
+            const message = pluginErrors.map((diagnostic) => diagnostic.error).join('\n');
+            await plugins.markLoadError(plugin.name, message);
+            resetChat();
+            response.statusCode = 422;
+            response.end(JSON.stringify({
+              error: `插件加载失败，已重新停用：${message}`,
+            }));
+            return;
+          }
+        }
+        resetChat();
+        response.end(JSON.stringify(plugin));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.pluginUninstall && request.method === 'POST') {
+        const body = await readJsonBody(request) as { name?: unknown };
+        if (typeof body.name !== 'string' || !body.name.trim()) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: '插件名称不能为空。' }));
+          return;
+        }
+        await plugins.uninstall(body.name);
+        resetChat();
+        response.end(JSON.stringify({ ok: true }));
         return;
       }
 
@@ -97,12 +282,15 @@ async function serve(): Promise<void> {
     } catch (error) {
       response.statusCode = 500;
       const message = error instanceof Error ? error.message : String(error);
-      const safeMessage = message.includes('No API key found')
+      const missingApiKey = message.includes('No API key found');
+      const safeMessage = missingApiKey
         ? `未找到 ${home.config.provider} API 密钥。请设置 ${home.config.apiKeyEnv} 后重启 YuanpuAgent。`
         : message;
       response.end(JSON.stringify({
         error: safeMessage,
-        hint: `Check ${home.configPath} and ${home.config.apiKeyEnv}.`,
+        ...(missingApiKey
+          ? { hint: `Check ${home.configPath} and ${home.config.apiKeyEnv}.` }
+          : {}),
       }));
     }
   });
@@ -125,7 +313,9 @@ async function serve(): Promise<void> {
   });
 
   const shutdown = () => {
-    void chatPromise?.then((chat) => chat.dispose(), () => undefined);
+    resetChat();
+    activePrompts = 0;
+    disposeRetiredChats();
     server.close(() => process.exit(0));
   };
   process.once('SIGINT', shutdown);

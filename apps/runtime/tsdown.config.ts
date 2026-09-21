@@ -19,6 +19,10 @@ export default defineConfig({
   sourcemap: false,
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
+    // The runtime is a single Node bundle (and later a SEA executable). Tell Pi
+    // to use its embedded extension loader instead of resolving workspace files
+    // relative to an import.meta URL that no longer exists after CJS bundling.
+    PI_BUNDLED_NODE: 'true',
   },
   deps: {
     alwaysBundle: [
@@ -26,6 +30,7 @@ export default defineConfig({
       '@yuanpu-agent/mcp',
       '@yuanpu-agent/mcp-contracts',
       '@yuanpu-agent/pi-runtime',
+      '@yuanpu-agent/plugins',
       '@yuanpu-agent/protocol',
     ],
     onlyBundle: false,

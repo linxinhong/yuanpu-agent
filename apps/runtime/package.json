@@ -31,12 +31,13 @@
     "@yuanpu-agent/mcp": "workspace:*",
     "@yuanpu-agent/mcp-contracts": "workspace:*",
     "@yuanpu-agent/pi-runtime": "workspace:*",
+    "@yuanpu-agent/plugins": "workspace:*",
     "@yuanpu-agent/protocol": "workspace:*"
   },
   "devDependencies": {
     "postject": "1.0.0-alpha.6"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.15.0 <25"
   }
 }

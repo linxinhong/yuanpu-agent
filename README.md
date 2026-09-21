@@ -7,6 +7,7 @@ Electron 图形界面与 Node.js SEA Runtime 解耦的 pnpm monorepo。工程组
 - `apps/app`：React/Vite renderer，只能访问 preload 暴露的窄接口。
 - `apps/desktop`：Electron main/preload，负责窗口、Runtime 生命周期与桌面端更新。
 - `apps/runtime`：Node SEA sidecar，承载 Agent 与本地服务，可以独立于桌面壳更新。
+- `server`：Yuanpu 技能市场目录服务，提供搜索与详情 API。
 - `packages/agent` 等：从 Pi 上游按固定 commit 同步的原样源码包。
 - `packages/yuanpu-protocol`：Renderer、Electron 和 Runtime 共用的协议版本与类型。
 - `packages/yuanpu-core`：不感知界面的领域逻辑。
@@ -18,7 +19,7 @@ Electron 首次使用安装包中携带的 Runtime。独立更新会下载到 El
 
 ## 本地开发
 
-要求 Node.js 22.19+ 和 pnpm 11。
+要求 Node.js 24.15+ 和 pnpm 11。
 
 ```bash
 pnpm install
@@ -26,13 +27,20 @@ pnpm check
 pnpm dev
 ```
 
-`pnpm dev` 会构建 Runtime 和 Electron main/preload，启动 Vite，然后打开 Electron。
+`pnpm dev` 会构建 Runtime 和 Electron main/preload，同时启动技能市场服务、Vite 和 Electron。
 
 ## 本地 Agent 配置
 
-Runtime 使用 Node 的系统主目录解析创建跨平台配置根目录：macOS/Linux 为 `~/.yuanpu`，Windows 为 `%USERPROFILE%\\.yuanpu`。首次启动会创建 `config.json`、`skills/`、`memory/` 和 `sessions/`。
+Runtime 使用 Node 的系统主目录解析创建跨平台配置根目录：macOS/Linux 为 `~/.yuanpu`，Windows 为 `%USERPROFILE%\\.yuanpu`。首次启动会创建以下边界：
 
-默认模型从 `OPENAI_API_KEY` 读取密钥。可在 `config.json` 修改 `provider`、`model`、`apiKeyEnv`、`baseUrl`、`api` 或 `workingDirectory`，然后重启桌面端。`baseUrl` 可接入 OpenAI-compatible 自定义服务；也可使用 Pi 的 `~/.yuanpu/auth.json` 凭据格式。API 密钥不会写入 `config.json`。
+- `app/config.json`：Yuanpu 全局配置，包括可选的 `catalogUrl`。
+- `agent/`：Pi 配置、凭据、模型缓存、会话、记忆和本地技能。
+- `packages/`：从技能市场安装的能力包及其独立配置。
+- `workflows/`：Yuanpu 工作流数据。
+
+默认模型从 `OPENAI_API_KEY` 读取密钥。可在 `app/config.json` 修改 `provider`、`model`、`apiKeyEnv`、`baseUrl`、`api`、`workingDirectory` 或 `catalogUrl`，然后重启桌面端。`baseUrl` 可接入 OpenAI-compatible 自定义服务；也可使用 Pi 的 `~/.yuanpu/agent/auth.json` 凭据格式。API 密钥不会写入 `config.json`。
+
+本地技能放在 `~/.yuanpu/agent/skills/<name>/SKILL.md`。技能市场安装的是可包含技能、专家角色、工作流、扩展或服务连接的“能力包”，普通用户只需要理解“技能”这一入口。
 
 ## 构建产物
 

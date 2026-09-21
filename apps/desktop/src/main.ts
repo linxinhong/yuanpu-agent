@@ -41,6 +41,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('runtime:greeting', (_event, name: string) => runtime.greeting(name));
   ipcMain.handle('runtime:chat', (_event, message: string) => runtime.chat(message));
   ipcMain.handle('runtime:update', () => runtime.checkForUpdate());
+  ipcMain.handle('plugins:search', (_event, query: string) => runtime.searchPlugins(query));
+  ipcMain.handle('plugins:list', () => runtime.listPlugins());
+  ipcMain.handle('skills:local', () => runtime.listLocalSkills());
+  ipcMain.handle('plugins:install', (_event, source: string) => runtime.installPlugin(source));
+  ipcMain.handle('plugins:state', (_event, name: string, enabled: boolean) => (
+    runtime.setPluginEnabled(name, enabled)
+  ));
+  ipcMain.handle('plugins:uninstall', (_event, name: string) => runtime.uninstallPlugin(name));
+  ipcMain.handle('plugins:config:get', (_event, name, scope) => runtime.getPluginConfig(name, scope));
+  ipcMain.handle('plugins:config:validate', (_event, input) => runtime.validatePluginConfig(input));
+  ipcMain.handle('plugins:config:save', (_event, input) => runtime.savePluginConfig(input));
+  ipcMain.handle('plugins:config:reset', (_event, name, scope) => runtime.resetPluginConfig(name, scope));
   ipcMain.handle('desktop:update', async () => {
     if (!app.isPackaged) throw new Error('Desktop updates are only available in packaged builds');
     await autoUpdater.checkForUpdates();
