@@ -46,7 +46,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-002
     title: "固定能力与制品公共契约"
-    status: ready
+    status: in_progress
     goal: "固定跨进程、授权和分发数据契约，消除消费者各自解释。"
     scope:
       in: ["capabilities/contracts.ts 及 yuanpu-protocol 公共 DTO","source 路由、MCP 结果、授权状态、制品 schema 与兼容策略","对应旧消费者适配和契约测试"]
@@ -68,12 +68,12 @@ tasks:
     investigation_hints: ["入口 packages/yuanpu-runtime/src/capabilities/contracts.ts、src/pi/index.ts、packages/yuanpu-protocol；现有结果只支持 JsonValue","契约卡为共享协议单一修改者；选 SDK/Schema 版本前核对官方文档；向下兼容必须测试"]
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
-      owner: null
+      owner: "codex-yuanpu"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T07:52:43.157Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
+      branch: "task/task-002-contract"
       evidence: []
       follow_up_candidates: []
   - id: TASK-003
