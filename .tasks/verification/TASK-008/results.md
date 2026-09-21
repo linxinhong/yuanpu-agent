@@ -15,7 +15,7 @@
 | S3 单源失败隔离、取消和进程清理 | PASS（macOS arm64） | TASK-009 新增已初始化但挂起 `tools/list` 的真实进程回归，超时后 PID 消失；验收结束没有本工作树的 Runtime/Python MCP 遗留进程。Windows Job Object 实机仍未验证。 |
 | S4 无系统 Python 的自包含安装 | PASS（macOS 制品级） / UNVERIFIED（三平台） | 冻结 Python 制品在隔离 PATH smoke 通过，并被打进 `.app`；应用内 Runtime 与 `YuanpuEchoMcp` 均为 Mach-O arm64、版本 0.1.0。Linux/Windows hosted artifact 未运行。 |
 | S5 Python 能力更新失败保旧、成功更新与回滚 | PASS（macOS 既有桌面场景） | TASK-007 真实桌面测试覆盖坏签名保留 0.1.0、成功升级 0.2.0 和显式回滚。Windows 文件占用实机恢复未验证。 |
-| S5 SEA Runtime 独立更新 | UNVERIFIED | 代码包含下载、长度/SHA-256 校验、暂存、`--version` 冒烟及下次启动切换，但没有本 revision 的端到端下载→暂存→重启激活证据，不能以源码检查代替验收。 |
+| S5 SEA Runtime 独立更新 | PASS（macOS arm64） / UNVERIFIED（Linux/Windows） | TASK-010 通过 loopback HTTP 下载刚构建的真实 SEA，证明校验后只暂存、模拟重启才原子激活；故障矩阵覆盖大小、哈希、传输中断、版本与 metadata 错误并保留旧版。Linux/Windows hosted run 尚无结果。 |
 | S6 离线、旧 npm 插件/配置保留 | PARTIAL | TASK-007 覆盖旧 `pi-mcp-adapter` 冲突显式选择且配置保留；macOS 自包含二进制可直接执行。三平台断外网桌面安装/调用未验证。 |
 | S7 搜索→信任→安装→配置→对话→审批→更新/回滚 | PASS（macOS 既有桌面场景） | TASK-007 在真实 Electron/LongCat 链路完成并保留截图和持久状态证据。本卡未在 Linux/Windows 重复该桌面旅程。 |
 
@@ -50,4 +50,4 @@
 1. 将待验 revision 推到远端并取得 Linux、macOS、Windows hosted bundle 的成功运行和制品证据。
 2. 配置生产 Ed25519、Apple Developer ID/公证及 Windows Authenticode 凭据，记录各系统真实安装提示。
 3. 在三平台执行无系统 Python、断外网的安装/调用旅程。
-4. 为 SEA Runtime 独立更新补充下载、坏制品保旧、暂存、重启激活和清理的端到端回归。
+4. 为 Runtime manifest 增加独立生产信任验证；当前 SHA-256 随同 manifest 获取，不能替代发布者签名和平台代码签名。

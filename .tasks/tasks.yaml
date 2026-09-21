@@ -341,6 +341,7 @@ tasks:
         - {type: "security", check: "release signing gates", status: "unverified", summary: "Production capability signing gate fails closed when credentials are absent; local macOS app is ad-hoc with no TeamIdentifier and fails spctl; Apple notarization and Windows Authenticode are unverified."}
         - {type: "boundary", check: "current revision hosted runs", status: "unverified", summary: "bc83168 is 53 commits ahead of origin/main and has no gh run result; workflow matrix definitions are not execution evidence."}
         - {type: "memory", check: "verification record", status: "passed", summary: "TASK-008 results and memory record S1-S7, exact artifacts, independent verdict and unblock conditions without a production-readiness claim."}
+        - {type: "repair", check: "SEA Runtime staged update", status: "passed", summary: "TASK-010 adds real SEA loopback download, staging, restart activation and failure-preserves-old regression on macOS arm64; Linux/Windows runs and production manifest trust remain unverified."}
       follow_up_candidates:
         - "TASK-009 修复干净构建后的冻结 Python MCP 首次冷启动发现超时，再恢复 TASK-008 验收。"
         - "为 SEA Runtime 独立更新补充下载、坏制品保旧、暂存、重启激活与清理的端到端回归。"
@@ -412,5 +413,12 @@ tasks:
       completed_at: null
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-update"
       branch: "task/task-010-sea-update"
-      evidence: []
-      follow_up_candidates: []
+      evidence:
+        - {type: "test", check: "Runtime updater fault matrix", status: "passed", summary: "Desktop tests use loopback HTTP, real files and a real executable to cover staged activation plus bad size/hash, interrupted transfer, version mismatch, malicious metadata and partial staging; old current.json remains active."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0 full build, Yuanpu typecheck and tests pass: desktop 5/5, runtime-kit 45/45, runtime 3/3 and server 2/2."}
+        - {type: "command", check: "pnpm smoke:native", status: "passed", summary: "darwin-arm64 root smoke passed frozen Python preparation, SEA capability smoke, then loopback download/stage/activate of the actual built YuanpuAgentRuntime with version and SHA-256 recheck."}
+        - {type: "artifact", check: "pnpm package:desktop", status: "passed", summary: "macOS arm64 ZIP/DMG packaging passed; app.asar contains main, updater entry and shared updater implementation chunk."}
+        - {type: "boundary", check: "cross-platform and production trust", status: "unverified", summary: "runtime-bundle now runs the staged-update smoke on all matrix targets, but current revision has no hosted results; Runtime manifest signing and Apple/Windows production signing remain release gates."}
+        - {type: "memory", check: "verification record", status: "passed", summary: "TASK-010 results and memory document the deep module interface, commands, fault matrix and remaining trust boundary."}
+      follow_up_candidates:
+        - "为 Runtime update manifest 增加独立发布者签名与客户端固定信任根验证，不能仅依赖同源 SHA-256。"
