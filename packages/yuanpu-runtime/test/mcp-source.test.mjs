@@ -136,9 +136,10 @@ test('a persisted approval is consumed before a real dispatch crash and is never
     createId: () => 'dispatch-crash-approval',
   });
   let server = createYuanpuMcpServer([source], store);
-  const match = (await server.search({ query: 'write marker exit' })).matches
+  const search = await server.search({ query: 'write marker exit', limit: 20 });
+  const match = search.matches
     .find((capability) => capability.originalName === 'yuanpu_write_marker_and_exit');
-  assert.ok(match);
+  assert.ok(match, JSON.stringify(search));
   const execution = { name: match.name, arguments: { marker: markerPath } };
   const hostContext = { sessionId: 'stage-verification', workspaceId: root };
   let requestId;
