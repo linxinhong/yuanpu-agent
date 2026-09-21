@@ -297,7 +297,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-008
     title: "跨平台技能安装与升级业务验收"
-    status: in_progress
+    status: blocked
     goal: "确认用户完整链路以及三系统离线、更新和回滚达到交付条件。"
     scope:
       in: ["S1–S7 真实桌面与自建 catalog/制品源场景","支持平台打包产物及升级失败注入","安全与兼容独立复核报告"]
@@ -328,14 +328,23 @@ tasks:
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
       owner: "codex-yuanpu-61529-61529-88666"
-      attempts: 0
+      attempts: 1
       claimed_at: "2026-09-21T15:51:07.008Z"
       completed_at: null
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-008-release-verification"
-      evidence: []
+      evidence:
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Integrated TASK-009 revision bc83168 passed full build, Yuanpu typecheck and tests on macOS arm64 with Node 24.15.0; runtime-kit 45/45, runtime 3/3, desktop 2/2 and server 2/2."}
+        - {type: "command", check: "clean pnpm build:native && pnpm smoke:native", status: "passed", summary: "From removed generated outputs, the first run rebuilt and isolated-smoked the frozen Python MCP, then passed darwin-arm64 SEA search/call/error smoke without warm-up retry."}
+        - {type: "artifact", check: "pnpm package:desktop", status: "passed", summary: "macOS arm64 produced ZIP d2ab15fc…6543 and DMG 205a6886…4bd; packaged Runtime and Python MCP are Mach-O arm64 version 0.1.0."}
+        - {type: "review", check: "independent business verification", status: "failed", summary: "Verifier confirmed macOS cold-start, self-contained artifact and cleanup PASS, but final verdict remains NOT PASS because current-revision hosted CI, Linux/Windows, production signatures, real three-platform offline journeys and SEA staged-update regression are absent."}
+        - {type: "security", check: "release signing gates", status: "unverified", summary: "Production capability signing gate fails closed when credentials are absent; local macOS app is ad-hoc with no TeamIdentifier and fails spctl; Apple notarization and Windows Authenticode are unverified."}
+        - {type: "boundary", check: "current revision hosted runs", status: "unverified", summary: "bc83168 is 53 commits ahead of origin/main and has no gh run result; workflow matrix definitions are not execution evidence."}
+        - {type: "memory", check: "verification record", status: "passed", summary: "TASK-008 results and memory record S1-S7, exact artifacts, independent verdict and unblock conditions without a production-readiness claim."}
       follow_up_candidates:
         - "TASK-009 修复干净构建后的冻结 Python MCP 首次冷启动发现超时，再恢复 TASK-008 验收。"
+        - "为 SEA Runtime 独立更新补充下载、坏制品保旧、暂存、重启激活与清理的端到端回归。"
+        - "推送待验 revision 后取得 Linux/macOS/Windows hosted runner、三平台离线和生产签名/系统提示证据，再恢复 TASK-008。"
   - id: TASK-009
     title: "修复 SEA 冻结 Python 能力冷启动冒烟"
     status: done
