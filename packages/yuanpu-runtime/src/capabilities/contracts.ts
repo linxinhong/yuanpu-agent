@@ -54,6 +54,7 @@ export interface CapabilityContext {
   workspaceId?: string;
   userId?: string;
   roles?: string[];
+  signal?: AbortSignal;
 }
 
 export interface SearchCapabilitiesInput {

@@ -16,7 +16,7 @@ Electron 首次使用安装包中携带的 Runtime。独立更新会下载到 El
 
 ## 本地开发
 
-Python 能力包与统一能力入口的目标设计见 [设计文档](docs/python-capabilities.md)，实施顺序与验收见 [任务入口](.tasks/README.md)。这些扩展能力尚待实施，不代表当前已支持 Python 插件。
+Python 能力包与统一能力入口的设计见 [设计文档](docs/python-capabilities.md)，实施顺序与验收见 [任务入口](.tasks/README.md)。当前已打通开发态 Python MCP 示例与 Node SEA 调用链；面向最终用户的跨平台冻结制品、安装和更新仍由后续任务交付。
 
 要求 Node.js 24.15+ 和 pnpm 11。
 

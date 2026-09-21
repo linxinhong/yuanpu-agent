@@ -4,6 +4,8 @@ dist-native/
 dist-release/
 release/
 *.log
+__pycache__/
+.venv/
 .DS_Store
 packages/ai/src/providers/data/
 
