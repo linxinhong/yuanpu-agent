@@ -7,7 +7,7 @@ feature:
 tasks:
   - id: TASK-001
     title: "确认合并基线与回归"
-    status: ready
+    status: in_progress
     goal: "确认 runtime-kit 合并后的所有消费者可构建，为后续任务建立可追溯基线。"
     scope:
       in: ["核对现有未提交合并及旧包引用","README、apps/runtime、锁文件与 runtime-kit 测试"]
@@ -31,12 +31,12 @@ tasks:
     investigation_hints: ["入口 packages/yuanpu-runtime、apps/runtime/test/runtime.test.mjs、pnpm-lock.yaml；新包当前未提交","预检 git diff 与依赖引用；复用现有 test，不重做已完成合并"]
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
-      owner: null
+      owner: "codex-yuanpu"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T07:49:03.317Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
+      branch: "task/task-001-baseline"
       evidence: []
       follow_up_candidates: []
   - id: TASK-002
