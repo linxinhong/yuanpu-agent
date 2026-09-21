@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
+import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+
+import { capabilityApprovalSigningPayload } from '@yuanpu-agent/protocol';
 
 test('runtime CLI prints the default greeting from the Yuanpu runtime kit', () => {
   const output = execFileSync(process.execPath, ['dist/index.cjs'], { encoding: 'utf8' });
@@ -53,13 +56,17 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     'description: Runtime skill fixture.',
     '---',
   ].join('\n'));
-  const token = 'integration-token';
+  const token = randomBytes(32).toString('hex');
+  const approvalKeyPair = generateKeyPairSync('ed25519');
+  const approvalPublicKey = approvalKeyPair.publicKey.export({ type: 'spki', format: 'der' })
+    .toString('base64');
   const child = spawn(process.execPath, [
-    'dist/index.cjs', '--serve', '--port', '0', '--token', token,
+    'dist/index.cjs', '--serve', '--port', '0',
   ], {
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: ['pipe', 'pipe', 'inherit'],
     env: { ...process.env, YUANPU_HOME: home },
   });
+  child.stdin.end(`${JSON.stringify({ token, approvalPublicKey })}\n`);
   context.after(async () => {
     child.kill();
     await rm(home, { recursive: true, force: true });
@@ -104,6 +111,41 @@ test('runtime server exposes its protocol and greeting', async (context) => {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json' },
       body: JSON.stringify({ requestId: '', decision: 'approved' }),
+    },
+  );
+  const forgedApprovalDecision = await fetch(
+    `http://${ready.host}:${ready.port}/v1/capabilities/approvals/decision`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'unknown',
+        decision: 'approved',
+        issuedAt: Date.now(),
+        nonce: randomBytes(16).toString('base64url'),
+        signature: randomBytes(64).toString('base64url'),
+      }),
+    },
+  );
+  const signedUnknown = {
+    requestId: 'unknown',
+    decision: 'approved',
+    issuedAt: Date.now(),
+    nonce: randomBytes(16).toString('base64url'),
+  };
+  const signedUnknownDecision = await fetch(
+    `http://${ready.host}:${ready.port}/v1/capabilities/approvals/decision`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...signedUnknown,
+        signature: sign(
+          null,
+          capabilityApprovalSigningPayload(signedUnknown),
+          approvalKeyPair.privateKey,
+        ).toString('base64url'),
+      }),
     },
   );
   const invalidPluginInstall = await fetch(`http://${ready.host}:${ready.port}/v1/plugins/install`, {
@@ -151,6 +193,9 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.equal(unauthorizedApprovals.status, 401);
   assert.deepEqual(approvals, []);
   assert.equal(invalidApprovalDecision.status, 400);
+  assert.equal(forgedApprovalDecision.status, 403);
+  assert.equal(signedUnknownDecision.status, 409);
+  assert.equal(child.spawnargs.includes(token), false);
   assert.equal(invalidChat.status, 400);
   assert.equal(invalidPluginInstall.status, 400);
   assert.equal(floatingPluginInstall.status, 500);

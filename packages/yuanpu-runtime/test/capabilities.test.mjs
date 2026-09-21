@@ -14,14 +14,14 @@ import {
   parseCapabilityId,
 } from '../dist/index.mjs';
 
-function sensitiveSource(onExecute = () => undefined) {
+function sensitiveSource(onExecute = () => undefined, packageVersion = '1.2.3') {
   const definition = {
     name: 'publish',
     description: 'Publish external data',
     type: 'mcp_tool',
     riskLevel: 'R3',
     status: 'needs_approval',
-    packageVersion: '1.2.3',
+    packageVersion,
     inputSchema: {
       type: 'object',
       required: ['target'],
@@ -128,6 +128,7 @@ test('model supplied approval ids do not authorize sensitive capabilities', asyn
     type: 'mcp_tool',
     riskLevel: 'R3',
     status: 'needs_approval',
+    packageVersion: '1.2.3',
     inputSchema: { type: 'object' },
   };
   const server = createYuanpuMcpServer([{
@@ -148,6 +149,22 @@ test('model supplied approval ids do not authorize sensitive capabilities', asyn
     );
   }
   assert.equal(executions, 0);
+});
+
+test('sensitive capabilities without immutable package versions are blocked', async () => {
+  const source = sensitiveSource();
+  const definition = (await source.list())[0];
+  delete definition.packageVersion;
+  const server = createYuanpuMcpServer([source], {
+    async authorize() { throw new Error('authorizer must not be reached'); },
+  });
+  await assert.rejects(
+    server.execute({
+      name: createCapabilityId(source.sourceInstanceId, definition.name),
+      arguments: { target: 'release' },
+    }, { sessionId: 'session', workspaceId: '/workspace' }),
+    (error) => error instanceof CapabilityError && error.failure.error === 'policy_blocked',
+  );
 });
 
 test('host approval is bound, atomically consumed once, and replay-safe', async (context) => {
@@ -174,6 +191,12 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
   );
   assert.equal((await store.listPending()).length, 1);
   await store.decide(requestId, 'approved');
+
+  const updatedServer = createYuanpuMcpServer([sensitiveSource(() => undefined, '2.0.0')], store);
+  await assert.rejects(
+    updatedServer.execute({ ...execution, approvalRequestId: requestId }, hostContext),
+    (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
+  );
 
   for (const [changed, changedContext] of [
     [{ target: 'other' }, hostContext],

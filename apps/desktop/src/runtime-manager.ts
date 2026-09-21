@@ -1,6 +1,9 @@
 import {
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,
+  capabilityApprovalSigningPayload,
+  type CapabilityApprovalDecisionInput,
+  type CapabilityApprovalSummary,
   type ChatResponse,
   type InstalledPlugin,
   type LocalSkillList,
@@ -14,7 +17,7 @@ import {
   type RuntimeUpdateState,
 } from '@yuanpu-agent/protocol';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -68,6 +71,7 @@ export class RuntimeManager {
   private child?: ChildProcessWithoutNullStreams;
   private ready?: RuntimeReady;
   private readonly token = randomBytes(32).toString('hex');
+  private readonly approvalKeyPair = generateKeyPairSync('ed25519');
 
   constructor(
     private readonly appPath: string,
@@ -164,12 +168,17 @@ export class RuntimeManager {
     return await new Promise<RuntimeReady>((resolveReady, reject) => {
       const child = spawn(
         command.executable,
-        [...command.args, '--serve', '--port', '0', '--token', this.token],
+        [...command.args, '--serve', '--port', '0'],
         {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         },
       );
+      const approvalPublicKey = this.approvalKeyPair.publicKey.export({
+        type: 'spki',
+        format: 'der',
+      }).toString('base64');
+      child.stdin.end(`${JSON.stringify({ token: this.token, approvalPublicKey })}\n`);
       this.child = child;
       let stdout = '';
       let stderr = '';
@@ -227,6 +236,35 @@ export class RuntimeManager {
 
   info(): Promise<RuntimeInfo> {
     return this.request(RUNTIME_ROUTES.health);
+  }
+
+  listCapabilityApprovals(): Promise<CapabilityApprovalSummary[]> {
+    return this.request(RUNTIME_ROUTES.capabilityApprovals);
+  }
+
+  decideCapabilityApproval(
+    requestId: string,
+    decision: CapabilityApprovalDecisionInput['decision'],
+  ): Promise<CapabilityApprovalSummary> {
+    const unsigned = {
+      requestId,
+      decision,
+      issuedAt: Date.now(),
+      nonce: randomBytes(16).toString('base64url'),
+    };
+    const input: CapabilityApprovalDecisionInput = {
+      ...unsigned,
+      signature: sign(
+        null,
+        capabilityApprovalSigningPayload(unsigned),
+        this.approvalKeyPair.privateKey,
+      ).toString('base64url'),
+    };
+    return this.request(RUNTIME_ROUTES.capabilityApprovalDecision, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
   }
 
   greeting(name: string): Promise<RuntimeGreeting> {

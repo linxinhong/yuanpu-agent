@@ -63,6 +63,21 @@ export interface CapabilityApprovalSummary {
 export interface CapabilityApprovalDecisionInput {
   requestId: string;
   decision: 'approved' | 'denied';
+  issuedAt: number;
+  nonce: string;
+  signature: string;
+}
+
+export function capabilityApprovalSigningPayload(
+  input: Omit<CapabilityApprovalDecisionInput, 'signature'>,
+): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify([
+    'yuanpu-capability-approval-v1',
+    input.requestId,
+    input.decision,
+    input.issuedAt,
+    input.nonce,
+  ]));
 }
 
 export const CAPABILITY_PACKAGE_MANIFEST_VERSION = 1;

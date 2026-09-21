@@ -205,6 +205,13 @@ export class CapabilityRegistry implements CapabilityToolClient {
     }
     validateArguments(capability, input.arguments ?? {});
     if (capability.status === 'needs_approval' || riskOrder[capability.riskLevel] >= riskOrder.R2) {
+      if (!capability.packageVersion) {
+        throw new CapabilityError({
+          error: 'policy_blocked',
+          message: `${input.name} is sensitive and does not declare an immutable package version.`,
+          retry: { search: false, action: 'contact_admin' },
+        });
+      }
       if (!this.#authorizer) {
         throw new CapabilityError({
           error: 'needs_approval',

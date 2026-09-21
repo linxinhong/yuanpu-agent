@@ -15,16 +15,43 @@ import {
 import {
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,
+  capabilityApprovalSigningPayload,
+  type CapabilityApprovalDecisionInput,
   type PluginConfigInput,
   type PluginConfigScope,
 } from '@yuanpu-agent/protocol';
 import { createServer, type IncomingMessage } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createPublicKey, randomUUID, verify } from 'node:crypto';
 import { join } from 'node:path';
 
 declare const __APP_VERSION__: string;
 
 const args = process.argv.slice(2);
+
+interface RuntimeBootstrap {
+  token: string;
+  approvalPublicKey: string;
+}
+
+async function readBootstrap(): Promise<RuntimeBootstrap> {
+  let input = '';
+  for await (const chunk of process.stdin) {
+    input += Buffer.from(chunk).toString('utf8');
+    if (input.length > 16 * 1024) throw new Error('Runtime bootstrap is too large');
+    if (input.includes('\n')) break;
+  }
+  const line = input.slice(0, input.indexOf('\n') >= 0 ? input.indexOf('\n') : input.length);
+  const value = JSON.parse(line) as Partial<RuntimeBootstrap>;
+  if (
+    typeof value.token !== 'string'
+    || value.token.length < 32
+    || typeof value.approvalPublicKey !== 'string'
+    || !value.approvalPublicKey
+  ) {
+    throw new Error('Runtime bootstrap credentials are invalid');
+  }
+  return { token: value.token, approvalPublicKey: value.approvalPublicKey };
+}
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -61,9 +88,13 @@ function readConfigInput(value: unknown): PluginConfigInput {
 async function serve(): Promise<void> {
   const portIndex = args.indexOf('--port');
   const requestedPort = portIndex >= 0 ? Number(args[portIndex + 1]) : 0;
-  const tokenIndex = args.indexOf('--token');
-  const token = tokenIndex >= 0 ? args[tokenIndex + 1] : undefined;
-  if (!token) throw new Error('Runtime server requires --token');
+  const { token, approvalPublicKey } = await readBootstrap();
+  const approvalVerificationKey = createPublicKey({
+    key: Buffer.from(approvalPublicKey, 'base64'),
+    format: 'der',
+    type: 'spki',
+  });
+  const usedDecisionNonces = new Set<string>();
 
   const home = await ensureYuanpuHome(process.env.YUANPU_HOME);
   process.env.PI_CODING_AGENT_DIR = home.agentPath;
@@ -189,15 +220,46 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.capabilityApprovalDecision && request.method === 'POST') {
-        const body = await readJsonBody(request) as { requestId?: unknown; decision?: unknown };
+        const body = await readJsonBody(request) as Partial<CapabilityApprovalDecisionInput>;
         if (
           typeof body.requestId !== 'string'
           || !body.requestId.trim()
+          || body.requestId.length > 200
           || (body.decision !== 'approved' && body.decision !== 'denied')
+          || !Number.isSafeInteger(body.issuedAt)
+          || Math.abs(Date.now() - (body.issuedAt ?? 0)) > 30_000
+          || typeof body.nonce !== 'string'
+          || !/^[A-Za-z0-9_-]{16,128}$/.test(body.nonce)
+          || typeof body.signature !== 'string'
+          || !/^[A-Za-z0-9_-]{64,256}$/.test(body.signature)
         ) {
           response.statusCode = 400;
           response.end(JSON.stringify({ error: 'Invalid capability approval decision.' }));
           return;
+        }
+        const unsigned = {
+          requestId: body.requestId,
+          decision: body.decision,
+          issuedAt: body.issuedAt as number,
+          nonce: body.nonce,
+        };
+        if (
+          usedDecisionNonces.has(body.nonce)
+          || !verify(
+            null,
+            capabilityApprovalSigningPayload(unsigned),
+            approvalVerificationKey,
+            Buffer.from(body.signature, 'base64url'),
+          )
+        ) {
+          response.statusCode = 403;
+          response.end(JSON.stringify({ error: 'Capability approval signature is invalid.' }));
+          return;
+        }
+        usedDecisionNonces.add(body.nonce);
+        if (usedDecisionNonces.size > 1_000) {
+          const oldest = usedDecisionNonces.values().next().value as string | undefined;
+          if (oldest) usedDecisionNonces.delete(oldest);
         }
         try {
           response.end(JSON.stringify(await approvals.decide(body.requestId, body.decision)));
