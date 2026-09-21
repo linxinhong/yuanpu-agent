@@ -18,13 +18,12 @@ import {
   type RuntimeInfo,
   type RuntimeUpdateState,
 } from '@yuanpu-agent/protocol';
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+import { RuntimeUpdater } from './runtime-updater.js';
+
 const DEFAULT_MANIFEST_URL =
   'https://github.com/linxinhong/yuanpu-agent/releases/latest/download/manifest.json';
 
@@ -34,116 +33,25 @@ interface RuntimeReady extends RuntimeInfo {
   port: number;
 }
 
-interface RuntimeArtifact {
-  filename: string;
-  url: string;
-  size: number;
-  sha256: string;
-}
-
-interface RuntimeManifest {
-  schemaVersion: number;
-  protocolVersion: number;
-  minDesktopVersion: string;
-  version: string;
-  platforms: Record<string, RuntimeArtifact>;
-}
-
-interface StagedRuntime {
-  version: string;
-  filename: string;
-  sha256: string;
-}
-
-function versionParts(version: string): number[] {
-  return version.replace(/^v/, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
-}
-
-export function compareVersions(left: string, right: string): number {
-  const a = versionParts(left);
-  const b = versionParts(right);
-  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
-    const difference = (a[index] ?? 0) - (b[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
-}
-
 export class RuntimeManager {
   private child?: ChildProcessWithoutNullStreams;
   private ready?: RuntimeReady;
   private readonly token = randomBytes(32).toString('hex');
   private readonly approvalKeyPair = generateKeyPairSync('ed25519');
+  private readonly updater: RuntimeUpdater;
 
   constructor(
     private readonly appPath: string,
     private readonly resourcesPath: string,
     private readonly userDataPath: string,
     private readonly packaged: boolean,
-    private readonly desktopVersion: string,
-  ) {}
+    desktopVersion: string,
+  ) {
+    this.updater = new RuntimeUpdater({ runtimeRoot: this.runtimeRoot, desktopVersion });
+  }
 
   private get runtimeRoot(): string {
     return join(this.userDataPath, 'runtime');
-  }
-
-  private get executableName(): string {
-    return process.platform === 'win32' ? 'YuanpuAgentRuntime.exe' : 'YuanpuAgentRuntime';
-  }
-
-  private async promoteStagedRuntime(): Promise<void> {
-    const stagingRoot = join(this.runtimeRoot, '.staging');
-    let staged: StagedRuntime;
-    try {
-      staged = JSON.parse(await readFile(join(stagingRoot, 'staged.json'), 'utf8')) as StagedRuntime;
-    } catch {
-      return;
-    }
-
-    const expectedStagedName = process.platform === 'win32' ? 'runtime.exe' : 'runtime';
-    if (
-      staged.filename !== expectedStagedName ||
-      !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(staged.version)
-    ) {
-      await rm(stagingRoot, { recursive: true, force: true });
-      return;
-    }
-
-    const versionRoot = join(this.runtimeRoot, 'versions', staged.version);
-    const destination = join(versionRoot, this.executableName);
-    const stagedPath = join(stagingRoot, staged.filename);
-    try {
-      const stagedBytes = await readFile(stagedPath);
-      const checksum = createHash('sha256').update(stagedBytes).digest('hex');
-      if (checksum !== staged.sha256) throw new Error('Staged runtime checksum mismatch');
-      if (process.platform !== 'win32') await chmod(stagedPath, 0o755);
-      const { stdout } = await execFileAsync(stagedPath, ['--version'], { timeout: 10_000 });
-      if (stdout.trim() !== staged.version) throw new Error('Staged runtime version mismatch');
-    } catch {
-      await rm(stagingRoot, { recursive: true, force: true });
-      return;
-    }
-
-    await mkdir(versionRoot, { recursive: true });
-    await rm(destination, { force: true });
-    await rename(stagedPath, destination);
-    if (process.platform !== 'win32') await chmod(destination, 0o755);
-    await writeFile(
-      join(this.runtimeRoot, 'current.json'),
-      `${JSON.stringify({ version: staged.version, executable: destination }, null, 2)}\n`,
-    );
-    await rm(stagingRoot, { recursive: true, force: true });
-  }
-
-  private async managedExecutable(): Promise<string | undefined> {
-    try {
-      const current = JSON.parse(
-        await readFile(join(this.runtimeRoot, 'current.json'), 'utf8'),
-      ) as { executable: string };
-      return current.executable;
-    } catch {
-      return undefined;
-    }
   }
 
   private packagedExecutable(): string {
@@ -159,8 +67,7 @@ export class RuntimeManager {
         args: [resolve(this.appPath, '../runtime/dist/index.cjs')],
       };
     }
-    await this.promoteStagedRuntime();
-    return { executable: (await this.managedExecutable()) ?? this.packagedExecutable(), args: [] };
+    return { executable: await this.updater.activate(this.packagedExecutable()), args: [] };
   }
 
   private capabilityEnvironment(): NodeJS.ProcessEnv {
@@ -394,57 +301,11 @@ export class RuntimeManager {
   }
 
   async checkForUpdate(): Promise<RuntimeUpdateState> {
-    try {
-      const current = await this.info();
-      const manifestUrl = process.env.YUANPU_RUNTIME_MANIFEST_URL || DEFAULT_MANIFEST_URL;
-      const response = await fetch(manifestUrl, { redirect: 'follow' });
-      if (!response.ok) throw new Error(`Manifest request failed with HTTP ${response.status}`);
-      const manifest = (await response.json()) as RuntimeManifest;
-      if (manifest.schemaVersion !== 1 || manifest.protocolVersion !== PROTOCOL_VERSION) {
-        throw new Error('Update manifest is incompatible with this desktop version');
-      }
-      if (compareVersions(this.desktopVersion, manifest.minDesktopVersion) < 0) {
-        throw new Error(`Desktop ${manifest.minDesktopVersion} or newer is required`);
-      }
-      if (compareVersions(manifest.version, current.version) <= 0) {
-        return { status: 'current', currentVersion: current.version };
-      }
-
-      const artifact = manifest.platforms[`${process.platform}-${process.arch}`];
-      if (!artifact) throw new Error('No runtime update is available for this platform');
-      const download = await fetch(new URL(artifact.url, response.url), { redirect: 'follow' });
-      if (!download.ok) throw new Error(`Runtime download failed with HTTP ${download.status}`);
-      const bytes = Buffer.from(await download.arrayBuffer());
-      if (bytes.byteLength !== artifact.size) throw new Error('Runtime download size mismatch');
-      const checksum = createHash('sha256').update(bytes).digest('hex');
-      if (checksum !== artifact.sha256) throw new Error('Runtime download checksum mismatch');
-
-      const stagingRoot = join(this.runtimeRoot, '.staging');
-      const stagedName = process.platform === 'win32' ? 'runtime.exe' : 'runtime';
-      const stagedPath = join(stagingRoot, stagedName);
-      await rm(stagingRoot, { recursive: true, force: true });
-      await mkdir(stagingRoot, { recursive: true });
-      await writeFile(stagedPath, bytes);
-      if (process.platform !== 'win32') await chmod(stagedPath, 0o755);
-      const { stdout } = await execFileAsync(stagedPath, ['--version'], { timeout: 10_000 });
-      if (stdout.trim() !== manifest.version) throw new Error('Runtime smoke test version mismatch');
-      await writeFile(
-        join(stagingRoot, 'staged.json'),
-        `${JSON.stringify(
-          { version: manifest.version, filename: stagedName, sha256: artifact.sha256 },
-          null,
-          2,
-        )}\n`,
-      );
-      return {
-        status: 'ready',
-        currentVersion: current.version,
-        availableVersion: manifest.version,
-        message: 'Runtime update is staged and will activate after restart.',
-      };
-    } catch (error) {
-      return { status: 'error', message: error instanceof Error ? error.message : String(error) };
-    }
+    const current = await this.info();
+    return this.updater.stage(
+      current.version,
+      process.env.YUANPU_RUNTIME_MANIFEST_URL || DEFAULT_MANIFEST_URL,
+    );
   }
 
   stop(): void {

@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-  entry: ['src/main.ts', 'src/preload.ts', 'src/renderer-security.ts'],
+  entry: ['src/main.ts', 'src/preload.ts', 'src/renderer-security.ts', 'src/runtime-updater.ts'],
   format: 'cjs',
   outDir: 'dist',
   outExtensions: () => ({ js: '.cjs' }),
