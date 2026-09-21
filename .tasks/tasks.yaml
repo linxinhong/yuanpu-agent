@@ -260,7 +260,7 @@ tasks:
         - "TASK-008 补齐 Linux/Windows hosted runner、真实生产签名/公证与跨平台桌面验收；端口租约哈希碰撞仅保守失败。"
   - id: TASK-007
     title: "接通技能管理与审批界面"
-    status: in_progress
+    status: done
     goal: "用户通过现有技能入口安装 Python 能力包并批准一次敏感调用。"
     scope:
       in: ["apps/app 技能详情/状态/更新与对话审批","desktop main/preload 窄接口及受信窗口验证","UI 操作流、API 联调和浏览器证据"]
@@ -285,14 +285,19 @@ tasks:
       owner: "codex-yuanpu-61529-61529"
       attempts: 0
       claimed_at: "2026-09-21T14:16:00.919Z"
-      completed_at: null
+      completed_at: "2026-09-21T15:50:56.417Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-007-skill-ui"
-      evidence: []
+      evidence:
+        - {type: "command", check: "pnpm check", status: "passed", summary: "TASK-007 final implementation 7566b78 plus evidence commit 029f170 passed pnpm check on integrated main: full build, Yuanpu typecheck, Python manifest tests, 44 yuanpu-runtime tests, catalog tests, desktop security tests, and runtime app tests on macOS arm64 with Node 24.15.0."}
+        - {type: "browser", check: "real Electron S7 journey", status: "passed", summary: "Electron/CDP verified catalog search, trust confirmation, signed Python artifact install, real LongCat approval allow-once and deny, renderer-refresh recovery, failed update retaining v0.1.0 with retry, successful v0.2.0 update, and explicit rollback. Screenshots are under .tasks/ui/task-007-skill-ui/images."}
+        - {type: "security", check: "trusted IPC and ownership conflict", status: "passed", summary: "All Electron invoke handlers validate the current main frame and trusted entry URL; legacy pi-mcp-adapter conflict requires explicit selection and does not delete config; signed manifest digest binds user confirmation to conflict/install; active signed schema is the only artifact config validator; runtime tests cover preserved config and approval replay rejection. Independent third review at 7566b78 passed with no HIGH/MEDIUM findings."}
+        - {type: "memory", check: "verification record", status: "passed", summary: "Integrated .tasks/verification/TASK-007/results.md, .tasks/ui/task-007-skill-ui/, and .tasks/memory/TASK-007.md record environment, commands, observations and limits."}
+        - {type: "boundary", check: "cross-platform release evidence", status: "unverified", summary: "Linux/Windows, production signing credentials, and three-platform offline artifacts remain UNVERIFIED for TASK-008; no production readiness claim."}
       follow_up_candidates: []
   - id: TASK-008
     title: "跨平台技能安装与升级业务验收"
-    status: pending
+    status: ready
     goal: "确认用户完整链路以及三系统离线、更新和回滚达到交付条件。"
     scope:
       in: ["S1–S7 真实桌面与自建 catalog/制品源场景","支持平台打包产物及升级失败注入","安全与兼容独立复核报告"]
