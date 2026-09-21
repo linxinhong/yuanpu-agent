@@ -210,7 +210,7 @@ tasks:
         - "TASK-008 必须补齐 Linux/Windows 实际 SEA 与 Windows Job Object 生命周期 runner 证据；当前仅 macOS 阶段 PASS。"
   - id: TASK-006
     title: "交付自包含制品与安全更新"
-    status: in_progress
+    status: done
     goal: "在没有 Python 的目标机安装、运行和更新完整能力包，自建源失败不破坏旧版本。"
     scope:
       in: ["Python 制品构建、现有 CI 平台矩阵与预装资源","packages 安装类型分流、验证、活动版本和回滚","server 版本元数据、签名发布入口与受控制品源","包配置及旧 pi-mcp-adapter 托管冲突检测 API"]
@@ -243,14 +243,24 @@ tasks:
       owner: "codex-yuanpu-61529"
       attempts: 0
       claimed_at: "2026-09-21T09:25:52.615Z"
-      completed_at: null
+      completed_at: "2026-09-21T14:15:25.036Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
       branch: "task/task-006-python-artifacts"
-      evidence: []
-      follow_up_candidates: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "TASK-006 implementation and evidence are integrated into main at 86222d0; security-reviewed implementation revision is 0920c74."}
+        - {type: "verification", check: "signed self-contained artifact", status: "passed", summary: "PyInstaller onedir artifact runs with Python removed from PATH; manifest signature, compatibility, hash, size and extraction limits are enforced."}
+        - {type: "verification", check: "atomic install and recovery", status: "passed", summary: "Concurrent install, failed health switch, immutable rollback and real SIGKILL lock-owner recovery pass without changing the active old version."}
+        - {type: "verification", check: "catalog and release trust chain", status: "passed", summary: "Catalog restricts signed files and symlinks; manifest reads are bounded; matrix receives only public trust root; release fails closed without matching production credentials."}
+        - {type: "review", check: "independent security review", status: "passed", summary: "Independent reviewer /root/task003_security_review returned PASS for 0920c74 with no HIGH/MEDIUM blocker."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 full build, typecheck and tests pass: runtime-kit 42/42, runtime 3/3, server 2/2, release manifest 1/1."}
+        - {type: "command", check: "native and desktop packaging", status: "passed", summary: "darwin-arm64 Node SEA build/smoke and self-contained Python smoke pass; Electron produced YuanpuAgent ZIP and DMG."}
+        - {type: "boundary", check: "production/cross-platform evidence", status: "unverified", summary: "Linux/Windows hosted-runner execution and real Apple/Windows/Ed25519 production credentials remain UNVERIFIED for TASK-008; no production readiness claim."}
+        - {type: "memory", check: "verification record", status: "passed", summary: "Integrated .tasks/verification/TASK-006/results.md and .tasks/memory/TASK-006.md record revision, environment, commands, observations and limits."}
+      follow_up_candidates:
+        - "TASK-008 补齐 Linux/Windows hosted runner、真实生产签名/公证与跨平台桌面验收；端口租约哈希碰撞仅保守失败。"
   - id: TASK-007
     title: "接通技能管理与审批界面"
-    status: pending
+    status: ready
     goal: "用户通过现有技能入口安装 Python 能力包并批准一次敏感调用。"
     scope:
       in: ["apps/app 技能详情/状态/更新与对话审批","desktop main/preload 窄接口及受信窗口验证","UI 操作流、API 联调和浏览器证据"]
