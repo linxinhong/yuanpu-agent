@@ -82,7 +82,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-003
     title: "实现宿主一次性授权"
-    status: ready
+    status: in_progress
     goal: "敏感能力由宿主审批并严格一次执行，移除非空 token 即放行。"
     scope:
       in: ["capabilities 授权状态与持久消费","Runtime 认证审批 API、Pi needs_approval 适配","授权回放与并发测试"]
@@ -104,12 +104,12 @@ tasks:
     investigation_hints: ["入口 capabilities/index.ts 非空 approvalToken 判断、pi/index.ts、apps/runtime/src/index.ts；测试 capabilities.test.mjs 和 runtime.test.mjs","现有会话上下文需由宿主解析；独立安全复核问题：模型能否伪造许可或重放产生副作用"]
     escalation_conditions: ["公共契约与设计不一致或需要修改 Pi 上游时停止该分支并报告","缺少平台环境或发布凭据时保留未验证项，不绕过安全检查"]
     result:
-      owner: null
+      owner: "codex-yuanpu"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-21T08:03:52.245Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-yuanpu"
+      branch: "task/task-003-approval"
       evidence: []
       follow_up_candidates: []
   - id: TASK-004
