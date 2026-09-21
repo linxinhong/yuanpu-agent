@@ -1,7 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
-import { execFile } from 'node:child_process';
+import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { CallToolResult, JSONRPCMessage, Tool } from '@modelcontextprotocol/sdk/types.js';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -43,39 +44,7 @@ export class ManagedMcpSourceError extends Error {
 
 const execFileAsync = promisify(execFile);
 
-async function descendantPids(rootPid: number): Promise<number[]> {
-  if (process.platform === 'win32') return [];
-  try {
-    const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,ppid='], {
-      encoding: 'utf8',
-      timeout: 2_000,
-      maxBuffer: 1024 * 1024,
-    });
-    const children = new Map<number, number[]>();
-    for (const line of stdout.split('\n')) {
-      const [pidText, parentText] = line.trim().split(/\s+/);
-      const pid = Number(pidText);
-      const parent = Number(parentText);
-      if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
-      const siblings = children.get(parent) ?? [];
-      siblings.push(pid);
-      children.set(parent, siblings);
-    }
-    const result: number[] = [];
-    const visit = (parent: number) => {
-      for (const child of children.get(parent) ?? []) {
-        visit(child);
-        result.push(child);
-      }
-    };
-    visit(rootPid);
-    return result;
-  } catch {
-    return [];
-  }
-}
-
-async function terminateDescendants(rootPid: number): Promise<void> {
+async function terminateProcessGroup(rootPid: number): Promise<void> {
   if (process.platform === 'win32') {
     await execFileAsync('taskkill', ['/PID', String(rootPid), '/T', '/F'], {
       timeout: 5_000,
@@ -83,13 +52,97 @@ async function terminateDescendants(rootPid: number): Promise<void> {
     }).catch(() => undefined);
     return;
   }
-  const descendants = await descendantPids(rootPid);
-  for (const pid of descendants) {
-    try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-  }
+  try { process.kill(-rootPid, 'SIGTERM'); } catch { /* already gone */ }
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
-  for (const pid of descendants) {
-    try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  try { process.kill(-rootPid, 'SIGKILL'); } catch { /* already gone */ }
+}
+
+class ProcessGroupStdioTransport implements Transport {
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: <T extends JSONRPCMessage>(message: T) => void;
+
+  readonly #command: string;
+  readonly #args: string[];
+  readonly #cwd: string;
+  readonly #env: Record<string, string>;
+  readonly #readBuffer = new ReadBuffer();
+  #process?: ChildProcess;
+  #groupId?: number;
+  #closing?: Promise<void>;
+
+  constructor(options: { command: string; args: string[]; cwd: string; env: Record<string, string> }) {
+    this.#command = options.command;
+    this.#args = options.args;
+    this.#cwd = options.cwd;
+    this.#env = options.env;
+  }
+
+  get pid(): number | null {
+    return this.#process?.pid ?? null;
+  }
+
+  async start(): Promise<void> {
+    if (this.#process) throw new Error('Managed MCP transport is already started.');
+    await new Promise<void>((resolveStart, rejectStart) => {
+      const child = spawn(this.#command, this.#args, {
+        cwd: this.#cwd,
+        env: this.#env,
+        detached: process.platform !== 'win32',
+        shell: false,
+        stdio: ['pipe', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+      this.#process = child;
+      this.#groupId = child.pid;
+      child.once('spawn', resolveStart);
+      child.once('error', rejectStart);
+      child.on('error', (error) => this.onerror?.(error));
+      child.stdin?.on('error', (error) => this.onerror?.(error));
+      child.stdout?.on('data', (chunk: Buffer) => {
+        this.#readBuffer.append(chunk);
+        while (true) {
+          try {
+            const message = this.#readBuffer.readMessage();
+            if (!message) break;
+            this.onmessage?.(message);
+          } catch (error) {
+            this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+      });
+      child.stdout?.on('error', (error) => this.onerror?.(error));
+      child.once('close', () => {
+        this.#process = undefined;
+        const groupId = this.#groupId;
+        this.#groupId = undefined;
+        if (groupId) {
+          void terminateProcessGroup(groupId).finally(() => this.onclose?.());
+        } else {
+          this.onclose?.();
+        }
+      });
+    });
+  }
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    const stdin = this.#process?.stdin;
+    if (!stdin) throw new Error('Managed MCP transport is not connected.');
+    const payload = serializeMessage(message);
+    if (stdin.write(payload)) return;
+    await new Promise<void>((resolveDrain) => stdin.once('drain', resolveDrain));
+  }
+
+  async close(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    this.#closing = (async () => {
+      const groupId = this.#groupId;
+      this.#groupId = undefined;
+      if (groupId) await terminateProcessGroup(groupId);
+      this.#process = undefined;
+      this.#readBuffer.clear();
+    })();
+    return this.#closing;
   }
 }
 
@@ -101,7 +154,7 @@ export class ManagedMcpCapabilitySource {
     riskPolicy: Record<string, CapabilityRiskLevel>;
   };
   #client?: Client;
-  #transport?: StdioClientTransport;
+  #transport?: ProcessGroupStdioTransport;
   #connecting?: Promise<Client>;
   #tools = new Map<string, Tool>();
   #toolsExpiresAt = 0;
@@ -153,7 +206,7 @@ export class ManagedMcpCapabilitySource {
       const appData = join(this.#options.privateHome, 'app-data');
       const localAppData = join(this.#options.privateHome, 'local-app-data');
       await Promise.all([mkdir(appData, { recursive: true }), mkdir(localAppData, { recursive: true })]);
-      const transport = new StdioClientTransport({
+      const transport = new ProcessGroupStdioTransport({
         command: this.#options.command,
         args: this.#options.args,
         cwd: this.#options.cwd,
@@ -166,7 +219,6 @@ export class ManagedMcpCapabilitySource {
         },
         // Do not inherit or buffer an untrusted child process's diagnostics. A
         // future host logger may expose a redacted, bounded diagnostic sink.
-        stderr: 'ignore',
       });
       const client = new Client({ name: 'yuanpu-agent', version: '0.1.0' });
       transport.onclose = () => {
@@ -290,12 +342,10 @@ export class ManagedMcpCapabilitySource {
     await this.#connecting?.catch(() => undefined);
     const client = this.#client;
     const transport = this.#transport;
-    const pid = transport?.pid ?? null;
     this.#client = undefined;
     this.#transport = undefined;
     this.#tools.clear();
     this.#toolsExpiresAt = 0;
-    if (pid) await terminateDescendants(pid);
     if (client) await client.close().catch(() => undefined);
     else if (transport) await transport.close().catch(() => undefined);
   }

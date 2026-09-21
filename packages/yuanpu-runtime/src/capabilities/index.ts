@@ -185,14 +185,25 @@ export class CapabilityRegistry implements CapabilityToolClient {
     if (existing) return existing;
 
     const abort = new AbortController();
-    const signal = context.signal
-      ? AbortSignal.any([context.signal, abort.signal])
-      : abort.signal;
     const entry = {
       abort,
       promise: Promise.resolve([]) as Promise<CapabilityDefinition[]>,
     };
-    entry.promise = source.list({ ...context, signal }).finally(() => {
+    let timeout: NodeJS.Timeout | undefined;
+    entry.promise = Promise.race([
+      source.list({ ...context, signal: abort.signal }),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          abort.abort(new Error('Capability discovery timed out.'));
+          reject(new ManagedMcpSourceError(
+            'timeout',
+            `Capability discovery timed out for ${source.sourceInstanceId}.`,
+          ));
+        }, this.#options.discoveryTimeoutMs);
+        timeout.unref?.();
+      }),
+    ]).finally(() => {
+      if (timeout) clearTimeout(timeout);
       if (this.#discoveries.get(key) === entry) this.#discoveries.delete(key);
     });
     this.#discoveries.set(key, entry);
@@ -217,23 +228,22 @@ export class CapabilityRegistry implements CapabilityToolClient {
       if (cached && cached.contextKey === contextKey && cached.expiresAt > Date.now()) {
         return cached.definitions.map((definition) => describe(source, definition));
       }
-      let timer: NodeJS.Timeout | undefined;
-      let timedOut = false;
+      let abortListener: (() => void) | undefined;
       try {
         const discovery = this.#discover(source, context, contextKey);
+        const cancellation = context.signal
+          ? new Promise<never>((_resolve, reject) => {
+              abortListener = () => reject(new ManagedMcpSourceError(
+                'cancelled',
+                'Capability discovery was cancelled.',
+              ));
+              if (context.signal?.aborted) abortListener();
+              else context.signal?.addEventListener('abort', abortListener, { once: true });
+            })
+          : new Promise<never>(() => undefined);
         const definitions = await Promise.race([
           discovery.promise,
-          new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => {
-              timedOut = true;
-              discovery.abort.abort(new Error('Capability discovery timed out.'));
-              reject(new ManagedMcpSourceError(
-                'timeout',
-                `Capability discovery timed out for ${source.sourceInstanceId}.`,
-              ));
-            }, this.#options.discoveryTimeoutMs);
-            timer.unref?.();
-          }),
+          cancellation,
         ]);
         this.#discoveryCache.set(source.sourceInstanceId, {
           contextKey,
@@ -242,16 +252,17 @@ export class CapabilityRegistry implements CapabilityToolClient {
         });
         return definitions.map((definition) => describe(source, definition));
       } catch (error) {
+        if (error instanceof ManagedMcpSourceError && error.code === 'cancelled') throw error;
         failures.push({
           sourceInstanceId: source.sourceInstanceId,
-          error: timedOut || (error instanceof ManagedMcpSourceError && error.code === 'timeout')
+          error: error instanceof ManagedMcpSourceError && error.code === 'timeout'
             ? 'timeout'
             : 'unavailable',
           message: error instanceof Error ? error.message : String(error),
         });
         return [];
       } finally {
-        if (timer) clearTimeout(timer);
+        if (abortListener) context.signal?.removeEventListener('abort', abortListener);
       }
     }));
     const capabilities = groups.flat();

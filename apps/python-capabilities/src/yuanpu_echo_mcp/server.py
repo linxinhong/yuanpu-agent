@@ -1,6 +1,7 @@
 """Minimal stdio MCP server used to verify Yuanpu's managed Python path."""
 
 import asyncio
+import os
 import subprocess
 import sys
 
@@ -79,17 +80,6 @@ async def yuanpu_wait(
     return f"waited {seconds:g} seconds"
 
 
-@mcp.tool(
-    name="yuanpu_spawn_child",
-    annotations=ToolAnnotations(
-        title="Spawn a lifecycle-test child",
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
-    structured_output=True,
-)
 async def yuanpu_spawn_child() -> dict[str, int]:
     """Spawn a sleeping descendant used only to verify process-tree cleanup."""
 
@@ -100,6 +90,39 @@ async def yuanpu_spawn_child() -> dict[str, int]:
         stderr=subprocess.DEVNULL,
     )
     return {"pid": child.pid}
+
+
+async def yuanpu_spawn_child_and_exit() -> dict[str, int]:
+    """Spawn a descendant, then crash the MCP root for lifecycle testing."""
+
+    result = await yuanpu_spawn_child()
+    asyncio.get_running_loop().call_later(0.1, os._exit, 17)
+    return result
+
+
+if os.environ.get("YUANPU_MCP_TEST_FIXTURES") == "1":
+    mcp.tool(
+        name="yuanpu_spawn_child",
+        annotations=ToolAnnotations(
+            title="Spawn a lifecycle-test child",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        structured_output=True,
+    )(yuanpu_spawn_child)
+    mcp.tool(
+        name="yuanpu_spawn_child_and_exit",
+        annotations=ToolAnnotations(
+            title="Spawn a child and exit the test server",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        structured_output=True,
+    )(yuanpu_spawn_child_and_exit)
 
 
 def main() -> None:

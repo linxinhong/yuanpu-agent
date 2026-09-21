@@ -92,7 +92,6 @@ function createConfiguredPythonSource(privateHome: string): ManagedMcpCapability
       yuanpu_echo_text: 'R0',
       yuanpu_diagnostic_error: 'R0',
       yuanpu_wait: 'R0',
-      yuanpu_spawn_child: 'R0',
     },
     env: {
       PATH: dirname(executable),

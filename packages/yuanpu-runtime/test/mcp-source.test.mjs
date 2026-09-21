@@ -34,11 +34,13 @@ function pythonSource(overrides = {}) {
       yuanpu_diagnostic_error: 'R0',
       yuanpu_wait: 'R0',
       yuanpu_spawn_child: 'R0',
+      yuanpu_spawn_child_and_exit: 'R0',
     },
     env: {
       PATH: dirname(pythonExecutable),
       PYTHONPATH: join(pythonRoot, 'src'),
       PYTHONUNBUFFERED: '1',
+      YUANPU_MCP_TEST_FIXTURES: '1',
       ...(process.platform === 'win32' && process.env.SYSTEMROOT
         ? { SYSTEMROOT: process.env.SYSTEMROOT }
         : {}),
@@ -106,6 +108,21 @@ test('close terminates descendants instead of only the MCP server pid', async ()
   assert.throws(() => process.kill(childPid, 0));
 });
 
+test('an unexpected MCP root exit terminates its process group', async () => {
+  const source = pythonSource();
+  const server = createYuanpuMcpServer([source]);
+  const match = (await server.search({ query: 'spawn child exit' })).matches
+    .find((capability) => capability.originalName === 'yuanpu_spawn_child_and_exit');
+  assert.ok(match);
+  const result = await server.execute({ name: match.name });
+  const childPid = result.structuredContent?.pid;
+  assert.equal(typeof childPid, 'number');
+  process.kill(childPid, 0);
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 400));
+  assert.throws(() => process.kill(childPid, 0));
+  await source.close();
+});
+
 test('untrusted MCP annotations cannot downgrade host approval policy', async (context) => {
   const source = pythonSource({ riskPolicy: {} });
   context.after(() => source.close());
@@ -120,9 +137,11 @@ test('one failed source does not hide healthy capabilities', async () => {
   let hangingCalls = 0;
   const hanging = {
     sourceInstanceId: 'test.hanging',
-    async list() {
+    async list(context) {
       hangingCalls += 1;
-      return new Promise(() => undefined);
+      return new Promise((_resolve, reject) => {
+        context.signal?.addEventListener('abort', () => reject(context.signal.reason), { once: true });
+      });
     },
     async resolve() { return undefined; },
     async execute() { return undefined; },
@@ -138,7 +157,38 @@ test('one failed source does not hide healthy capabilities', async () => {
   assert.equal(result.failures?.[0]?.error, 'timeout');
   const repeated = await server.search({ query: 'echo' });
   assert.equal(repeated.matches.length, 1);
-  assert.equal(hangingCalls, 1, 'a timed-out discovery must not accumulate background calls');
+  assert.equal(hangingCalls, 2, 'a timed-out discovery can recover on a later search');
+});
+
+test('concurrent discovery waiters have independent cancellation', async () => {
+  let calls = 0;
+  const definition = {
+    name: 'shared',
+    description: 'Shared delayed capability',
+    type: 'mcp_tool',
+    riskLevel: 'R0',
+    status: 'available',
+    inputSchema: { type: 'object' },
+    packageVersion: '1.0.0',
+  };
+  const source = {
+    sourceInstanceId: 'test.shared-discovery',
+    async list() {
+      calls += 1;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+      return [definition];
+    },
+    async resolve() { return definition; },
+    async execute() { return { content: [] }; },
+  };
+  const server = createYuanpuMcpServer([source], undefined, { discoveryTimeoutMs: 500 });
+  const firstController = new AbortController();
+  const first = server.search({}, { sessionId: 'shared', signal: firstController.signal });
+  const second = server.search({}, { sessionId: 'shared' });
+  firstController.abort();
+  await assert.rejects(first, /cancelled/i);
+  assert.equal((await second).matches.length, 1);
+  assert.equal(calls, 1);
 });
 
 test('initialization failures respect the restart budget', async () => {
