@@ -47,6 +47,22 @@ test('Pi preserves supported MCP blocks and keeps unsupported blocks in details'
   ]);
 });
 
+test('Pi receives the host approval request id as a structured capability error', async () => {
+  const failure = {
+    error: 'needs_approval',
+    message: 'Approval required.',
+    retry: { search: false, action: 'request_approval' },
+    approvalRequestId: 'host-request-1',
+  };
+  const tools = createYuanpuCapabilityTools({
+    async search() { return { matches: [] }; },
+    async execute() { throw Object.assign(new Error(failure.message), { failure }); },
+  });
+  const result = await tools[1].execute('call-1', { name: 'ypcap:test:approval' });
+  assert.deepEqual(result.details, { capabilityError: failure });
+  assert.deepEqual(JSON.parse(result.content[0].text), { capabilityError: failure });
+});
+
 test('skill inspection lists user skills from the Yuanpu Agent directory', async (context) => {
   const agentDir = await mkdtemp(join(tmpdir(), 'yuanpu-pi-skill-'));
   context.after(() => rm(agentDir, { recursive: true, force: true }));

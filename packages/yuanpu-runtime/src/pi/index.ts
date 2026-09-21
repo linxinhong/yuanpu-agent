@@ -12,6 +12,7 @@ import {
 import {
   CAPABILITY_TOOL_NAMES,
   type CapabilityContext,
+  type CapabilityFailure,
   type CapabilityToolClient,
   type ExecuteCapabilityInput,
 } from '../capabilities/contracts.js';
@@ -59,6 +60,15 @@ function capabilityResultForPi(
   return { content, details: result };
 }
 
+function capabilityFailureFrom(error: unknown): CapabilityFailure | undefined {
+  if (!error || typeof error !== 'object' || !('failure' in error)) return undefined;
+  const failure = (error as { failure?: unknown }).failure;
+  if (!failure || typeof failure !== 'object' || !('error' in failure) || !('message' in failure)) {
+    return undefined;
+  }
+  return failure as CapabilityFailure;
+}
+
 export function createYuanpuCapabilityTools(
   client: CapabilityToolClient,
   context: CapabilityContext = {},
@@ -77,7 +87,9 @@ export function createYuanpuCapabilityTools(
         };
       },
     }),
-    defineTool({
+    defineTool<typeof executeParameters, (
+      Awaited<ReturnType<CapabilityToolClient['execute']>> | { capabilityError: CapabilityFailure }
+    )>({
       name: CAPABILITY_TOOL_NAMES.execute,
       label: 'Execute capability',
       description: 'Execute an external capability by its exact name from search_capabilities.',
@@ -88,8 +100,17 @@ export function createYuanpuCapabilityTools(
           arguments: params.arguments,
           approvalRequestId: params.approvalRequestId,
         } as ExecuteCapabilityInput;
-        const result = await client.execute(input, context);
-        return capabilityResultForPi(result);
+        try {
+          const result = await client.execute(input, context);
+          return capabilityResultForPi(result);
+        } catch (error) {
+          const failure = capabilityFailureFrom(error);
+          if (!failure) throw error;
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ capabilityError: failure }) }],
+            details: { capabilityError: failure },
+          };
+        }
       },
     }),
   ];
