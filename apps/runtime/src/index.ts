@@ -14,6 +14,7 @@ import {
   PluginManager,
   CapabilityArtifactManager,
   capabilityManifestDigest,
+  openYuanpuMetadataDatabase,
   validateCapabilityConfig,
   detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
@@ -183,6 +184,21 @@ async function capabilitySmoke(): Promise<void> {
     await pythonSource.close();
     await rm(privateHome, { recursive: true, force: true });
   }
+}
+
+function sqliteSmoke(path: string | undefined): void {
+  if (!path) throw new Error('--sqlite-smoke requires an explicit database path.');
+  const database = openYuanpuMetadataDatabase(resolve(path));
+  const count = database.incrementMetadataCounter('native-sea-open-count');
+  const schemaVersion = database.schemaVersion;
+  const driver = database.driver;
+  database.close();
+
+  const reopened = openYuanpuMetadataDatabase(resolve(path));
+  const persistedCount = Number.parseInt(reopened.getMetadata('native-sea-open-count') ?? '', 10);
+  reopened.close();
+  if (persistedCount !== count) throw new Error('SQLite value did not survive close and reopen.');
+  console.log(JSON.stringify({ driver, schemaVersion, persistedCount }));
 }
 
 function readConfigScope(value: unknown): PluginConfigScope {
@@ -854,6 +870,14 @@ if (args.includes('--version') || args.includes('-v')) {
     console.error(error);
     process.exitCode = 1;
   });
+} else if (args.includes('--sqlite-smoke')) {
+  try {
+    const pathIndex = args.indexOf('--sqlite-smoke');
+    sqliteSmoke(args[pathIndex + 1]);
+  } catch (error) {
+    console.error(error);
+    process.exitCode = 1;
+  }
 } else {
   const nameIndex = args.indexOf('--name');
   const name = nameIndex >= 0 ? args[nameIndex + 1] : undefined;

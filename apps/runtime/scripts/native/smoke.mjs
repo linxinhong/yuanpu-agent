@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import { executableSuffix, targetTriple } from './lib.mjs';
@@ -30,6 +31,20 @@ const capabilitySmoke = JSON.parse(execFileSync(binary, ['--capability-smoke'], 
     PATH: `${dirname(pythonExecutable)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
   },
 }).trim());
+const sqliteRoot = await mkdtemp(join(tmpdir(), 'yuanpu-sea-sqlite-'));
+let firstSqliteSmoke;
+let secondSqliteSmoke;
+try {
+  const sqlitePath = join(sqliteRoot, 'automation.sqlite');
+  firstSqliteSmoke = JSON.parse(execFileSync(binary, ['--sqlite-smoke', sqlitePath], {
+    encoding: 'utf8',
+  }).trim());
+  secondSqliteSmoke = JSON.parse(execFileSync(binary, ['--sqlite-smoke', sqlitePath], {
+    encoding: 'utf8',
+  }).trim());
+} finally {
+  await rm(sqliteRoot, { recursive: true, force: true });
+}
 
 assert.equal(greeting, 'Hello, world!');
 assert.equal(reportedVersion, version);
@@ -40,4 +55,14 @@ assert.deepEqual(capabilitySmoke.result.structuredContent, {
 });
 assert.equal(capabilitySmoke.errorResult.isError, true);
 assert.match(capabilitySmoke.errorResult.content[0].text, /diagnostic error/i);
+assert.deepEqual(firstSqliteSmoke, {
+  driver: 'node:sqlite',
+  schemaVersion: 1,
+  persistedCount: 1,
+});
+assert.deepEqual(secondSqliteSmoke, {
+  driver: 'node:sqlite',
+  schemaVersion: 1,
+  persistedCount: 2,
+});
 console.log(`Smoke test passed for ${target}`);
