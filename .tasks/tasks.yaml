@@ -592,7 +592,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-015
     title: "实现 Electron 系统通知闭环"
-    status: ready
+    status: in_progress
     goal: "Pi 与系统任务能请求原生通知，用户点击后定位对应会话或任务。"
     scope:
       in: ["Runtime 通知路由与认证宿主事件连接","Electron 原生通知及处理回执","notify_user 通过现有两个 MCP 元工具注册"]
@@ -616,12 +616,12 @@ tasks:
     investigation_hints: ["新增 packages/yuanpu-runtime/src/notifications；apps/desktop/src/main.ts、runtime-manager.ts、preload.ts；现有 main.tsx 对话页面最小导航适配","先核对 Electron 官方接口与各平台行为；复用 TASK-011 事件 DTO，Runtime 不导入 Electron","通知适配 fixture/事件断线测试 → pnpm check → 打包应用原生通知与点击实测；系统设置导致未展示需单独记录"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "sol-task015-owner-20260922-72012"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-22T10:20:57.459Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-015"
+      branch: "task/task-015-electron-notifications"
       evidence: []
       follow_up_candidates: []
   - id: TASK-016
