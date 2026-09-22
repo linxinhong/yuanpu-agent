@@ -1015,7 +1015,6 @@ async function serve(): Promise<void> {
     shuttingDown = true;
     if (shutdownPromise) return;
     const forcedExit = setTimeout(() => process.exit(1), 7_500);
-    forcedExit.unref();
     shutdownPromise = (async () => {
       parentMonitor?.dispose();
       const managedCleanup = cleanup().then(
