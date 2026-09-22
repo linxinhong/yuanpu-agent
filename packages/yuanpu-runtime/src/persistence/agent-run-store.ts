@@ -1,5 +1,6 @@
 import type {
   AgentApprovalBinding,
+  AgentRunOutput,
   AgentRunRecord,
   AgentRunRequest,
   AgentRunStatus,
@@ -126,7 +127,12 @@ export class AgentRunStore {
     const row = this.database.prepare(
       'SELECT * FROM yp_agent_runs WHERE run_id = ?',
     ).get(runId) as AgentRunRow | undefined;
-    return row ? rowToRun(row) : undefined;
+    if (!row) return undefined;
+    const run = rowToRun(row);
+    const output = this.database.prepare(
+      'SELECT output_json FROM yp_agent_run_outputs WHERE run_id = ?',
+    ).get(runId) as { output_json: string } | undefined;
+    return output ? { ...run, output: JSON.parse(output.output_json) as AgentRunOutput } : run;
   }
 
   submit(input: {
@@ -355,25 +361,40 @@ export class AgentRunStore {
     status: Extract<AgentRunStatus, 'succeeded' | 'failed' | 'cancelled'>;
     now: string;
     outputDigest?: string;
+    output?: AgentRunOutput;
     failure?: AgentRunRecord['failure'];
   }): AgentRunRecord {
-    const result = this.database.prepare(`
-      UPDATE yp_agent_runs
-      SET status = ?, output_digest = ?, failure_code = ?, failure_message = ?,
-        failure_retryable = ?, approval_request_id = NULL, approval_session_id = NULL,
-        approval_workspace_id = NULL, approval_expires_at = NULL, updated_at = ?
-      WHERE run_id = ? AND status IN ('running', 'waiting_approval')
-    `).run(
-      input.status,
-      input.outputDigest ?? null,
-      input.failure?.code ?? null,
-      input.failure?.message ?? null,
-      input.failure ? Number(input.failure.retryable) : null,
-      input.now,
-      input.runId,
-    );
-    if (result.changes !== 1) throw new Error(`Run ${input.runId} cannot finish from its current state.`);
-    return this.get(input.runId)!;
+    return this.#transaction(() => {
+      const result = this.database.prepare(`
+        UPDATE yp_agent_runs
+        SET status = ?, output_digest = ?, failure_code = ?, failure_message = ?,
+          failure_retryable = ?, approval_request_id = NULL, approval_session_id = NULL,
+          approval_workspace_id = NULL, approval_expires_at = NULL, updated_at = ?
+        WHERE run_id = ? AND status IN ('running', 'waiting_approval')
+      `).run(
+        input.status,
+        input.outputDigest ?? null,
+        input.failure?.code ?? null,
+        input.failure?.message ?? null,
+        input.failure ? Number(input.failure.retryable) : null,
+        input.now,
+        input.runId,
+      );
+      if (result.changes !== 1) {
+        throw new Error(`Run ${input.runId} cannot finish from its current state.`);
+      }
+      const owner = this.database.prepare(
+        'SELECT entry_point FROM yp_agent_runs WHERE run_id = ?',
+      ).get(input.runId) as { entry_point: string };
+      if (owner.entry_point === 'scheduler' && input.output) {
+        this.database.prepare(`
+          INSERT INTO yp_agent_run_outputs(run_id, output_json, created_at)
+          VALUES (?, ?, ?)
+          ON CONFLICT(run_id) DO UPDATE SET output_json = excluded.output_json
+        `).run(input.runId, JSON.stringify(input.output), input.now);
+      }
+      return this.get(input.runId)!;
+    });
   }
 
   interrupt(runId: string, now: string): AgentRunRecord {

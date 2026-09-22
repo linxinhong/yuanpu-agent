@@ -7,7 +7,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { AGENT_CONTRACT_VERSION, capabilityApprovalSigningPayload } from '@yuanpu-agent/protocol';
+import {
+  AGENT_CONTRACT_VERSION,
+  SCHEDULE_CONTRACT_VERSION,
+  capabilityApprovalSigningPayload,
+} from '@yuanpu-agent/protocol';
 
 test('runtime CLI prints the default greeting from the Yuanpu runtime kit', () => {
   const output = execFileSync(process.execPath, ['dist/index.cjs'], { encoding: 'utf8' });
@@ -289,6 +293,43 @@ test('runtime server exposes its protocol and greeting', async (context) => {
       identity: { ...agentRequest.identity, subjectId: 'other-user' },
     }),
   });
+  const createScheduleResponse = await fetch(`http://${ready.host}:${ready.port}/v1/schedules`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      contractVersion: SCHEDULE_CONTRACT_VERSION,
+      name: 'Runtime schedule',
+      prompt: 'Run later',
+      workspaceId: runtimeConfig.workingDirectory,
+      timing: { kind: 'once', at: '2099-01-01T00:00:00.000Z' },
+      timeZone: 'UTC',
+      delivery: { kind: 'desktop' },
+    }),
+  });
+  const createdSchedule = await createScheduleResponse.json();
+  const unauthorizedSchedule = await fetch(`http://${ready.host}:${ready.port}/v1/schedules`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      contractVersion: SCHEDULE_CONTRACT_VERSION,
+      name: 'Unauthorized schedule',
+      prompt: 'Must not run',
+      workspaceId: join(home, 'other-workspace'),
+      timing: { kind: 'cron', expression: '* * * * *' },
+      timeZone: 'UTC',
+      delivery: { kind: 'desktop' },
+    }),
+  });
+  const listedSchedules = await fetch(`http://${ready.host}:${ready.port}/v1/schedules`, { headers })
+    .then((response) => response.json());
+  const disabledSchedule = await fetch(
+    `http://${ready.host}:${ready.port}/v1/schedules/${createdSchedule.scheduleId}/disable`,
+    { method: 'POST', headers },
+  ).then((response) => response.json());
+  const scheduleHistory = await fetch(
+    `http://${ready.host}:${ready.port}/v1/schedules/${createdSchedule.scheduleId}/history`,
+    { headers },
+  ).then((response) => response.json());
 
   assert.equal(unauthorized.status, 401);
   assert.equal(badToken.status, 401);
@@ -323,6 +364,14 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.equal(agentRun.status, 'failed');
   assert.match(agentRun.failure.message, /API key/);
   assert.equal(spoofedAgentSubmission.status, 403);
+  assert.equal(createScheduleResponse.status, 201);
+  assert.equal(unauthorizedSchedule.status, 400);
+  assert.equal(createdSchedule.revision, 1);
+  assert.equal(createdSchedule.nextTriggerAt, '2099-01-01T00:00:00.000Z');
+  assert.equal(listedSchedules.length, 1);
+  assert.equal(disabledSchedule.enabled, false);
+  assert.equal(disabledSchedule.revision, 2);
+  assert.deepEqual(scheduleHistory, []);
   assert.deepEqual(health, {
     version: '0.1.0',
     protocolVersion: 3,

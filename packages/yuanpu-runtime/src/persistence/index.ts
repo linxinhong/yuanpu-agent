@@ -3,10 +3,11 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { AgentRunStore } from './agent-run-store.js';
+import { SchedulerStore } from '../scheduler/store.js';
 
 export * from './agent-run-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 2;
+export const YUANPU_METADATA_SCHEMA_VERSION = 3;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -129,6 +130,59 @@ const migrations: readonly Migration[] = [{
       failure_retryable = 1
     WHERE status = 'queued';
   `,
+}, {
+  version: 3,
+  sql: `
+    CREATE TABLE yp_agent_run_outputs (
+      run_id TEXT PRIMARY KEY REFERENCES yp_agent_runs(run_id),
+      output_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE yp_schedules (
+      schedule_id TEXT PRIMARY KEY,
+      revision INTEGER NOT NULL CHECK (revision > 0),
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      timing_json TEXT NOT NULL,
+      time_zone TEXT NOT NULL,
+      enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+      misfire_policy TEXT NOT NULL CHECK (misfire_policy IN ('coalesce', 'skip')),
+      maximum_lateness_ms INTEGER NOT NULL CHECK (maximum_lateness_ms >= 0),
+      allow_overlap INTEGER NOT NULL CHECK (allow_overlap IN (0, 1)),
+      conversation_id TEXT NOT NULL,
+      delivery_json TEXT NOT NULL,
+      next_trigger_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX yp_schedules_due
+      ON yp_schedules(enabled, next_trigger_at);
+
+    CREATE TABLE yp_schedule_triggers (
+      trigger_key TEXT PRIMARY KEY,
+      schedule_id TEXT NOT NULL REFERENCES yp_schedules(schedule_id),
+      schedule_revision INTEGER NOT NULL,
+      scheduled_at TEXT NOT NULL,
+      request_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN (
+        'pending_submission', 'submitted', 'submission_failed',
+        'skipped_misfire', 'skipped_overlap', 'output_unknown'
+      )),
+      run_id TEXT REFERENCES yp_agent_runs(run_id),
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (schedule_id, schedule_revision, scheduled_at)
+    ) STRICT;
+
+    CREATE INDEX yp_schedule_triggers_schedule_history
+      ON yp_schedule_triggers(schedule_id, scheduled_at DESC);
+    CREATE INDEX yp_schedule_triggers_submission
+      ON yp_schedule_triggers(status, created_at);
+  `,
 }];
 
 function applyMigrations(database: DatabaseSync): number {
@@ -168,10 +222,12 @@ export class YuanpuMetadataDatabase {
   readonly driver = YUANPU_SQLITE_DRIVER;
   readonly schemaVersion: number;
   readonly agentRuns: AgentRunStore;
+  readonly schedules: SchedulerStore;
 
   constructor(private readonly database: DatabaseSync) {
     this.schemaVersion = applyMigrations(database);
     this.agentRuns = new AgentRunStore(database);
+    this.schedules = new SchedulerStore(database);
   }
 
   getMetadata(key: string): string | undefined {

@@ -5,6 +5,7 @@ import type { AgentRunRecord } from './agent.js';
 
 export * from './agent.js';
 export * from './host-events.js';
+export * from './scheduler.js';
 
 export const RUNTIME_ROUTES = {
   health: '/v1/health',
@@ -14,6 +15,7 @@ export const RUNTIME_ROUTES = {
   hostEvents: '/v1/host/events',
   hostEventReceipts: '/v1/host/events/receipts',
   notificationTargetValidation: '/v1/notifications/targets/validate',
+  schedules: '/v1/schedules',
   localSkills: '/v1/skills/local',
   plugins: '/v1/plugins',
   pluginSearch: '/v1/plugins/search',

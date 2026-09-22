@@ -18,6 +18,7 @@ import {
   PersistentAgentService,
   HostNotificationRouter,
   requestTerminalRunNotification,
+  PersistentScheduler,
   validateCapabilityConfig,
   detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
@@ -25,6 +26,7 @@ import {
 } from '@yuanpu-agent/runtime-kit';
 import {
   AGENT_CONTRACT_VERSION,
+  SCHEDULE_CONTRACT_VERSION,
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,
   capabilityApprovalSigningPayload,
@@ -272,6 +274,73 @@ function sqliteSmoke(path: string | undefined): void {
   console.log(JSON.stringify({ driver, schemaVersion, persistedCount }));
 }
 
+async function schedulerSmoke(path: string | undefined): Promise<void> {
+  if (!path) throw new Error('--scheduler-smoke requires an explicit database path.');
+  const now = new Date('2026-09-22T00:00:00.000Z');
+  const database = openYuanpuMetadataDatabase(resolve(path));
+  const caller: AuthenticatedAgentCaller = {
+    entryPoint: 'scheduler',
+    identity: {
+      kind: 'scheduler',
+      subjectId: 'native-smoke',
+      authorityId: 'native-runtime',
+      authenticatedBy: 'scheduler',
+    },
+    authorizeWorkspace: (workspaceId) => workspaceId === '/native-smoke',
+    authorizeConversation: (conversation) => conversation.namespace === 'scheduler',
+    authorizeDelivery: (delivery) => delivery.kind === 'none',
+  };
+  const agent = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute(input) {
+        return { kind: 'completed', output: { message: input.input, tools: [] } };
+      },
+    },
+    now: () => now,
+  });
+  const scheduler = await PersistentScheduler.open({
+    store: database.schedules,
+    agent,
+    caller,
+    authorizeWorkspace: caller.authorizeWorkspace,
+    authorizeDelivery: caller.authorizeDelivery,
+    now: () => now,
+    scanIntervalMs: 60_000,
+  });
+  const schedule = scheduler.create({
+    contractVersion: SCHEDULE_CONTRACT_VERSION,
+    name: 'Native scheduler smoke',
+    prompt: 'SEA scheduler persisted output',
+    workspaceId: '/native-smoke',
+    timing: { kind: 'once', at: now.toISOString() },
+    timeZone: 'UTC',
+    delivery: { kind: 'none' },
+  });
+  await scheduler.tick();
+  await agent.waitForIdle();
+  await scheduler.tick();
+  await scheduler.close();
+  await agent.close();
+  database.close();
+
+  const reopened = openYuanpuMetadataDatabase(resolve(path));
+  const history = reopened.schedules.history(schedule.scheduleId, 10);
+  const schemaVersion = reopened.schemaVersion;
+  reopened.close();
+  const result = history[0];
+  if (history.length !== 1 || result?.runStatus !== 'succeeded' || !result.output) {
+    throw new Error('Scheduled run did not survive SQLite close and reopen.');
+  }
+  console.log(JSON.stringify({
+    schemaVersion,
+    historyCount: history.length,
+    runStatus: result.runStatus,
+    output: result.output.message,
+    deliveryStatus: result.deliveryStatus,
+  }));
+}
+
 function readConfigScope(value: unknown): PluginConfigScope {
   if (value !== 'user' && value !== 'workspace') throw new Error('插件配置作用域无效。');
   return value;
@@ -453,6 +522,25 @@ async function serve(): Promise<void> {
     authorizeConversation: (conversation) => conversation.namespace === 'desktop',
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
+  const schedulerCaller: AuthenticatedAgentCaller = {
+    entryPoint: 'scheduler',
+    identity: {
+      kind: 'scheduler',
+      subjectId: 'local-scheduler',
+      authorityId: 'local-runtime',
+      authenticatedBy: 'scheduler',
+    },
+    authorizeWorkspace: (workspaceId) => workspaceId === home.config.workingDirectory,
+    authorizeConversation: (conversation) => conversation.namespace === 'scheduler',
+    authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
+  };
+  const scheduler = await PersistentScheduler.open({
+    store: metadata.schedules,
+    agent: agentService,
+    caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: schedulerCaller.authorizeDelivery,
+  });
   const activatePythonArtifact = async (entrypoint: string, installPath: string, version: string) => {
     const previousSource = pythonSource;
     process.env.YUANPU_PYTHON_MCP_EXECUTABLE = entrypoint;
@@ -687,6 +775,76 @@ async function serve(): Promise<void> {
         );
         response.statusCode = receipt.result === 'not_found' ? 404 : 200;
         response.end(JSON.stringify(receipt));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.schedules && request.method === 'GET') {
+        response.end(JSON.stringify(scheduler.list()));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.schedules && request.method === 'POST') {
+        try {
+          const schedule = scheduler.create(await readJsonBody(request));
+          response.statusCode = 201;
+          response.end(JSON.stringify(schedule));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
+        return;
+      }
+      const schedulePath = url.pathname.startsWith(`${RUNTIME_ROUTES.schedules}/`)
+        ? url.pathname.slice(RUNTIME_ROUTES.schedules.length + 1).split('/')
+        : undefined;
+      if (schedulePath?.length === 1 && request.method === 'GET') {
+        const schedule = scheduler.get(decodeURIComponent(schedulePath[0]!));
+        response.statusCode = schedule ? 200 : 404;
+        response.end(JSON.stringify(schedule ?? { error: 'Schedule not found.' }));
+        return;
+      }
+      if (schedulePath?.length === 1 && request.method === 'PUT') {
+        const scheduleId = decodeURIComponent(schedulePath[0]!);
+        if (!scheduler.get(scheduleId)) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Schedule not found.' }));
+          return;
+        }
+        try {
+          response.end(JSON.stringify(scheduler.update(scheduleId, await readJsonBody(request))));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
+        return;
+      }
+      if (
+        schedulePath?.length === 2
+        && (schedulePath[1] === 'enable' || schedulePath[1] === 'disable')
+        && request.method === 'POST'
+      ) {
+        const scheduleId = decodeURIComponent(schedulePath[0]!);
+        if (!scheduler.get(scheduleId)) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Schedule not found.' }));
+          return;
+        }
+        response.end(JSON.stringify(scheduler.setEnabled(scheduleId, schedulePath[1] === 'enable')));
+        return;
+      }
+      if (schedulePath?.length === 2 && schedulePath[1] === 'history' && request.method === 'GET') {
+        const scheduleId = decodeURIComponent(schedulePath[0]!);
+        if (!scheduler.get(scheduleId)) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Schedule not found.' }));
+          return;
+        }
+        const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
+        try {
+          response.end(JSON.stringify(scheduler.history(scheduleId, limit)));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
         return;
       }
 
@@ -1106,6 +1264,7 @@ async function serve(): Promise<void> {
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
     cleanupPromise ??= (async () => {
+      await scheduler.close();
       const results = await Promise.allSettled([
         Promise.resolve().then(() => notificationRouter.close()),
         agentService.close(),
@@ -1228,6 +1387,12 @@ if (args.includes('--version') || args.includes('-v')) {
     console.error(error);
     process.exitCode = 1;
   }
+} else if (args.includes('--scheduler-smoke')) {
+  const pathIndex = args.indexOf('--scheduler-smoke');
+  void schedulerSmoke(args[pathIndex + 1]).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 } else {
   const nameIndex = args.indexOf('--name');
   const name = nameIndex >= 0 ? args[nameIndex + 1] : undefined;

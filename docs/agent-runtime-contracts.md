@@ -13,11 +13,13 @@ type or table declaration alone is still not evidence that a provider exists.
 - Runtime exposes the live AgentService to its authenticated desktop host at `POST /v1/agent/runs`,
   `GET /v1/agent/runs/:runId`, and `POST /v1/agent/runs/:runId/cancel`. The legacy `POST /v1/chat`
   path submits to the same service and waits for its run, preserving its existing response shape.
-  IM and Scheduler transports are not advertised until their trusted adapters exist. Electron now
+  Scheduler is now a live trusted adapter: Runtime exposes authenticated schedule create/list/get,
+  update, enable/disable, and history routes under `/v1/schedules`; the adapter constructs its
+  identity rather than accepting it from task text. Electron now
   opens the authenticated `GET /v1/host/events` SSE stream and acknowledges events through
   `POST /v1/host/events/receipts`; only the bootstrap Bearer token authorizes either route. Every
-  submission carries the contract version and preserves the
-  rejection/result shapes in `@yuanpu-agent/protocol`.
+  submission carries the contract version and preserves the rejection/result shapes in
+  `@yuanpu-agent/protocol`. IM is not advertised until its trusted adapter exists.
 - A future incompatible change increments the affected contract version. Additive optional fields
   may retain the version only when old consumers can safely ignore them. Runtime update manifests
   continue to use the existing exact desktop/Runtime protocol check until a separately tested
@@ -136,7 +138,7 @@ Yuanpu workflow metadata lives in `~/.yuanpu/workflows/automation.sqlite`. It is
 session store: Pi owns conversation content, while Yuanpu owns external conversation bindings, run
 metadata, deduplication, and delivery state. The Runtime is the single writer.
 
-Schema version 2 is managed by `packages/yuanpu-runtime/src/persistence/index.ts` using Node 24's
+Schema version 3 is managed by `packages/yuanpu-runtime/src/persistence/index.ts` using Node 24's
 built-in `node:sqlite` driver:
 
 | Table | Owner and purpose |
@@ -148,6 +150,9 @@ built-in `node:sqlite` driver:
 | `yp_agent_run_queue_payloads` | AgentService; input retained only while safely queued and deleted on claim or cancellation |
 | `yp_delivery_attempts` | delivery adapters; delivery state independent of execution |
 | `yp_inbound_deduplication` | channel ingress; authenticated source message deduplication |
+| `yp_agent_run_outputs` | Scheduler-only completed output needed for restart-safe delivery |
+| `yp_schedules` | schedule definition, revision, time zone, misfire/overlap policy and next trigger |
+| `yp_schedule_triggers` | revision-scoped trigger outbox, Agent run link and skipped-trigger history |
 
 Migrations run in `BEGIN IMMEDIATE` transactions, are forward-only and additive, and refuse a schema
 newer than the running Runtime. For a staged Runtime activation, Electron snapshots the closed
@@ -165,8 +170,12 @@ The run table therefore does not store the complete `AgentRunRequest`, output me
 Pi conversation content. TASK-012 adds one explicit exception for crash-safe admission: the queue
 payload table retains only input text while status is `queued`; claiming or cancelling the run
 deletes it in the same transaction. Once execution starts, Pi owns the persisted conversation and
-Yuanpu retains only digests and status. Future durable task or delivery payloads still need an
-explicit retention/redaction/cleanup design rather than being hidden in run metadata.
+Yuanpu retains only digests and status for desktop and IM runs. Scheduled prompts are explicitly
+retained in the schedule definition and its pending trigger outbox; completed Scheduler output is
+retained in `yp_agent_run_outputs` so delivery can resume after restart. These workflow records stay
+in the user-owned `automation.sqlite`; logs and task metadata must not copy prompt/output content.
+Product-configurable history cleanup remains a future policy and must remove trigger, output, and
+delivery records consistently.
 Runtime reuses at most 16 Pi session objects in an idle LRU pool. Eviction disposes only the in-memory
 session/runtime resources; the binding's Pi session remains persisted and reopens on later use.
 Tests use real files, including migration over a pre-existing fixture. The native smoke executes the
