@@ -39,12 +39,15 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     ORDER BY name
   `).all().map((row) => row.name);
   assert.deepEqual(tables, [
+    'yp_agent_run_outputs',
     'yp_agent_run_queue_payloads',
     'yp_agent_runs',
     'yp_conversation_bindings',
     'yp_delivery_attempts',
     'yp_inbound_deduplication',
     'yp_runtime_metadata',
+    'yp_schedule_triggers',
+    'yp_schedules',
     'yp_schema_migrations',
   ]);
   assert.equal(

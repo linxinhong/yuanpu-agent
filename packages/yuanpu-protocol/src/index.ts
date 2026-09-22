@@ -2,12 +2,14 @@ export const PROTOCOL_VERSION = 3;
 
 export * from './agent.js';
 export * from './host-events.js';
+export * from './scheduler.js';
 
 export const RUNTIME_ROUTES = {
   health: '/v1/health',
   greeting: '/v1/greeting',
   chat: '/v1/chat',
   agentRuns: '/v1/agent/runs',
+  schedules: '/v1/schedules',
   localSkills: '/v1/skills/local',
   plugins: '/v1/plugins',
   pluginSearch: '/v1/plugins/search',

@@ -34,6 +34,7 @@ const capabilitySmoke = JSON.parse(execFileSync(binary, ['--capability-smoke'], 
 const sqliteRoot = await mkdtemp(join(tmpdir(), 'yuanpu-sea-sqlite-'));
 let firstSqliteSmoke;
 let secondSqliteSmoke;
+let schedulerSmoke;
 try {
   const sqlitePath = join(sqliteRoot, 'automation.sqlite');
   firstSqliteSmoke = JSON.parse(execFileSync(binary, ['--sqlite-smoke', sqlitePath], {
@@ -42,6 +43,11 @@ try {
   secondSqliteSmoke = JSON.parse(execFileSync(binary, ['--sqlite-smoke', sqlitePath], {
     encoding: 'utf8',
   }).trim());
+  schedulerSmoke = JSON.parse(execFileSync(
+    binary,
+    ['--scheduler-smoke', join(sqliteRoot, 'scheduler.sqlite')],
+    { encoding: 'utf8' },
+  ).trim());
 } finally {
   await rm(sqliteRoot, { recursive: true, force: true });
 }
@@ -57,12 +63,19 @@ assert.equal(capabilitySmoke.errorResult.isError, true);
 assert.match(capabilitySmoke.errorResult.content[0].text, /diagnostic error/i);
 assert.deepEqual(firstSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 2,
+  schemaVersion: 3,
   persistedCount: 1,
 });
 assert.deepEqual(secondSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 2,
+  schemaVersion: 3,
   persistedCount: 2,
+});
+assert.deepEqual(schedulerSmoke, {
+  schemaVersion: 3,
+  historyCount: 1,
+  runStatus: 'succeeded',
+  output: 'SEA scheduler persisted output',
+  deliveryStatus: 'delivered',
 });
 console.log(`Smoke test passed for ${target}`);

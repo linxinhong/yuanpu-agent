@@ -282,6 +282,7 @@ export class PersistentAgentService implements AgentService {
       status: 'succeeded',
       now: this.#now().toISOString(),
       outputDigest: digest(JSON.stringify(output)),
+      output,
     });
     const live = { ...completed, output };
     this.#releaseApprovalRun(runId);
@@ -493,6 +494,7 @@ export class PersistentAgentService implements AgentService {
         status: 'succeeded',
         now: this.#now().toISOString(),
         outputDigest: digest(JSON.stringify(result.output)),
+        output: result.output,
       });
       this.#rememberOutput(claimed.run.runId, result.output);
       this.#emit({ ...completed, output: result.output });
