@@ -21,6 +21,7 @@ import {
   type HostEventReceipt,
   type NotificationNavigationTarget,
   type NotificationTargetValidation,
+  type AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
@@ -431,6 +432,13 @@ export class RuntimeManager {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(target),
     });
+  }
+
+  getAgentRun(runId: string): Promise<AgentRunRecord> {
+    if (typeof runId !== 'string' || runId.length < 1 || runId.length > 200) {
+      throw new Error('runId must be a non-empty string of at most 200 characters.');
+    }
+    return this.request(`${RUNTIME_ROUTES.agentRuns}/${encodeURIComponent(runId)}`);
   }
 
   listCapabilityApprovals(): Promise<CapabilityApprovalSummary[]> {

@@ -7,6 +7,7 @@ import {
   createNotificationCapabilitySource,
   createYuanpuCapabilityTools,
   createYuanpuMcpServer,
+  requestTerminalRunNotification,
 } from '../dist/index.mjs';
 
 function ids() {
@@ -63,16 +64,32 @@ test('notify_user is discovered and executed through the two existing MCP meta t
 });
 
 test('trusted system events use the same route without invoking a model and replay until receipt', async () => {
-  const router = new HostNotificationRouter({ createId: ids(), receiptTimeoutMs: 500 });
+  const router = new HostNotificationRouter({ createId: ids() });
   const first = [];
   const unsubscribe = router.subscribe(undefined, (event) => first.push(event));
-  const pending = router.request({
-    title: 'Scheduled task',
-    body: 'The task finished.',
-    kind: 'run_succeeded',
-    conversationId: 'default',
+  const pending = requestTerminalRunNotification(router, {
     runId: 'run-system',
+    owner: {
+      entryPoint: 'scheduler',
+      identity: {
+        kind: 'scheduler', subjectId: 'schedule-1', authorityId: 'local', authenticatedBy: 'scheduler',
+      },
+    },
+    context: {
+      workspaceId: '/workspace',
+      conversation: { namespace: 'scheduler', conversationId: 'default' },
+      delivery: { kind: 'desktop' },
+    },
+    requestFingerprint: 'fingerprint',
+    inputDigest: 'digest',
+    status: 'succeeded',
+    externalEffectState: 'possible',
+    createdAt: '2026-09-22T00:00:00.000Z',
+    updatedAt: '2026-09-22T00:00:01.000Z',
   });
+  assert.ok(pending);
+  assert.equal(first[0].payload.kind, 'run_succeeded');
+  assert.equal(first[0].payload.body.includes('fingerprint'), false);
   unsubscribe();
   const replay = [];
   router.subscribe(first[0].eventId, (event) => replay.push(event));

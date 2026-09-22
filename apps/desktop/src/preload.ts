@@ -5,6 +5,7 @@ const bridge: DesktopBridge = {
   runtimeInfo: () => ipcRenderer.invoke('runtime:info'),
   greeting: (name) => ipcRenderer.invoke('runtime:greeting', name),
   chat: (message) => ipcRenderer.invoke('runtime:chat', message),
+  getAgentRun: (runId) => ipcRenderer.invoke('agent:runs:get', runId),
   checkRuntimeUpdate: () => ipcRenderer.invoke('runtime:update'),
   checkDesktopUpdate: () => ipcRenderer.invoke('desktop:update'),
   searchPlugins: (query) => ipcRenderer.invoke('plugins:search', query),

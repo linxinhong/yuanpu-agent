@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -11,11 +12,16 @@ import { AGENT_CONTRACT_VERSION } from '@yuanpu-agent/protocol';
 async function ready(child) {
   return await new Promise((resolve, reject) => {
     let output = '';
+    let errors = '';
     const timeout = setTimeout(() => reject(new Error('Runtime did not become ready.')), 10_000);
     child.once('error', reject);
-    child.once('exit', (code, signal) => reject(new Error(
-      `Runtime exited before readiness (code=${String(code)}, signal=${String(signal)}).`,
-    )));
+    child.stderr.on('data', (chunk) => { errors += chunk.toString(); });
+    child.once('exit', (code, signal) => {
+      clearTimeout(timeout);
+      reject(new Error(
+        `Runtime exited before readiness (code=${String(code)}, signal=${String(signal)}): ${errors.trim()}`,
+      ));
+    });
     child.stdout.on('data', (chunk) => {
       output += chunk.toString();
       const newline = output.indexOf('\n');
@@ -34,6 +40,38 @@ async function waitForExit(child) {
   });
 }
 
+async function readSseEvent(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    let timer;
+    const result = await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Timed out waiting for a host event.')),
+          remaining,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (result.done) throw new Error('Host event stream closed before delivering an event.');
+    buffer += decoder.decode(result.value, { stream: true });
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary >= 0) {
+      const block = buffer.slice(0, boundary).replace(/\r/gu, '');
+      buffer = buffer.slice(boundary + 2);
+      const data = block.split('\n').filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart());
+      if (data.length > 0) return JSON.parse(data.join('\n'));
+      boundary = buffer.indexOf('\n\n');
+    }
+  }
+  throw new Error('Timed out waiting for a host event.');
+}
+
 test('Runtime authenticates host events and canonicalizes notification navigation targets', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-notification-routing-'));
   context.after(() => rm(root, { recursive: true, force: true }));
@@ -41,13 +79,40 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
   const workspace = join(root, 'workspace');
   await mkdir(join(home, 'app'), { recursive: true });
   await mkdir(workspace, { recursive: true });
+  const provider = createServer((request, response) => {
+    request.resume();
+    response.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    });
+    response.write(`data: ${JSON.stringify({
+      id: 'chatcmpl-notification',
+      object: 'chat.completion.chunk',
+      created: 0,
+      model: 'fixture-model',
+      choices: [{ index: 0, delta: { role: 'assistant', content: 'done' }, finish_reason: null }],
+    })}\n\n`);
+    response.write(`data: ${JSON.stringify({
+      id: 'chatcmpl-notification',
+      object: 'chat.completion.chunk',
+      created: 0,
+      model: 'fixture-model',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    })}\n\n`);
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise((resolve) => provider.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise((resolve) => provider.close(resolve)));
+  const providerAddress = provider.address();
   await writeFile(join(home, 'app', 'config.json'), `${JSON.stringify({
     schemaVersion: 1,
     provider: 'notification-fixture',
     model: 'fixture-model',
     apiKeyEnv: 'NOTIFICATION_FIXTURE_KEY',
     workingDirectory: workspace,
-    baseUrl: 'http://127.0.0.1:1/v1',
+    baseUrl: `http://127.0.0.1:${providerAddress.port}/v1`,
     api: 'openai-completions',
   }, null, 2)}\n`);
 
@@ -78,12 +143,17 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
   });
   assert.equal(eventResponse.status, 200);
   assert.match(eventResponse.headers.get('content-type'), /text\/event-stream/);
-  eventAbort.abort();
 
   const malformedReceipt = await fetch(`${origin}/v1/host/events/receipts`, {
     method: 'POST', headers, body: '{}',
   });
   assert.equal(malformedReceipt.status, 400);
+  assert.equal((await fetch(`${origin}/v1/host/events/receipts`, {
+    method: 'POST', headers, body: 'null',
+  })).status, 400);
+  assert.equal((await fetch(`${origin}/v1/notifications/targets/validate`, {
+    method: 'POST', headers, body: 'null',
+  })).status, 400);
 
   const submission = await fetch(`${origin}/v1/agent/runs`, {
     method: 'POST',
@@ -105,6 +175,28 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
     }),
   }).then((response) => response.json());
   assert.equal(submission.accepted, true);
+
+  const systemEvent = await readSseEvent(eventResponse);
+  assert.equal(systemEvent.type, 'notification_requested');
+  assert.equal(systemEvent.payload.kind, 'run_succeeded');
+  assert.equal(systemEvent.payload.runId, submission.runId);
+  assert.equal(systemEvent.payload.conversationId, 'default');
+  assert.equal(systemEvent.payload.body.includes('fixture'), false);
+  const receiptResponse = await fetch(`${origin}/v1/host/events/receipts`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      eventId: systemEvent.eventId,
+      status: 'accepted',
+      notification: {
+        requestId: systemEvent.payload.requestId,
+        status: 'submitted',
+        userVisibility: 'unknown',
+      },
+    }),
+  });
+  assert.equal(receiptResponse.status, 200);
+  eventAbort.abort();
 
   const validate = (target) => fetch(`${origin}/v1/notifications/targets/validate`, {
     method: 'POST', headers, body: JSON.stringify(target),

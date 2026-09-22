@@ -1,6 +1,7 @@
 export const PROTOCOL_VERSION = 3;
 
 import type { NotificationNavigationTarget } from './host-events.js';
+import type { AgentRunRecord } from './agent.js';
 
 export * from './agent.js';
 export * from './host-events.js';
@@ -209,6 +210,7 @@ export interface DesktopBridge {
   runtimeInfo(): Promise<RuntimeInfo>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
+  getAgentRun(runId: string): Promise<AgentRunRecord>;
   checkRuntimeUpdate(): Promise<RuntimeUpdateState>;
   checkDesktopUpdate(): Promise<void>;
   searchPlugins(query: string): Promise<PluginSearchResult[]>;

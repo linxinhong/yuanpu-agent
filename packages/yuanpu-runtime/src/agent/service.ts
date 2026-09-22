@@ -46,6 +46,7 @@ export interface PersistentAgentServiceOptions {
   maximumQueuedRuns?: number;
   now?: () => Date;
   createId?: () => string;
+  onRunStateChanged?: (run: AgentRunRecord) => void;
 }
 
 function digest(value: string): string {
@@ -76,6 +77,7 @@ export class PersistentAgentService implements AgentService {
   readonly #maximumQueuedRuns: number;
   readonly #now: () => Date;
   readonly #createId: () => string;
+  readonly #onRunStateChanged?: (run: AgentRunRecord) => void;
   readonly #activeBindings = new Set<string>();
   readonly #waitingBindings = new Map<string, string>();
   readonly #abortControllers = new Map<string, AbortController>();
@@ -99,6 +101,7 @@ export class PersistentAgentService implements AgentService {
     this.#maximumQueuedRuns = options.maximumQueuedRuns ?? 100;
     this.#now = options.now ?? (() => new Date());
     this.#createId = options.createId ?? randomUUID;
+    this.#onRunStateChanged = options.onRunStateChanged;
     if (!Number.isSafeInteger(this.#maximumConcurrentRuns) || this.#maximumConcurrentRuns < 1) {
       throw new Error('maximumConcurrentRuns must be a positive integer.');
     }
@@ -418,6 +421,7 @@ export class PersistentAgentService implements AgentService {
 
   #emit(run: AgentRunRecord): void {
     for (const subscriber of this.#subscribers.get(run.runId) ?? []) subscriber(run);
+    this.#onRunStateChanged?.(structuredClone(run));
   }
 
   #scheduleDispatch(): void {

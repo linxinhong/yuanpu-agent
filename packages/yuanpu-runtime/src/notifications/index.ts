@@ -4,6 +4,7 @@ import {
   HOST_EVENT_CONTRACT_VERSION,
   type HostEvent,
   type HostEventReceipt,
+  type AgentRunRecord,
   type NotificationReceipt,
 } from '@yuanpu-agent/protocol';
 
@@ -34,7 +35,7 @@ type HostEventListener = (event: HostEvent) => void;
 interface PendingNotification {
   event: Extract<HostEvent, { type: 'notification_requested' }>;
   resolve(receipt: NotificationReceipt): void;
-  timer: NodeJS.Timeout;
+  timer?: NodeJS.Timeout;
 }
 
 function unavailable(requestId: string, message: string): NotificationReceipt {
@@ -50,7 +51,7 @@ function assertBoundedText(value: string, name: string, maximumLength: number): 
 }
 
 export class HostNotificationRouter {
-  readonly #receiptTimeoutMs: number;
+  readonly #receiptTimeoutMs?: number;
   readonly #maximumPendingEvents: number;
   readonly #createId: () => string;
   readonly #now: () => Date;
@@ -60,11 +61,12 @@ export class HostNotificationRouter {
   #closed = false;
 
   constructor(options: HostNotificationRouterOptions = {}) {
-    this.#receiptTimeoutMs = options.receiptTimeoutMs ?? 10_000;
+    this.#receiptTimeoutMs = options.receiptTimeoutMs;
     this.#maximumPendingEvents = options.maximumPendingEvents ?? 100;
     this.#createId = options.createId ?? randomUUID;
     this.#now = options.now ?? (() => new Date());
-    if (!Number.isSafeInteger(this.#receiptTimeoutMs) || this.#receiptTimeoutMs < 1) {
+    if (this.#receiptTimeoutMs !== undefined
+      && (!Number.isSafeInteger(this.#receiptTimeoutMs) || this.#receiptTimeoutMs < 1)) {
       throw new Error('receiptTimeoutMs must be a positive integer.');
     }
     if (!Number.isSafeInteger(this.#maximumPendingEvents) || this.#maximumPendingEvents < 1) {
@@ -97,11 +99,11 @@ export class HostNotificationRouter {
     };
 
     return new Promise<NotificationReceipt>((resolve) => {
-      const timer = setTimeout(() => {
+      const timer = this.#receiptTimeoutMs === undefined ? undefined : setTimeout(() => {
         if (!this.#pending.delete(event.eventId)) return;
         resolve(unavailable(requestId, 'The Electron host did not acknowledge the notification request in time.'));
       }, this.#receiptTimeoutMs);
-      timer.unref?.();
+      timer?.unref?.();
       this.#pending.set(event.eventId, { event, resolve, timer });
       for (const listener of this.#listeners) listener(event);
     });
@@ -141,7 +143,7 @@ export class HostNotificationRouter {
             message: receipt.message ?? 'The Electron host rejected the notification request.',
           };
     }
-    clearTimeout(pending.timer);
+    if (pending.timer) clearTimeout(pending.timer);
     this.#pending.delete(receipt.eventId);
     pending.resolve(notification);
     return true;
@@ -152,7 +154,7 @@ export class HostNotificationRouter {
     this.#closed = true;
     this.#listeners.clear();
     for (const [eventId, pending] of this.#pending) {
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       this.#pending.delete(eventId);
       pending.resolve(unavailable(
         pending.event.payload.requestId,
@@ -160,6 +162,25 @@ export class HostNotificationRouter {
       ));
     }
   }
+}
+
+/**
+ * Translate durable terminal run state into a data-minimal host notification.
+ * This path is independent of model tool selection and deliberately excludes
+ * prompts, outputs, and failure details from the native notification surface.
+ */
+export function requestTerminalRunNotification(
+  router: HostNotificationRouter,
+  run: AgentRunRecord,
+): Promise<NotificationReceipt> | undefined {
+  if (run.status !== 'succeeded' && run.status !== 'failed') return undefined;
+  return router.request({
+    title: run.status === 'succeeded' ? '任务已完成' : '任务执行失败',
+    body: '点击查看对应会话与运行记录。',
+    kind: run.status === 'succeeded' ? 'run_succeeded' : 'run_failed',
+    conversationId: run.context.conversation.conversationId,
+    runId: run.runId,
+  });
 }
 
 const notifyUserCapability: CapabilityDefinition = {

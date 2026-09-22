@@ -17,6 +17,7 @@ import {
   openYuanpuMetadataDatabase,
   PersistentAgentService,
   HostNotificationRouter,
+  requestTerminalRunNotification,
   validateCapabilityConfig,
   detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
@@ -97,6 +98,10 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     chunks.push(bytes);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function readBoundedJsonResponse(response: Response, maximumBytes = 256 * 1024): Promise<unknown> {
@@ -429,6 +434,12 @@ async function serve(): Promise<void> {
     approvals,
     maximumConcurrentRuns: 4,
     maximumQueuedRuns: 100,
+    onRunStateChanged: (run) => {
+      const receipt = requestTerminalRunNotification(notificationRouter, run);
+      void receipt?.catch((error) => {
+        console.error('Terminal run notification failed:', error instanceof Error ? error.message : String(error));
+      });
+    },
   });
   const desktopCaller: AuthenticatedAgentCaller = {
     entryPoint: 'desktop',
@@ -540,20 +551,32 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.hostEventReceipts && request.method === 'POST') {
-        const body = await readJsonBody(request) as Partial<HostEventReceipt>;
+        const rawBody = await readJsonBody(request);
+        if (!isRecord(rawBody)) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid host event receipt.' }));
+          return;
+        }
+        const body = rawBody as Partial<HostEventReceipt>;
         const notification = body.notification;
         if (
           typeof body.eventId !== 'string'
           || body.eventId.length < 1
           || body.eventId.length > 200
           || !['accepted', 'duplicate', 'unsupported', 'rejected'].includes(body.status ?? '')
+          || (body.message !== undefined && (
+            typeof body.message !== 'string' || body.message.length > 1_000
+          ))
           || (notification !== undefined && (
-            !notification
-            || typeof notification !== 'object'
+            !isRecord(notification)
             || typeof notification.requestId !== 'string'
+            || notification.requestId.length < 1
+            || notification.requestId.length > 200
             || !['submitted', 'suppressed', 'unavailable', 'failed'].includes(notification.status)
             || notification.userVisibility !== 'unknown'
-            || (notification.message !== undefined && typeof notification.message !== 'string')
+            || (notification.message !== undefined && (
+              typeof notification.message !== 'string' || notification.message.length > 1_000
+            ))
           ))
         ) {
           response.statusCode = 400;
@@ -567,12 +590,27 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.notificationTargetValidation && request.method === 'POST') {
-        const body = await readJsonBody(request) as NotificationNavigationTarget;
+        const rawBody = await readJsonBody(request);
+        if (!isRecord(rawBody)
+          || (rawBody.conversationId !== undefined && (
+            typeof rawBody.conversationId !== 'string'
+            || rawBody.conversationId.length < 1
+            || rawBody.conversationId.length > 512
+          ))
+          || (rawBody.runId !== undefined && (
+            typeof rawBody.runId !== 'string'
+            || rawBody.runId.length < 1
+            || rawBody.runId.length > 200
+          ))) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid notification navigation target.' }));
+          return;
+        }
+        const body = rawBody as NotificationNavigationTarget;
         const requestedConversationId = typeof body.conversationId === 'string'
-          && body.conversationId.length <= 512
           ? body.conversationId
           : undefined;
-        const requestedRunId = typeof body.runId === 'string' && body.runId.length <= 200
+        const requestedRunId = typeof body.runId === 'string'
           ? body.runId
           : undefined;
         let result: NotificationTargetValidation;

@@ -29,6 +29,8 @@ export interface ElectronNotificationHostOptions {
   focus(): void;
   submissionTimeoutMs?: number;
   maximumRememberedEvents?: number;
+  maximumActiveNotifications?: number;
+  activeNotificationTtlMs?: number;
   onError?: (error: Error) => void;
 }
 
@@ -36,6 +38,7 @@ interface ActiveNotification {
   notification: NativeNotification;
   finish(receipt: NotificationReceipt): void;
   requestId: string;
+  expiryTimer: NodeJS.Timeout;
 }
 
 function statusReceipt(
@@ -64,6 +67,8 @@ export class ElectronNotificationHost {
   readonly #options: ElectronNotificationHostOptions;
   readonly #submissionTimeoutMs: number;
   readonly #maximumRememberedEvents: number;
+  readonly #maximumActiveNotifications: number;
+  readonly #activeNotificationTtlMs: number;
   readonly #receiptsByEvent = new Map<string, NotificationReceipt>();
   readonly #receiptsByRequest = new Map<string, NotificationReceipt>();
   readonly #active = new Map<string, ActiveNotification>();
@@ -73,6 +78,14 @@ export class ElectronNotificationHost {
     this.#options = options;
     this.#submissionTimeoutMs = options.submissionTimeoutMs ?? 2_000;
     this.#maximumRememberedEvents = options.maximumRememberedEvents ?? 500;
+    this.#maximumActiveNotifications = options.maximumActiveNotifications ?? 50;
+    this.#activeNotificationTtlMs = options.activeNotificationTtlMs ?? 5 * 60_000;
+    if (!Number.isSafeInteger(this.#maximumActiveNotifications) || this.#maximumActiveNotifications < 1) {
+      throw new Error('maximumActiveNotifications must be a positive integer.');
+    }
+    if (!Number.isSafeInteger(this.#activeNotificationTtlMs) || this.#activeNotificationTtlMs < 1) {
+      throw new Error('activeNotificationTtlMs must be a positive integer.');
+    }
   }
 
   async handle(event: HostEvent): Promise<HostEventReceipt> {
@@ -116,7 +129,9 @@ export class ElectronNotificationHost {
   stop(): void {
     if (this.#stopped) return;
     this.#stopped = true;
-    for (const active of this.#active.values()) {
+    for (const [eventId, active] of this.#active) {
+      clearTimeout(active.expiryTimer);
+      this.#active.delete(eventId);
       active.notification.close();
       active.finish(statusReceipt(active.requestId, 'unavailable', 'The App exited before submission completed.'));
     }
@@ -137,30 +152,48 @@ export class ElectronNotificationHost {
       let notification: NativeNotification;
       try {
         notification = this.#options.platform.create({ title, body });
-        this.#active.set(event.eventId, { notification, finish, requestId });
+        while (this.#active.size >= this.#maximumActiveNotifications) {
+          const oldestEventId = this.#active.keys().next().value as string | undefined;
+          if (!oldestEventId) break;
+          const oldest = this.#active.get(oldestEventId);
+          this.#release(oldestEventId);
+          oldest?.notification.close();
+          oldest?.finish(statusReceipt(
+            oldest.requestId,
+            'unavailable',
+            'The native notification limit was reached before submission completed.',
+          ));
+        }
+        const expiryTimer = setTimeout(() => {
+          this.#release(event.eventId);
+          notification.close();
+        }, this.#activeNotificationTtlMs);
+        expiryTimer.unref?.();
+        this.#active.set(event.eventId, { notification, finish, requestId, expiryTimer });
         notification.once('show', () => finish(statusReceipt(
           requestId,
           'submitted',
           'The operating system accepted the notification; whether the user saw it is unknown.',
         )));
         notification.once('failed', (_nativeEvent, error) => {
-          this.#active.delete(event.eventId);
+          this.#release(event.eventId);
           finish(statusReceipt(requestId, 'failed', error || 'The operating system rejected the notification.'));
         });
-        notification.on('close', () => this.#active.delete(event.eventId));
+        notification.on('close', () => this.#release(event.eventId));
         notification.on('click', () => {
           void this.#activate(event).catch((error) => this.#options.onError?.(
             error instanceof Error ? error : new Error(String(error)),
           ));
         });
         timer = setTimeout(() => {
-          this.#active.delete(event.eventId);
+          this.#release(event.eventId);
+          notification.close();
           finish(statusReceipt(requestId, 'failed', 'The operating system did not confirm notification submission.'));
         }, this.#submissionTimeoutMs);
         timer.unref?.();
         notification.show();
       } catch (error) {
-        this.#active.delete(event.eventId);
+        this.#release(event.eventId);
         finish(statusReceipt(
           requestId,
           'failed',
@@ -168,6 +201,13 @@ export class ElectronNotificationHost {
         ));
       }
     });
+  }
+
+  #release(eventId: string): void {
+    const active = this.#active.get(eventId);
+    if (!active) return;
+    clearTimeout(active.expiryTimer);
+    this.#active.delete(eventId);
   }
 
   async #activate(event: Extract<HostEvent, { type: 'notification_requested' }>): Promise<void> {

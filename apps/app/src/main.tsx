@@ -16,6 +16,7 @@ import type {
   PluginConfigScope,
   PluginSearchResult,
   NotificationNavigationTarget,
+  AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 
 import './styles.css';
@@ -830,6 +831,7 @@ function ChatPanel({
   const [runtime, setRuntime] = useState({ connected: false, piVersion: '—' });
   const [approvals, setApprovals] = useState<CapabilityApprovalSummary[]>([]);
   const [approvalBusy, setApprovalBusy] = useState<string>();
+  const [locatedRun, setLocatedRun] = useState<AgentRunRecord | 'loading' | 'error'>();
   const nextId = useRef(2);
   const conversation = useRef<HTMLDivElement>(null);
   const desktop = window.yuanpu;
@@ -854,6 +856,21 @@ function ChatPanel({
     const timer = window.setInterval(() => void refreshApprovals(), 1_500);
     return () => window.clearInterval(timer);
   }, [desktop, active]);
+
+  useEffect(() => {
+    const runId = navigationTarget?.runId;
+    if (!desktop || !runId) {
+      setLocatedRun(undefined);
+      return;
+    }
+    let cancelled = false;
+    setLocatedRun('loading');
+    void desktop.getAgentRun(runId).then(
+      (run) => { if (!cancelled) setLocatedRun(run); },
+      () => { if (!cancelled) setLocatedRun('error'); },
+    );
+    return () => { cancelled = true; };
+  }, [desktop, navigationTarget?.runId]);
 
   useEffect(() => {
     conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'smooth' });
@@ -946,7 +963,13 @@ function ChatPanel({
           <span className="mcp-count">2 个 MCP 元工具</span>
           {navigationTarget && (
             <span role="status">
-              已定位到 {navigationTarget.runId ? `任务 ${navigationTarget.runId}` : `会话 ${navigationTarget.conversationId}`}
+              {locatedRun === 'loading'
+                ? '正在加载任务记录…'
+                : locatedRun === 'error'
+                  ? '任务记录不可用'
+                  : locatedRun
+                    ? `已定位任务 ${locatedRun.runId} · ${locatedRun.status} · 会话 ${locatedRun.context.conversation.conversationId}`
+                    : `已定位会话 ${navigationTarget.conversationId}`}
             </span>
           )}
         </div>

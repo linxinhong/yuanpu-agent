@@ -107,6 +107,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('runtime:info', trustedHandler(() => runtime.info()));
   ipcMain.handle('runtime:greeting', trustedHandler((name: string) => runtime.greeting(name)));
   ipcMain.handle('runtime:chat', trustedHandler((message: string) => runtime.chat(message)));
+  ipcMain.handle('agent:runs:get', trustedHandler((runId: string) => runtime.getAgentRun(runId)));
   ipcMain.handle('runtime:update', trustedHandler(() => runtime.checkForUpdate()));
   ipcMain.handle('plugins:search', trustedHandler((query: string) => runtime.searchPlugins(query)));
   ipcMain.handle('plugins:list', trustedHandler(() => runtime.listPlugins()));

@@ -56,7 +56,8 @@ function validateConfig(value: unknown, configPath: string): YuanpuConfig {
       'google-generative-ai',
     ].includes(config.api))
     || (config.notifications !== undefined && (
-      typeof config.notifications !== 'object'
+      !config.notifications
+      || typeof config.notifications !== 'object'
       || typeof config.notifications.enabled !== 'boolean'
     ))
   ) {

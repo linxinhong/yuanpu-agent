@@ -35,6 +35,30 @@ const server = createServer((request, response) => {
     }));
     return;
   }
+  if (request.url === '/v1/agent/runs/run-fixture') {
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({
+      runId: 'run-fixture',
+      owner: {
+        entryPoint: 'desktop',
+        identity: {
+          kind: 'local_user', subjectId: 'local-user', authorityId: 'local-desktop', authenticatedBy: 'electron',
+        },
+      },
+      context: {
+        workspaceId: '/fixture',
+        conversation: { namespace: 'desktop', conversationId: 'default' },
+        delivery: { kind: 'desktop' },
+      },
+      requestFingerprint: 'fixture',
+      inputDigest: 'fixture',
+      status: 'succeeded',
+      externalEffectState: 'possible',
+      createdAt: '2026-09-22T00:00:00.000Z',
+      updatedAt: '2026-09-22T00:00:01.000Z',
+    }));
+    return;
+  }
   response.writeHead(404).end();
 });
 

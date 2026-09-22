@@ -74,3 +74,23 @@ test('uses authenticated SSE, reconnects after a lost receipt, and permits host 
   assert.deepEqual(handled, ['event-reconnect', 'event-reconnect']);
   assert.deepEqual(auth, Array(auth.length).fill('Bearer secret-token'));
 });
+
+test('stop interrupts exponential reconnect backoff after a failed response', async () => {
+  let reported;
+  const failure = new Promise((resolve) => { reported = resolve; });
+  const client = new AuthenticatedHostEventClient(
+    async () => ({ host: '127.0.0.1', port: 1, token: 'secret-token' }),
+    async () => { throw new Error('unexpected event'); },
+    {
+      reconnectDelayMs: 1_000,
+      maximumReconnectDelayMs: 5_000,
+      fetch: async () => new Response('unavailable', { status: 503 }),
+      onError: reported,
+    },
+  );
+  client.start();
+  await failure;
+  const started = Date.now();
+  await client.stop();
+  assert.ok(Date.now() - started < 250);
+});

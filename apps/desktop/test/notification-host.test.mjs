@@ -141,3 +141,19 @@ test('App stop closes active notifications and prevents any later submission', a
   assert.equal(after.status, 'rejected');
   assert.equal(after.notification.status, 'unavailable');
 });
+
+test('bounds active native notifications and expires retained instances', async () => {
+  const bounded = setup({ maximumActiveNotifications: 1, activeNotificationTtlMs: 1_000 });
+  await bounded.host.handle(event());
+  await bounded.host.handle(event({
+    eventId: 'event-2',
+    payload: { ...event().payload, requestId: 'request-2' },
+  }));
+  assert.equal(bounded.created.length, 2);
+  assert.equal(bounded.created[0].closed, true);
+
+  const expiring = setup({ activeNotificationTtlMs: 5 });
+  await expiring.host.handle(event());
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(expiring.created[0].closed, true);
+});
