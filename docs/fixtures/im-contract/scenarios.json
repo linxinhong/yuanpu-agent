@@ -1,0 +1,46 @@
+{
+  "fixtureVersion": 1,
+  "payloadKind": "normalized-only",
+  "scenarios": [
+    {
+      "id": "dm-allowed-text",
+      "expect": ["accepted", "one-agent-run", "reply-route-from-inbound"]
+    },
+    {
+      "id": "group-allowed-mention",
+      "expect": ["accepted", "paired-sender-checked", "same-thread-reply"]
+    },
+    {
+      "id": "unauthorized-sender",
+      "expect": ["rejected-before-agent-run", "no-identity-from-message-body"]
+    },
+    {
+      "id": "duplicate-provider-delivery",
+      "expect": ["acknowledged", "existing-run-returned", "no-second-agent-run"]
+    },
+    {
+      "id": "same-message-different-connection",
+      "expect": ["distinct-dedupe-keys", "distinct-sessions"]
+    },
+    {
+      "id": "thread-reply-route",
+      "expect": ["immutable-route", "same-conversation", "same-thread"]
+    },
+    {
+      "id": "send-timeout-after-write",
+      "expect": ["outbound-unknown", "no-blind-retry", "no-agent-rerun"]
+    },
+    {
+      "id": "restart-with-persisted-dedupe",
+      "expect": ["existing-run-returned", "no-second-agent-run"]
+    },
+    {
+      "id": "unsupported-attachment",
+      "expect": ["visible-unsupported-result", "no-remote-fetch", "no-agent-run"]
+    },
+    {
+      "id": "offline-gap-unverified",
+      "expect": ["no-offline-recovery-claim", "requires-real-provider-test"]
+    }
+  ]
+}

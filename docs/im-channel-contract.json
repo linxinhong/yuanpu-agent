@@ -1,0 +1,166 @@
+{
+  "contractVersion": 1,
+  "decision": {
+    "status": "awaiting-user-selection",
+    "selectedCandidateId": null,
+    "userDecisionRef": null,
+    "accountPermissionRef": null,
+    "testConversationRefs": []
+  },
+  "candidateIds": [
+    "feishu-self-built-app-bot-ws",
+    "wecom-intelligent-bot-ws",
+    "dingtalk-internal-app-bot-stream",
+    "wechat-service-account-webhook"
+  ],
+  "architectureChangeCandidateIds": [
+    "wechat-service-account-webhook"
+  ],
+  "connection": {
+    "connectionIdFormat": "imc_<uuid>",
+    "lifecycleOwner": "desktop-app-runtime",
+    "backgroundAfterAppExit": false,
+    "publicInboundEndpoint": false,
+    "outboundInternetRequired": true
+  },
+  "inbound": {
+    "requiredFields": [
+      "provider",
+      "connectionId",
+      "providerDeliveryId",
+      "providerMessageId",
+      "trustedSenderId",
+      "conversationId",
+      "messageType",
+      "receivedAt"
+    ],
+    "dedupeKeyFields": [
+      "provider",
+      "connectionId",
+      "providerDeliveryId"
+    ],
+    "messageUniquenessFields": [
+      "provider",
+      "connectionId",
+      "providerMessageId"
+    ],
+    "persistBeforeAck": true,
+    "executeAsynchronouslyAfterAck": true,
+    "offlineRecovery": "unverified"
+  },
+  "identity": {
+    "pairingKeyFields": [
+      "connectionId",
+      "trustedSenderId"
+    ],
+    "trustMessageBodyIdentity": false,
+    "groupRequiresPairedSender": true,
+    "groupRequiresAllowlistedConversation": true,
+    "groupRequiresBotMention": true
+  },
+  "session": {
+    "keyFields": [
+      "provider",
+      "connectionId",
+      "conversationId",
+      "threadIdOrRoot"
+    ],
+    "crossConnectionReuse": false,
+    "crossConversationReuse": false
+  },
+  "replyRoute": {
+    "fields": [
+      "provider",
+      "connectionId",
+      "conversationId",
+      "threadId",
+      "providerMessageId"
+    ],
+    "immutableAfterInbound": true,
+    "modelMayOverride": false,
+    "fallbackToDifferentConversation": false
+  },
+  "outbound": {
+    "states": [
+      "pending",
+      "delivered",
+      "failed",
+      "unknown"
+    ],
+    "persistBeforeSend": true,
+    "successRequiresProviderMessageId": true,
+    "timeoutAfterPossibleWrite": "unknown",
+    "blindRetryUnknown": false,
+    "rerunAgentOnDeliveryFailure": false
+  },
+  "attachments": {
+    "initiallyAcceptedTypes": [
+      "text"
+    ],
+    "unsupportedTypes": [
+      "image",
+      "file",
+      "audio",
+      "video",
+      "rich-text"
+    ],
+    "autoFetchRemoteResources": false
+  },
+  "configurationFields": {
+    "required": [
+      "enabled",
+      "provider",
+      "connectionId",
+      "providerAccountRef",
+      "credentialRefs",
+      "directMessagePolicy",
+      "groupPolicy",
+      "groupAllowlist",
+      "acceptedMessageTypes"
+    ],
+    "directMessagePolicy": "paired-only",
+    "groupPolicy": "allowlist-and-mention",
+    "secretValuesAllowed": false,
+    "sdkOptionsPassthrough": false
+  },
+  "candidateCredentialRefs": {
+    "feishu-self-built-app-bot-ws": [
+      "env:YUANPU_FEISHU_APP_ID",
+      "keychain:yuanpu/im/<connectionId>/app-secret"
+    ],
+    "wecom-intelligent-bot-ws": [
+      "env:YUANPU_WECOM_BOT_ID",
+      "keychain:yuanpu/im/<connectionId>/bot-secret"
+    ],
+    "dingtalk-internal-app-bot-stream": [
+      "env:YUANPU_DINGTALK_CLIENT_ID",
+      "keychain:yuanpu/im/<connectionId>/client-secret"
+    ],
+    "wechat-service-account-webhook": [
+      "env:YUANPU_WECHAT_APP_ID",
+      "keychain:yuanpu/im/<connectionId>/app-secret",
+      "keychain:yuanpu/im/<connectionId>/callback-token",
+      "keychain:yuanpu/im/<connectionId>/encoding-aes-key"
+    ]
+  },
+  "providerLimits": null,
+  "fixtureScope": {
+    "scenarioFile": "docs/fixtures/im-contract/scenarios.json",
+    "proves": [
+      "normalization-shape",
+      "identity-policy",
+      "session-isolation",
+      "dedupe-policy",
+      "reply-route-policy",
+      "send-unknown-policy"
+    ],
+    "doesNotProve": [
+      "provider-authentication",
+      "provider-delivery",
+      "provider-rate-limits",
+      "offline-recovery",
+      "real-attachment-transfer",
+      "end-to-end-display"
+    ]
+  }
+}
