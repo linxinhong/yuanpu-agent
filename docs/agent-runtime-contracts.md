@@ -124,8 +124,12 @@ built-in `node:sqlite` driver:
 | `yp_inbound_deduplication` | channel ingress; authenticated source message deduplication |
 
 Migrations run in `BEGIN IMMEDIATE` transactions, are forward-only and additive, and refuse a schema
-newer than the running Runtime. Rollback of a Runtime binary therefore does not imply database
-rollback. An incompatible/destructive migration requires a separate backup and recovery design.
+newer than the running Runtime. For a staged Runtime activation, Electron snapshots the closed
+`automation.sqlite` database (including present WAL/SHM sidecars) before changing `current.json`.
+The activation remains provisional through startup health and a stability interval; failure or an
+App crash before confirmation restores both the previous Runtime pointer and that database snapshot.
+After activation confirmation, binary rollback does not imply database rollback. An incompatible or
+destructive migration after that boundary requires a separately designed backup/recovery operation.
 Bindings, runs, deduplication, and idempotency include both authenticated authority and subject; a
 shared channel connection does not collapse different senders. Composite foreign keys prevent a run
 from referencing another owner's binding and prevent inbound deduplication from pointing at another

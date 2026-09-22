@@ -55,6 +55,18 @@ test('deduplicates concurrent starts and performs a bounded graceful stop', asyn
   assert.equal((await events(eventFile)).filter((event) => event.event === 'term').length, 1);
 });
 
+test('stop cancels a start that has not spawned its Runtime yet', async (context) => {
+  const { manager, eventFile } = await createManager(context, 'healthy');
+  const starting = manager.start().then(
+    () => undefined,
+    (error) => error,
+  );
+  await manager.stop();
+  const error = await starting;
+  assert.match(error.message, /cancelled because the App is stopping/);
+  assert.equal((await events(eventFile)).filter((event) => event.event === 'start').length, 0);
+});
+
 test('restarts a crashed Runtime once without overlapping instances', async (context) => {
   const { manager, eventFile, errors } = await createManager(context, 'crash-once');
   const first = await manager.start();

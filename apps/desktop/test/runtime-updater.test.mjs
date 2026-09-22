@@ -188,17 +188,29 @@ test('discards staged executables whose version or metadata is invalid', async (
 
 test('rolls back an unconfirmed activation on the next App start without touching user data', async (context) => {
   const root = await temporaryRuntimeRoot(context);
-  const updater = new RuntimeUpdater({ runtimeRoot: root, desktopVersion: '0.1.0' });
   const stagingRoot = join(root, '.staging');
   const stagedName = process.platform === 'win32' ? 'runtime.exe' : 'runtime';
   const executable = await readFile(process.execPath);
   const sha256 = createHash('sha256').update(executable).digest('hex');
-  const userDatabase = join(root, 'user-data', 'automation.sqlite');
-  await mkdir(join(root, 'user-data'), { recursive: true });
+  const yuanpuHome = join(root, 'yuanpu-home');
+  const userDatabase = join(yuanpuHome, 'workflows', 'automation.sqlite');
+  await mkdir(join(yuanpuHome, 'workflows'), { recursive: true });
   const database = new DatabaseSync(userDatabase);
+  database.exec(`
+    CREATE TABLE yp_schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    ) STRICT;
+    INSERT INTO yp_schema_migrations(version, applied_at) VALUES (1, 'fixture');
+  `);
   database.exec('CREATE TABLE user_fixture(value TEXT NOT NULL) STRICT');
   database.prepare('INSERT INTO user_fixture(value) VALUES (?)').run('persistent-user-data');
   database.close();
+  const updater = new RuntimeUpdater({
+    runtimeRoot: root,
+    desktopVersion: '0.1.0',
+    metadataDatabasePath: userDatabase,
+  });
   await mkdir(stagingRoot, { recursive: true });
   await writeFile(join(stagingRoot, stagedName), executable);
   await writeFile(join(stagingRoot, 'staged.json'), JSON.stringify({
@@ -215,9 +227,18 @@ test('rolls back an unconfirmed activation on the next App start without touchin
     { version: executableVersion, executable: activation.executable },
   );
 
+  const migrated = new DatabaseSync(userDatabase);
+  migrated.exec(`
+    CREATE TABLE new_runtime_only(value TEXT NOT NULL) STRICT;
+    INSERT INTO yp_schema_migrations(version, applied_at) VALUES (2, 'failed-update');
+    UPDATE user_fixture SET value = 'changed-by-failed-runtime';
+  `);
+  migrated.close();
+
   const afterCrash = await new RuntimeUpdater({
     runtimeRoot: root,
     desktopVersion: '0.1.0',
+    metadataDatabasePath: userDatabase,
   }).prepareActivation('/bundled/runtime');
   assert.deepEqual(afterCrash, {
     executable: '/old/runtime',
@@ -230,6 +251,11 @@ test('rolls back an unconfirmed activation on the next App start without touchin
   );
   const reopened = new DatabaseSync(userDatabase, { readOnly: true });
   assert.equal(reopened.prepare('SELECT value FROM user_fixture').get().value, 'persistent-user-data');
+  assert.equal(reopened.prepare('SELECT MAX(version) AS version FROM yp_schema_migrations').get().version, 1);
+  assert.equal(
+    reopened.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name = 'new_runtime_only'").get().count,
+    0,
+  );
   reopened.close();
   await assert.rejects(stat(join(root, 'activation-pending.json')), { code: 'ENOENT' });
 });

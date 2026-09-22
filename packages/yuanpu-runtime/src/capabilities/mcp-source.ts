@@ -481,7 +481,11 @@ export class ManagedMcpCapabilitySource {
     this.#transport = undefined;
     this.#tools.clear();
     this.#toolsExpiresAt = 0;
-    if (client) await client.close().catch(() => undefined);
-    else if (transport) await transport.close().catch(() => undefined);
+    // Terminate the process group directly as well as closing the MCP client.
+    // This keeps App shutdown bounded even if the protocol-level close stalls.
+    await Promise.allSettled([
+      transport?.close(),
+      client?.close(),
+    ].filter((operation): operation is Promise<void> => Boolean(operation)));
   }
 }

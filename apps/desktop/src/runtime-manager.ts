@@ -20,6 +20,7 @@ import {
 } from '@yuanpu-agent/protocol';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -45,6 +46,7 @@ export interface RuntimeManagerOptions {
   restartLimit?: number;
   restartWindowMs?: number;
   restartBaseDelayMs?: number;
+  activationStabilityMs?: number;
   onError?: (error: Error) => void;
 }
 
@@ -56,6 +58,7 @@ export class RuntimeManager {
   private startPromise?: Promise<RuntimeReady>;
   private stopPromise?: Promise<void>;
   private restartTimer?: NodeJS.Timeout;
+  private activationConfirmationTimer?: NodeJS.Timeout;
   private restartAttempts: number[] = [];
   private shouldRun = false;
   private readonly token = randomBytes(32).toString('hex');
@@ -72,14 +75,20 @@ export class RuntimeManager {
     desktopVersion: string,
     options: RuntimeManagerOptions = {},
   ) {
-    this.updater = new RuntimeUpdater({ runtimeRoot: this.runtimeRoot, desktopVersion });
+    const yuanpuHome = resolve(process.env.YUANPU_HOME || join(homedir(), '.yuanpu'));
+    this.updater = new RuntimeUpdater({
+      runtimeRoot: this.runtimeRoot,
+      desktopVersion,
+      metadataDatabasePath: join(yuanpuHome, 'workflows', 'automation.sqlite'),
+    });
     this.options = {
       command: options.command,
       startupTimeoutMs: options.startupTimeoutMs ?? 15_000,
-      shutdownGraceMs: options.shutdownGraceMs ?? 5_000,
+      shutdownGraceMs: options.shutdownGraceMs ?? 10_000,
       restartLimit: options.restartLimit ?? 3,
       restartWindowMs: options.restartWindowMs ?? 60_000,
       restartBaseDelayMs: options.restartBaseDelayMs ?? 250,
+      activationStabilityMs: options.activationStabilityMs ?? 2_000,
       onError: options.onError,
     };
   }
@@ -198,7 +207,21 @@ export class RuntimeManager {
     this.restartTimer.unref();
   }
 
+  private scheduleActivationConfirmation(
+    child: ChildProcessWithoutNullStreams,
+    executable: string,
+  ): void {
+    if (this.activationConfirmationTimer) clearTimeout(this.activationConfirmationTimer);
+    this.activationConfirmationTimer = setTimeout(() => {
+      this.activationConfirmationTimer = undefined;
+      if (!this.shouldRun || this.child !== child || !this.ready || child.exitCode !== null) return;
+      void this.updater.confirmActivation(executable).catch((error) => this.reportError(error));
+    }, this.options.activationStabilityMs);
+    this.activationConfirmationTimer.unref();
+  }
+
   private async launch(command: RuntimeCommand): Promise<{ child: ChildProcessWithoutNullStreams; ready: RuntimeReady }> {
+    if (!this.shouldRun) throw new Error('Runtime start was cancelled because the App is stopping.');
     const child = await new Promise<ChildProcessWithoutNullStreams>((resolveSpawn, rejectSpawn) => {
       const child = spawn(
         command.executable,
@@ -214,12 +237,18 @@ export class RuntimeManager {
       child.once('error', rejectSpawn);
     });
     this.child = child;
+    if (!this.shouldRun) {
+      await this.terminate(child);
+      throw new Error('Runtime start was cancelled because the App is stopping.');
+    }
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
       if (stderr.length < 64 * 1024) stderr += chunk.toString();
     });
     child.once('exit', (code, signal) => {
       if (this.child !== child) return;
+      if (this.activationConfirmationTimer) clearTimeout(this.activationConfirmationTimer);
+      this.activationConfirmationTimer = undefined;
       const wasReady = Boolean(this.ready);
       this.child = undefined;
       this.ready = undefined;
@@ -310,13 +339,16 @@ export class RuntimeManager {
 
   private async startInternal(): Promise<RuntimeReady> {
     let command = await this.command();
+    if (!this.shouldRun) throw new Error('Runtime start was cancelled because the App is stopping.');
     try {
       const launched = await this.launch(command);
-      if (command.pending) await this.updater.confirmActivation(command.executable);
       if (this.child !== launched.child || launched.child.exitCode !== null) {
         throw new Error('Runtime exited before activation health was confirmed.');
       }
       this.ready = launched.ready;
+      if (command.pending) {
+        this.scheduleActivationConfirmation(launched.child, command.executable);
+      }
       return launched.ready;
     } catch (error) {
       if (!command.pending) throw error;
@@ -514,11 +546,15 @@ export class RuntimeManager {
     this.shouldRun = false;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = undefined;
+    if (this.activationConfirmationTimer) clearTimeout(this.activationConfirmationTimer);
+    this.activationConfirmationTimer = undefined;
     if (this.stopPromise) return this.stopPromise;
     this.stopPromise = (async () => {
-      const child = this.child;
-      if (child) await this.terminate(child);
+      const initialChild = this.child;
+      if (initialChild) await this.terminate(initialChild);
       await this.startPromise?.catch(() => undefined);
+      const lateChild = this.child;
+      if (lateChild && lateChild !== initialChild) await this.terminate(lateChild);
       this.child = undefined;
       this.ready = undefined;
     })().finally(() => {
