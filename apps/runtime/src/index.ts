@@ -1018,7 +1018,10 @@ async function serve(): Promise<void> {
     forcedExit.unref();
     shutdownPromise = (async () => {
       parentMonitor?.dispose();
-      const managedCleanup = cleanup();
+      const managedCleanup = cleanup().then(
+        () => ({ status: 'fulfilled' as const }),
+        (reason: unknown) => ({ status: 'rejected' as const, reason }),
+      );
       let drained = false;
       const closeServer = new Promise<void>((resolveClose) => {
         try {
@@ -1037,15 +1040,27 @@ async function serve(): Promise<void> {
       });
       await Promise.race([closeServer, drainTimeout]);
       if (!drained) server.closeAllConnections();
-      const cleanupTimeout = new Promise<void>((resolveTimeout) => {
-        const timeout = setTimeout(resolveTimeout, 2_000);
+      const cleanupTimeout = new Promise<{ status: 'timed-out' }>((resolveTimeout) => {
+        const timeout = setTimeout(() => resolveTimeout({ status: 'timed-out' }), 2_000);
         timeout.unref();
       });
-      await Promise.race([managedCleanup, cleanupTimeout]);
-    })().finally(() => {
-      clearTimeout(forcedExit);
-      process.exit(0);
-    });
+      const cleanupResult = await Promise.race([managedCleanup, cleanupTimeout]);
+      if (cleanupResult.status === 'rejected') throw cleanupResult.reason;
+      if (cleanupResult.status === 'timed-out') {
+        throw new Error('Runtime cleanup timed out.');
+      }
+    })();
+    void shutdownPromise.then(
+      () => {
+        clearTimeout(forcedExit);
+        process.exit(0);
+      },
+      (error) => {
+        console.error(error);
+        clearTimeout(forcedExit);
+        process.exit(1);
+      },
+    );
   };
 
   parentMonitor = installParentProcessMonitor(parentPid, shutdown);
