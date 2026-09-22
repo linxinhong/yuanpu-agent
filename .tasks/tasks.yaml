@@ -505,7 +505,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-013
     title: "完善 App 进程生命周期与升级恢复"
-    status: in_progress
+    status: done
     goal: "Runtime 与受管能力进程随 App 启停，并在异常退出和升级失败时可控恢复。"
     scope:
       in: ["Electron RuntimeManager 启停、单实例、父进程异常退出处理","受控重启与下一次 App 启动激活","启动健康检查和旧版本恢复"]
@@ -532,14 +532,22 @@ tasks:
       owner: "sol-owner-task-013-94721-72012"
       attempts: 0
       claimed_at: "2026-09-22T08:00:44.345Z"
-      completed_at: null
+      completed_at: "2026-09-22T09:51:08.141Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-013"
       branch: "task/task-013-app-lifecycle"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Branch task/task-013-app-lifecycle (final 494b58e; implementation e3e887f) was merged into main at 2d902a8; cleanup coordination fixes 753a29f, ebf15f8 and 8abf297 are included in final verified main."}
+        - {type: "test", check: "process lifecycle and restart", status: "passed", summary: "Runtime/Desktop tests cover single managed Runtime, graceful and forced stop, parent death before/after readiness, Runtime/MCP descendant cleanup, bounded crash restart and incompatible protocol handling."}
+        - {type: "test", check: "staged activation and rollback", status: "passed", summary: "Desktop tests and staged-update smoke cover next-start activation, invalid artifact rejection, unconfirmed activation rollback and preservation of user data; metadata migration/reopen tests passed in the full suite."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Final main 8abf297 passed full build, Yuanpu TypeScript checks and all tests on macOS arm64 with Node 24.15.0 and pnpm 11.22.0: Runtime 6/6, Desktop 12/12 and runtime-kit 76/76."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "darwin-arm64 SEA, self-contained Python artifact, native process smoke and staged Runtime update smoke passed at ebf15f8; final 8abf297 then passed Runtime build/tests and full pnpm check."}
+        - {type: "review", check: "independent Sol lifecycle review", status: "passed", summary: "Two independent review paths confirmed final main 8abf297 starts cleanup before HTTP drain, closes Agent/MCP concurrently, closes metadata last, handles cleanup rejection immediately, returns nonzero on failure/timeout and retains a referenced 7.5-second hard-exit boundary."}
+        - {type: "boundary", check: "cross-platform and production evidence", status: "unverified", summary: "Linux/Windows native lifecycle execution, production signing and hosted runner evidence remain unverified and are not claimed by TASK-013 completion."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-013.md records lifecycle boundaries, commands, review history and follow-up evidence."}
       follow_up_candidates: []
   - id: TASK-014
     title: "本机执行与生命周期阶段验证"
-    status: pending
+    status: ready
     goal: "独立证明单机多入口执行基础能隔离会话、恢复状态并遵守 App 生命周期。"
     scope:
       in: ["真实 Runtime API、Pi 会话、SQLite 与子进程的组合验证","身份、审批重放、退出与升级的独立边界审查"]
