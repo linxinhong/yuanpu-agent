@@ -186,7 +186,7 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
   const server = createYuanpuMcpServer([sensitiveSource(() => { executions += 1; })], store);
   const capability = createCapabilityId('test.sensitive', 'publish');
   const execution = { name: capability, arguments: { target: 'release' } };
-  const hostContext = { sessionId: 'session-a', workspaceId: '/workspace/a' };
+  const hostContext = { runId: 'run-a', sessionId: 'session-a', workspaceId: '/workspace/a' };
 
   let requestId;
   await assert.rejects(
@@ -201,6 +201,7 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
   assert.equal((await store.listPending()).length, 1);
   assert.deepEqual(store.executionFor(requestId), {
     requestId,
+    runId: hostContext.runId,
     sessionId: hostContext.sessionId,
     workspaceId: hostContext.workspaceId,
     capabilityId: capability,
@@ -218,6 +219,7 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
     [{ target: 'other' }, hostContext],
     [execution.arguments, { ...hostContext, sessionId: 'session-b' }],
     [execution.arguments, { ...hostContext, workspaceId: '/workspace/b' }],
+    [execution.arguments, { ...hostContext, runId: 'run-b' }],
   ]) {
     await assert.rejects(
       server.execute({ ...execution, arguments: changed, approvalRequestId: requestId }, changedContext),
@@ -236,6 +238,29 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
     (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
   );
+});
+
+test('run cancellation invalidates only approvals bound to that run', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-run-approval-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let nextId = 0;
+  const store = await CapabilityApprovalStore.open(join(root, 'approvals.json'), {
+    createId: () => `request-${++nextId}`,
+  });
+  const base = {
+    sessionId: 'session',
+    workspaceId: '/workspace',
+    sourceInstanceId: 'source',
+    packageVersion: '1.0.0',
+    capabilityId: 'capability',
+    arguments: { value: 'fixture' },
+  };
+  await store.authorize({ ...base, runId: 'run-a' });
+  await store.authorize({ ...base, runId: 'run-b' });
+  await store.cancelRun('run-a');
+  assert.deepEqual((await store.listPending()).map((record) => record.runId), ['run-b']);
+  assert.equal(store.executionFor('request-1'), undefined);
+  assert.equal(store.executionFor('request-2').runId, 'run-b');
 });
 
 test('expired, fabricated, denied and restarted approvals cannot execute', async (context) => {

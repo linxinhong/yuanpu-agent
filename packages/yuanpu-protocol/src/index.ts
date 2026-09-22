@@ -1,5 +1,8 @@
 export const PROTOCOL_VERSION = 3;
 
+export * from './agent.js';
+export * from './host-events.js';
+
 export const RUNTIME_ROUTES = {
   health: '/v1/health',
   greeting: '/v1/greeting',
@@ -51,6 +54,7 @@ export interface RuntimeUpdateState {
 
 export interface CapabilityApprovalSummary {
   requestId: string;
+  runId?: string;
   sessionId: string;
   workspaceId: string;
   sourceInstanceId: string;

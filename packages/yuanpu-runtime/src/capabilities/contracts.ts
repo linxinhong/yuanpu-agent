@@ -50,6 +50,7 @@ export interface CapabilityDescriptor extends Omit<CapabilityDefinition, 'name'>
 }
 
 export interface CapabilityContext {
+  runId?: string;
   sessionId?: string;
   workspaceId?: string;
   userId?: string;
@@ -104,6 +105,7 @@ export type CapabilityApprovalStatus =
 
 export interface CapabilityApprovalBinding {
   requestId: string;
+  runId?: string;
   sessionId: string;
   workspaceId: string;
   sourceInstanceId: string;
@@ -122,6 +124,7 @@ export interface CapabilityApprovalRecord extends CapabilityApprovalBinding {
 
 export interface CapabilityAuthorizationInput {
   approvalRequestId?: string;
+  runId?: string;
   sessionId?: string;
   workspaceId?: string;
   sourceInstanceId: string;
