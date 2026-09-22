@@ -2,10 +2,10 @@
 
 - 关键词：企业微信、智能机器人、WebSocket、身份配对、幂等、发送未知、真实验证环境
 - Owner：`sol-owner-task-017-72012`；记录日期：2026-09-22
-- 状态：`in_progress` / `selected` / `awaiting-account-permission-credentials-and-test-conversations`
+- 状态：`in_progress` / `selected` / `authentication-spike-passed-environment-revoked`
 - Claim revision：`78e0fe2a0def8f04e3cf3a3852490a463d509222`
 - 企业微信契约 revision：`3e97492`
-- 未 merge、未 complete、未 push、未做真实 E2E
+- 已集成到 main；未 complete、未 push；一次性真实 WSS 鉴权通过，消息 E2E 未执行
 
 ## 入口与产出
 
@@ -46,10 +46,11 @@
 - `node scripts/verify-im-channel-contract.mjs`：pass，Node 24.15.0，14 个企业微信归一化场景。
 - `pnpm check`：pass，Node 24.15.0 / pnpm 11.22.0，约 28 秒；生成的空 `pnpmfileChecksum` 漂移已用 task-owned patch 清理。
 - 独立审阅：主 owner 逐项把研究附件映射到机器契约与任务四条 acceptance；没有发现未覆盖项。fixture 只证明静态策略，不代表平台 E2E。
+- 一次性连接 spike：官方 SDK 1.0.7 + Node.js 24.15.0 成功通过真实 WSS 鉴权；未发送消息、未记录原始帧或正文。Secret 仅经系统 Keychain 临时注入，测试后已删除；用户随后删除企业微信侧测试机器人。
 
 ## 未验证项与交接
 
-- 缺目标企业的智能机器人创建权限证据、Bot ID 元数据引用、SecretStore 绑定、两个测试成员、获授权私聊和隔离测试群。
-- 未验证真实 WSS 鉴权、Node 24 下精确 SDK 包、群 @ 投递、真实限流响应、离线补收、附件传输和客户端展示。
+- 当前没有可复用的机器人凭据、SecretStore 绑定、两个测试成员、获授权私聊或隔离测试群；历史测试标识不进入任务证据。
+- 已验证真实 WSS 鉴权与 Node 24 下官方 SDK 1.0.7 的连接路径；未验证消息收发、群 @ 投递、真实限流响应、离线补收、附件传输和客户端展示。
 - 下一实现入口是 TASK-018：先做官方 SDK tarball/Node 24/logger spike，再实现文本单聊 adapter；群聊和附件分别通过真实门禁后启用。
-- 不建议现在完成 TASK-017：平台/契约部分已收敛，但任务 acceptance 仍要求账号权限与测试会话记录，且 done 还要求集成并验证于 main。保持 `in_progress`，等待用户提供真实验证环境后继续。
+- TASK-017 的选型、契约、环境清单和凭据引用边界已具备完成条件；真实私聊/群聊消息验收归 TASK-018，重新测试前须创建新的隔离机器人并获得明确会话授权。

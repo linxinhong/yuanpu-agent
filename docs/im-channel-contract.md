@@ -1,6 +1,6 @@
 # 首个 IM 接入契约与验证环境
 
-状态：**平台与接入类型已选择；真实环境未就绪**
+状态：**平台与接入类型已选择；一次性 WSS 鉴权已通过；消息 E2E 环境已撤销**
 
 任务：确定首个 IM 接入契约与验证环境（TASK-017）
 
@@ -8,7 +8,7 @@
 
 用户已选择企业微信。本卡把选择精确收敛为：**企业微信智能机器人、API 模式、WebSocket 长连接**。它不是企业微信群机器人 Webhook，不是传统自建应用回调，也不是微信客服。机器可校验版本见 [`im-channel-contract.json`](im-channel-contract.json)，官方资料摘录见 [`research/wecom-first-channel.md`](research/wecom-first-channel.md)。
 
-尚未获得企业微信账号权限证据、Bot ID 引用、SecretStore 绑定或获授权的测试会话，因此本文不声称鉴权、真实收发、群触发、离线补收、限流或客户端展示已经通过 E2E。
+2026-09-22 曾用一次性测试机器人、官方 SDK 1.0.7 与 Node.js 24.15.0 完成真实 WSS 鉴权；没有发送消息，也没有记录原始帧或正文。测试 Secret 随后从系统 Keychain 删除，用户也已删除企业微信侧机器人。本文不声称真实收发、群触发、离线补收、限流或客户端展示已经通过 E2E。
 
 ## 1. 为什么选择智能机器人长连接
 
@@ -119,7 +119,9 @@ TASK-018 必须在构造 SDK 客户端时注入 Yuanpu redacting logger：
 
 ## 5. 真实验证环境
 
-当前环境状态：**unavailable / E2E unverified**。
+当前环境状态：**revoked after authentication spike / message E2E unverified**。
+
+已完成的一次性安全验证：官方 SDK 1.0.7 在 Node.js 24.15.0 上成功连接并通过企业微信 WSS 鉴权；未发送消息、未记录原始帧或内容。凭据仅经系统 Keychain 临时注入，测试后已删除；企业微信侧测试机器人也已由用户删除。该结果只证明当时凭据、网络和 SDK 鉴权路径可用，不能证明消息收发或未来重新创建的机器人可用。
 
 开始 E2E 前必须补齐：
 
@@ -146,7 +148,7 @@ TASK-018 必须在构造 SDK 客户端时注入 Yuanpu redacting logger：
 
 [`fixtures/im-contract/scenarios.json`](fixtures/im-contract/scenarios.json) 的归一化 fixture 可以证明：字段映射约束、配对策略、账号/渠道/peer 隔离、`msgid` 去重、原 `req_id` 路由、发送 unknown 状态、日志禁止项和 App 退出策略。
 
-Fixture 不能证明：真实账号权限、Bot ID/Secret 有效、WSS 鉴权、目标租户里的群 @ 实际投递、平台限流实际响应、离线补收、附件传输、Node 24 兼容或客户端最终展示。
+Fixture 不能证明：真实账号权限、当前 Bot ID/Secret 有效、目标租户里的群 @ 实际投递、平台限流实际响应、离线补收、附件传输、完整 Node 24 adapter 兼容或客户端最终展示。一次性连接 spike 已单独证明当时官方 SDK 1.0.7 可在 Node 24.15.0 上完成 WSS 鉴权，但测试机器人和凭据现已撤销。
 
 运行静态契约检查：
 
