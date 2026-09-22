@@ -5,13 +5,13 @@
 - 记录日期：2026-09-22
 - 分支：`task/task-022-jev-evidence-review`
 - 来源 revision：`d355ea8`
-- 测试 revision：实现提交后更新；当前为工作区实现
+- 测试 revision：`9a23502`（实现、测试与证据）
 
 ## 交付入口
 
 - `scripts/verification/jev-evidence-review.mjs`：默认 dry-run 的只读 CLI；导出校验、精确检查、出站净化、API 调用和指标函数。
 - `scripts/verification/fixtures/jev-evidence-cases.json`：24 个虚构人工标注样例，tuning/holdout 各 12 个。
-- `scripts/verification/jev-evidence-review.test.mjs`：字段拒绝、精确检查、API 故障和人工回退测试。
+- `scripts/verification/test/jev-evidence-review.test.mjs`：字段拒绝、精确检查、API 故障和人工回退测试。
 - `.tasks/verification/TASK-022/results.md`：运行边界、实测结果和当前采用结论。
 
 ## 决策与陷阱
@@ -24,7 +24,7 @@
 
 ## 验证
 
-- Node 24.15.0；`node --test scripts/verification/jev-evidence-review.test.mjs` 通过。
+- Node 24.15.0；`node --test scripts/verification/test/jev-evidence-review.test.mjs` 通过。
 - `pnpm check` 通过；最终提交纳入根测试命令后需再跑一次。
 - 真实虚构数据调用：Jev 1.13.0，24 例，1452 ms，输入 5699 tokens，输出 1199 tokens，估算 USD 0.00023936。
 - ZG 不可用；scoped `rg` 覆盖 scripts、Node test 惯例与 TASK-014/019/021/022，官方文档通过实时 HTTPS 读取。

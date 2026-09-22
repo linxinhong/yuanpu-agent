@@ -10,9 +10,9 @@ import {
   sanitizeForOutbound,
   serviceFailureReport,
   validateDataset,
-} from './jev-evidence-review.mjs';
+} from '../jev-evidence-review.mjs';
 
-const fixtureUrl = new URL('./fixtures/jev-evidence-cases.json', import.meta.url);
+const fixtureUrl = new URL('../fixtures/jev-evidence-cases.json', import.meta.url);
 const loadFixture = async () => validateDataset(JSON.parse(await readFile(fixtureUrl, 'utf8')));
 
 test('validates the 24-case tuning/holdout corpus and all required labels', async () => {
@@ -30,6 +30,7 @@ test('rejects extra fields, secrets, local paths, long text, and unknown events'
     (item) => { item.rawLog = 'hidden'; },
     (item) => { item.summary = 'authorization: Bearer abcdefghijklmnop'; },
     (item) => { item.summary = 'Evidence stored in /Users/alice/private.log'; },
+    (item) => { item.summary = 'Evidence stored in /workspace/private/run.log'; },
     (item) => { item.summary = 'x'.repeat(1_001); },
     (item) => { item.events = ['shell.execute']; },
   ];
@@ -37,6 +38,14 @@ test('rejects extra fields, secrets, local paths, long text, and unknown events'
     const dataset = structuredClone(base);
     mutate(dataset.cases[0]);
     assert.throws(() => validateDataset(dataset));
+  }
+});
+
+test('rejects duplicate acceptance and evidence identifiers', async () => {
+  for (const field of ['acceptance', 'evidence']) {
+    const dataset = structuredClone(await loadFixture());
+    dataset.cases[1][field].id = dataset.cases[0][field].id;
+    assert.throws(() => validateDataset(dataset), /must be unique/);
   }
 });
 
@@ -118,4 +127,17 @@ test('keeps low confidence and exact failures in human review', async () => {
   assert(report.recommendationReasons.includes('human_timing_or_miss_baseline_unverified'));
   assert.equal(report.predictions.find((item) => item.id === 'tuning-supported-real').needsHumanReview, true);
   assert.equal(report.predictions.find((item) => item.id === 'holdout-stale-revision').needsHumanReview, true);
+});
+
+test('does not accept impossible human comparison metrics', async () => {
+  const dataset = await loadFixture();
+  const predictions = dataset.cases.map((item) => ({ id: item.id, prediction: item.fixturePrediction, confidence: item.fixtureConfidence, probabilities: null }));
+  for (const metrics of [
+    { humanBaselineMs: 100, assistedReviewMs: -1, humanFalseSupported: 0 },
+    { humanBaselineMs: 100, assistedReviewMs: 50, humanFalseSupported: 999 },
+  ]) {
+    const report = evaluate(dataset, predictions, { mode: 'live', ...metrics });
+    assert.equal(report.humanComparison.complete, false);
+    assert.equal(report.recommendation, 'do_not_adopt');
+  }
 });

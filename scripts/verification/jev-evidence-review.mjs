@@ -32,7 +32,10 @@ const SECRET_PATTERNS = [
   /\bsk-[A-Za-z0-9_-]{16,}\b/,
   /\b(?:api[_ -]?key|authorization|bearer)\s*[:= ]\s*[A-Za-z0-9._~+\/-]{8,}/i,
 ];
-const PATH_PATTERNS = [/(?:^|\s)\/(?:Users|home|var|tmp|etc)\//, /[A-Za-z]:\\(?:Users|Windows|Program Files)\\/i];
+const PATH_PATTERNS = [
+  /(?:^|[\s"'(])\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+/,
+  /[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s]+/,
+];
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -56,6 +59,8 @@ export function validateDataset(dataset) {
   assert(dataset.dataClassification === 'synthetic', 'only synthetic data is allowed by this pilot');
   assert(Array.isArray(dataset.cases) && dataset.cases.length >= 1 && dataset.cases.length <= MAX_CASES, `dataset.cases must contain 1-${MAX_CASES} cases`);
   const ids = new Set();
+  const acceptanceIds = new Set();
+  const evidenceIds = new Set();
   for (const [index, item] of dataset.cases.entries()) {
     const context = `dataset.cases[${index}]`;
     assertExactKeys(item, ALLOWED_CASE_FIELDS, context);
@@ -65,11 +70,15 @@ export function validateDataset(dataset) {
     assert(['tuning', 'holdout'].includes(item.split), `${context}.split is invalid`);
     assertExactKeys(item.acceptance, ALLOWED_ACCEPTANCE_FIELDS, `${context}.acceptance`);
     assertShortString(item.acceptance.id, `${context}.acceptance.id`);
+    assert(!acceptanceIds.has(item.acceptance.id), `${context}.acceptance.id must be unique`);
+    acceptanceIds.add(item.acceptance.id);
     assertShortString(item.acceptance.text, `${context}.acceptance.text`);
     assertExactKeys(item.evidence, ALLOWED_EVIDENCE_FIELDS, `${context}.evidence`);
     for (const field of ['id', 'revision', 'expectedRevision', 'platform', 'mode', 'requiredMode']) {
       assertShortString(item.evidence[field], `${context}.evidence.${field}`);
     }
+    assert(!evidenceIds.has(item.evidence.id), `${context}.evidence.id must be unique`);
+    evidenceIds.add(item.evidence.id);
     assert(Array.isArray(item.evidence.requiredPlatforms) && item.evidence.requiredPlatforms.length > 0, `${context}.evidence.requiredPlatforms must be non-empty`);
     item.evidence.requiredPlatforms.forEach((platform, platformIndex) => assertShortString(platform, `${context}.evidence.requiredPlatforms[${platformIndex}]`));
     assert(['fixture', 'real'].includes(item.evidence.mode), `${context}.evidence.mode is invalid`);
@@ -179,7 +188,12 @@ export function evaluate(dataset, predictions, metadata = {}) {
   const holdout = rows.filter((row) => row.split === 'holdout');
   const falseSupported = rows.filter((row) => row.prediction === 'supported' && row.label !== 'supported').length;
   const holdoutCriticalFalseSupported = holdout.filter((row) => row.criticalCounterexample && row.prediction === 'supported').length;
-  const comparisonComplete = Number.isFinite(metadata.humanBaselineMs) && Number.isFinite(metadata.assistedReviewMs) && Number.isInteger(metadata.humanFalseSupported);
+  const validDuration = (value) => Number.isFinite(value) && value >= 0;
+  const comparisonComplete = validDuration(metadata.humanBaselineMs)
+    && validDuration(metadata.assistedReviewMs)
+    && Number.isInteger(metadata.humanFalseSupported)
+    && metadata.humanFalseSupported >= 0
+    && metadata.humanFalseSupported <= rows.length;
   const adoptionEligible = metadata.mode === 'live' && comparisonComplete && holdoutCriticalFalseSupported === 0 && falseSupported <= metadata.humanFalseSupported && metadata.assistedReviewMs < metadata.humanBaselineMs;
   return {
     schemaVersion: 1,
