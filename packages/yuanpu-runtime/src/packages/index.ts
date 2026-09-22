@@ -32,7 +32,7 @@ export interface PluginSearchResult {
   npmUrl?: string;
   source: string;
   components?: Array<'skill' | 'agent' | 'workflow' | 'extension' | 'prompt' | 'theme' | 'connector'>;
-  permissions?: Array<'instructions' | 'scripts' | 'filesystem' | 'network' | 'credentials' | 'background'>;
+  permissions?: Array<'instructions' | 'scripts' | 'filesystem' | 'network' | 'credentials' | 'notifications' | 'background'>;
 }
 
 export interface InstalledPlugin {

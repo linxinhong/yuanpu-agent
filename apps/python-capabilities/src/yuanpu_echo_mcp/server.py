@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -18,7 +19,14 @@ class EchoResult(TypedDict):
     length: int
 
 
+class DialogResult(TypedDict):
+    shown: bool
+    platform: str
+    process_id: int
+
+
 mcp = FastMCP("yuanpu_echo_mcp", log_level="ERROR")
+_dialog_tasks: set[asyncio.Task[None]] = set()
 
 
 def _configured_text(text: str) -> str:
@@ -78,6 +86,92 @@ async def yuanpu_approved_echo(
 
     configured = _configured_text(text)
     return {"text": configured, "length": len(configured)}
+
+
+def _dialog_command(text: str, title: str) -> list[str]:
+    """Build an injection-safe native dialog command for the current platform."""
+
+    if sys.platform == "darwin":
+        return [
+            "/usr/bin/osascript",
+            "-e",
+            "on run argv",
+            "-e",
+            "display dialog (item 1 of argv) with title (item 2 of argv) "
+            'buttons {"OK"} default button "OK"',
+            "-e",
+            "end run",
+            "--",
+            text,
+            title,
+        ]
+    if sys.platform == "win32":
+        system_root = os.environ.get("SYSTEMROOT", r"C:\Windows")
+        powershell = os.path.join(
+            system_root,
+            "System32",
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe",
+        )
+        return [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Add-Type -AssemblyName PresentationFramework; "
+            "[System.Windows.MessageBox]::Show($args[0], $args[1]) | Out-Null",
+            text,
+            title,
+        ]
+    dialog = shutil.which("zenity") or shutil.which("xmessage")
+    if not dialog:
+        raise RuntimeError(
+            "No supported Linux dialog program is installed; install zenity or xmessage."
+        )
+    if os.path.basename(dialog) == "zenity":
+        return [dialog, "--info", f"--text={text}", f"--title={title}"]
+    return [dialog, "-title", title, text]
+
+
+async def _reap_dialog(process: asyncio.subprocess.Process) -> None:
+    await process.wait()
+
+
+@mcp.tool(
+    name="yuanpu_show_message",
+    annotations=ToolAnnotations(
+        title="Show a desktop message",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    ),
+    structured_output=True,
+)
+async def yuanpu_show_message(
+    text: Annotated[
+        str,
+        Field(description="Message displayed in the desktop dialog.", min_length=1, max_length=500),
+    ],
+    title: Annotated[
+        str,
+        Field(description="Short title displayed above the message.", min_length=1, max_length=80),
+    ] = "YuanpuAgent",
+) -> DialogResult:
+    """Show one native desktop dialog after the host grants one-time approval."""
+
+    command = _dialog_command(text, title)
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    task = asyncio.create_task(_reap_dialog(process))
+    _dialog_tasks.add(task)
+    task.add_done_callback(_dialog_tasks.discard)
+    return {"shown": True, "platform": sys.platform, "process_id": process.pid}
 
 
 @mcp.tool(

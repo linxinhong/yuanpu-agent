@@ -129,6 +129,7 @@ function createConfiguredPythonSource(
     riskPolicy: {
       yuanpu_echo_text: 'R0',
       yuanpu_approved_echo: 'R2',
+      yuanpu_show_message: 'R2',
       yuanpu_diagnostic_error: 'R0',
       yuanpu_wait: 'R0',
     },

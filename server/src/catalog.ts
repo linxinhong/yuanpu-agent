@@ -10,7 +10,7 @@ export const catalog: SkillCatalogItem[] = [
     publisher: 'yuanpu',
     source: 'artifact:/v1/capability-packages/builtin.python.echo/manifest',
     components: ['connector'],
-    permissions: ['background'],
+    permissions: ['notifications', 'background'],
   },
   {
     id: 'works.earendil.dynamic-workflows',

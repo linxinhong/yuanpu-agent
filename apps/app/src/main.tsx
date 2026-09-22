@@ -380,6 +380,7 @@ const permissionLabels: Record<NonNullable<PluginSearchResult['permissions']>[nu
   filesystem: '访问本地文件',
   network: '访问网络',
   credentials: '需要密钥',
+  notifications: '显示系统弹窗',
   background: '后台运行',
 };
 

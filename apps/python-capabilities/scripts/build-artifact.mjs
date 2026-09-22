@@ -126,7 +126,7 @@ const manifest = {
     additionalProperties: false,
     default: { responsePrefix: '' },
   },
-  permissions: ['background'],
+  permissions: ['notifications', 'background'],
   connections: ['yuanpu_echo_mcp'],
   issuedAt: process.env.SOURCE_DATE_EPOCH
     ? new Date(Number(process.env.SOURCE_DATE_EPOCH) * 1000).toISOString()

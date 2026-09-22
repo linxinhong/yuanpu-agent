@@ -62,6 +62,11 @@ test('real Python MCP discovery and execution preserve structured results and er
   assert.equal(result.content[0].type, 'text');
   assert.ok(source.processId);
 
+  const dialogSearch = await server.search({ query: 'desktop message' });
+  const dialog = dialogSearch.matches.find((match) => match.originalName === 'yuanpu_show_message');
+  assert.ok(dialog);
+  assert.equal(dialog.riskLevel, 'R2');
+  assert.equal(dialog.status, 'needs_approval');
   const all = await server.search({});
   const diagnostic = all.matches.find((match) => match.originalName === 'yuanpu_diagnostic_error');
   assert.ok(diagnostic);

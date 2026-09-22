@@ -117,7 +117,7 @@ export interface CapabilityPackageManifest {
   runtimeCompatibility: { minimum: string; maximumExclusive?: string };
   artifacts: CapabilityArtifactTarget[];
   configSchema?: Record<string, unknown>;
-  permissions: Array<'filesystem' | 'network' | 'credentials' | 'background'>;
+  permissions: Array<'filesystem' | 'network' | 'credentials' | 'notifications' | 'background'>;
   connections?: string[];
   issuedAt: string;
   signature: { algorithm: 'ed25519'; keyId: string; value: string };
@@ -134,7 +134,7 @@ export interface PluginSearchResult {
   npmUrl?: string;
   source: string;
   components?: Array<'skill' | 'agent' | 'workflow' | 'extension' | 'prompt' | 'theme' | 'connector'>;
-  permissions?: Array<'instructions' | 'scripts' | 'filesystem' | 'network' | 'credentials' | 'background'>;
+  permissions?: Array<'instructions' | 'scripts' | 'filesystem' | 'network' | 'credentials' | 'notifications' | 'background'>;
   artifactManifestDigest?: string;
 }
 

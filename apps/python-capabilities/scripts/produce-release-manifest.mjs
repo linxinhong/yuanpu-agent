@@ -57,7 +57,7 @@ const manifest = {
     additionalProperties: false,
     default: { responsePrefix: '' },
   },
-  permissions: ['background'],
+  permissions: ['notifications', 'background'],
   connections: ['yuanpu_echo_mcp'],
   issuedAt: new Date().toISOString(),
   signature: { algorithm: 'ed25519', keyId, value: '' },
