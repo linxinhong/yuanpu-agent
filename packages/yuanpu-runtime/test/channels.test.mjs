@@ -42,6 +42,12 @@ class FixtureTransport {
   }
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 function message(overrides = {}) {
   return {
     provider: 'wecom',
@@ -150,6 +156,34 @@ test('persists before dispatch, deduplicates replay, and replies with the origin
   context.database.close();
 });
 
+test('returns an acceptance receipt without waiting for model completion', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const gate = deferred();
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute() {
+        await gate.promise;
+        return { kind: 'completed', output: { message: 'fixture delayed reply', tools: [] } };
+      },
+    },
+  });
+  const transport = new FixtureTransport();
+  const router = new ChannelRouter({ config: config(), store: database.channels, agent: service, transport });
+  router.start();
+  const receipt = await Promise.race([
+    router.handleInbound(message()),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('receipt waited for model')), 100)),
+  ]);
+  assert.equal(receipt.accepted, true);
+  assert.equal(transport.replies.length, 0);
+  gate.resolve();
+  await waitUntil(() => transport.replies.length === 1);
+  await router.close();
+  await service.close();
+  database.close();
+});
+
 test('isolates concurrent conversations while reusing one conversation binding', async () => {
   const context = await fixture();
   const first = await context.router.handleInbound(message());
@@ -195,6 +229,25 @@ test('records explicit failure and unknown delivery without re-running Agent', a
   assert.equal(context.executions.length, 2);
   assert.equal(transport.replies.length, 2);
   await context.router.close();
+  await context.service.close();
+  context.database.close();
+});
+
+test('marks an in-flight delivery unknown when the channel closes', async () => {
+  const gate = deferred();
+  const transport = new FixtureTransport();
+  transport.reply = async function reply(route, outboundId, content) {
+    this.replies.push({ route, outboundId, content });
+    await gate.promise;
+    return { status: 'accepted' };
+  };
+  const context = await fixture({ transport });
+  const receipt = await context.router.handleInbound(message());
+  await waitUntil(() => transport.replies.length === 1);
+  assert.equal(context.database.channels.getOutboundForRun(receipt.runId).status, 'delivering');
+  await context.router.close();
+  assert.equal(context.database.channels.getOutboundForRun(receipt.runId).status, 'unknown');
+  gate.resolve();
   await context.service.close();
   context.database.close();
 });

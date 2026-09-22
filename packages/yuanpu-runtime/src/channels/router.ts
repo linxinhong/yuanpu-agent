@@ -150,6 +150,7 @@ export class ChannelRouter {
     if (this.#closed) return;
     this.#closed = true;
     await this.#transport.close();
+    this.#store.markDeliveringUnknown('wecom', this.#config.connectionId, this.#now().toISOString());
   }
 
   #caller(conversationDigest: string): AuthenticatedAgentCaller {
