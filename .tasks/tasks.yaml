@@ -629,7 +629,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-017
     title: "确定首个 IM 接入契约与验证环境"
-    status: ready
+    status: in_progress
     goal: "明确一个首发平台的实际机器人类型、收发方式、配对规则和可验证环境。"
     scope:
       in: ["平台与机器人类型选择、官方文档核验","入站确认/离线补收/限流/附件约束与配置字段","私聊和群聊身份配对、原会话回复规则"]
@@ -651,12 +651,12 @@ tasks:
     investigation_hints: ["docs/application-architecture.md 第 7 节及 packages/yuanpu-protocol；现阶段尚无平台适配器","平台/API 事实必须查询最新官方文档；信息和选择记录到现有架构文档的渠道决策小节","本卡以可执行接入契约与环境清单验收，不以空目录或 fixture 宣称接通"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "sol-owner-task-017-72012"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-22T07:12:33.211Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-017"
+      branch: "task/task-017-im-contract"
       evidence: []
       follow_up_candidates: []
   - id: TASK-018
