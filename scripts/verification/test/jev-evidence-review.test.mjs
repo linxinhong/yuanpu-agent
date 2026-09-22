@@ -97,7 +97,11 @@ test('fails closed without a key and on timeout', async () => {
     if (previousTypesafe === undefined) delete process.env.TYPESAFE_API_KEY; else process.env.TYPESAFE_API_KEY = previousTypesafe;
   }
   const fetchImpl = async (_url, request) => new Promise((_resolve, reject) => {
-    request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
+    const keepAlive = setTimeout(() => reject(new Error('timeout test did not abort')), 1_000);
+    request.signal.addEventListener('abort', () => {
+      clearTimeout(keepAlive);
+      reject(request.signal.reason);
+    }, { once: true });
   });
   await assert.rejects(callJev([dataset.cases[0]], { apiKey: 'test-secret-value', timeoutMs: 5, fetchImpl }), /abort|timeout/i);
 });

@@ -24,7 +24,7 @@
 
 ## 验证
 
-- Node 24.15.0；`node --test scripts/verification/test/jev-evidence-review.test.mjs` 通过。
+- Node 24.15.0（`/Users/linxinhong/.nvm/versions/node/v24.15.0/bin/node`）；通过 worktree runner 执行 `python3 ~/.agents/skills/coding-owner/scripts/worktree-kit.py --root /Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-022 run --label task-022-focused-handoff --timeout 120 --require node -- node --test scripts/verification/test/jev-evidence-review.test.mjs`。
 - `pnpm check` 通过；最终提交纳入根测试命令后需再跑一次。
 - 真实虚构数据调用：Jev 1.13.0，24 例，1452 ms，输入 5699 tokens，输出 1199 tokens，估算 USD 0.00023936。
 - ZG 不可用；scoped `rg` 覆盖 scripts、Node test 惯例与 TASK-014/019/021/022，官方文档通过实时 HTTPS 读取。

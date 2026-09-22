@@ -27,7 +27,7 @@ node scripts/verification/jev-evidence-review.mjs \
 
 ## 结果
 
-在 Node 24.15.0 上，字段拒绝、精确检查、密钥隔离、无密钥、超时、429、无重试、错误响应和低置信度回退的离线测试通过。dry-run 和离线 fixture 运行成功。
+在仓库支持的 Node 24.15.0（`/Users/linxinhong/.nvm/versions/node/v24.15.0/bin/node`）上，字段拒绝、精确检查、密钥隔离、无密钥、超时、429、无重试、错误响应和低置信度回退的离线测试通过。通过 coding-owner worktree runner 执行验证，避免系统默认 Node 版本污染结果。dry-run 和离线 fixture 运行成功。
 
 独立 Sol 只读评审补充发现并已修复：`/workspace/...` 等通用绝对路径拒绝、负耗时或超样本漏检数不能满足采用门槛、acceptance/evidence ID 必须唯一，以及测试需放入相邻 `test/` 目录。评审提出的“未授权实现”不适用：用户在建卡后明确要求 Sol 子代理领卡处理，构成本次实施与提交授权。
 
