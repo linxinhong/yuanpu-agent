@@ -31,6 +31,11 @@ test('rejects extra fields, secrets, local paths, long text, and unknown events'
     (item) => { item.summary = 'authorization: Bearer abcdefghijklmnop'; },
     (item) => { item.summary = 'Evidence stored in /Users/alice/private.log'; },
     (item) => { item.summary = 'Evidence stored in /workspace/private/run.log'; },
+    (item) => { item.summary = 'Evidence stored at file:///workspace/private/original.log'; },
+    (item) => { item.summary = 'Evidence stored at `/workspace/private/original.log`'; },
+    (item) => { item.summary = 'path=/workspace/private/original.log'; },
+    (item) => { item.summary = '/secret'; },
+    (item) => { item.summary = 'Evidence stored at C:\\workspace\\private.log'; },
     (item) => { item.summary = 'x'.repeat(1_001); },
     (item) => { item.events = ['shell.execute']; },
   ];

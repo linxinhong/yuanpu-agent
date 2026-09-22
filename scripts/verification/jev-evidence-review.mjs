@@ -33,8 +33,8 @@ const SECRET_PATTERNS = [
   /\b(?:api[_ -]?key|authorization|bearer)\s*[:= ]\s*[A-Za-z0-9._~+\/-]{8,}/i,
 ];
 const PATH_PATTERNS = [
-  /(?:^|[\s"'(])\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+/,
-  /[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s]+/,
+  /\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*/,
+  /[A-Za-z]:\\[^\s]+/,
 ];
 
 function assert(condition, message) {
