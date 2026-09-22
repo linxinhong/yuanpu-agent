@@ -59,9 +59,10 @@ The only run statuses are:
 | --- | --- | --- |
 | `queued` | start | `running` |
 | `queued` | cancellation observed | `cancelled` |
-| `queued` | shutdown before safe persistence | `interrupted` |
+| `queued` | Runtime shutdown/restart | `queued` |
 | `running` | approval required | `waiting_approval` |
 | `waiting_approval` | approval granted after revalidation | `running` |
+| `waiting_approval` | approval denied or expired | `failed` |
 | `running` | success / failure | `succeeded` / `failed` |
 | `running`, `waiting_approval` | cancellation observed | `cancelled` |
 | `running`, `waiting_approval` | restart, no possible external effect | `interrupted` |
@@ -72,9 +73,9 @@ Transitions out of a terminal state are rejected. Recovery may create a new run 
 idempotency key after an explicit user/service decision; it does not mutate an uncertain run back
 to queued.
 
-Cancelling a queued run synchronously records `cancelled`. Cancelling a running or approval-waiting
-run returns `cancellation_requested`; it becomes `cancelled` only after the worker observes the
-signal and stops. Cancellation does not undo tool or remote side effects that already occurred.
+Cancelling a queued or approval-waiting run synchronously records `cancelled`. Cancelling a running
+run returns `cancellation_requested`; it becomes `cancelled` after the worker observes the signal and
+stops. Cancellation does not undo tool or remote side effects that already occurred.
 Unknown run ids and already-terminal runs have distinct receipts.
 
 Before any external dispatch, AgentService must atomically persist
@@ -90,6 +91,11 @@ Entering `waiting_approval` and persisting its run/request/session/workspace/exp
 transaction; the schema rejects a waiting run without that binding. Capability approvals also carry
 the optional `runId`, and replay from another run fails the existing binding comparison. Cancellation,
 denial, expiry, and restart must invalidate the matching approval rather than a caller-supplied id.
+An atomic owner signal admits only one signed decision for a pending approval. Approved capability
+execution consumes a global execution slot; denial is terminal bookkeeping and does not wait for a
+slot. While approval is pending, the conversation binding stays reserved. Its expiry timer records a
+retryable `approval_expired` failure, invalidates the pending execution, releases that binding, and
+wakes the next same-conversation run.
 The approval JSON store and run SQLite file cannot share one transaction: create the approval first,
 then commit the run binding. A crash between them leaves an orphan approval, never a waiting run;
 approval-store startup cancels pending/approved orphans, and normal run cancellation calls
@@ -146,6 +152,8 @@ payload table retains only input text while status is `queued`; claiming or canc
 deletes it in the same transaction. Once execution starts, Pi owns the persisted conversation and
 Yuanpu retains only digests and status. Future durable task or delivery payloads still need an
 explicit retention/redaction/cleanup design rather than being hidden in run metadata.
+Runtime reuses at most 16 Pi session objects in an idle LRU pool. Eviction disposes only the in-memory
+session/runtime resources; the binding's Pi session remains persisted and reopens on later use.
 Tests use real files, including migration over a pre-existing fixture. The native smoke executes the
 actual SEA twice against the same file and verifies a persisted counter after close/reopen; Node
 development mode alone is not accepted as driver compatibility evidence.
