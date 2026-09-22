@@ -23,6 +23,7 @@ import {
   detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
   type AuthenticatedAgentCaller,
+  type ChannelRouter,
 } from '@yuanpu-agent/runtime-kit';
 import {
   AGENT_CONTRACT_VERSION,
@@ -51,6 +52,7 @@ import { promisify } from 'node:util';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun } from './runtime-host.js';
+import { closeWecomChannels, startConfiguredWecomChannels } from './wecom-channel.js';
 
 declare const __APP_VERSION__: string;
 
@@ -542,6 +544,7 @@ async function serve(): Promise<void> {
     authorizeWorkspace: schedulerCaller.authorizeWorkspace,
     authorizeDelivery: schedulerCaller.authorizeDelivery,
   });
+  const wecomChannels: ChannelRouter[] = [];
   const activatePythonArtifact = async (entrypoint: string, installPath: string, version: string) => {
     const previousSource = pythonSource;
     process.env.YUANPU_PYTHON_MCP_EXECUTABLE = entrypoint;
@@ -1275,6 +1278,7 @@ async function serve(): Promise<void> {
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
     cleanupPromise ??= cleanupRuntimeResources({
+      closeChannels: () => closeWecomChannels(wecomChannels),
       closeScheduler: () => scheduler.close(),
       closeNotificationRouter: () => notificationRouter.close(),
       closeAgentService: () => agentService.close(),
@@ -1341,24 +1345,54 @@ async function serve(): Promise<void> {
     );
   };
 
-  parentMonitor = installParentProcessMonitor(parentPid, shutdown);
-  server.listen(requestedPort, '127.0.0.1', () => {
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Runtime did not bind a TCP port');
-    console.log(
-      JSON.stringify({
-        event: 'ready',
-        host: '127.0.0.1',
-        port: address.port,
-        version: __APP_VERSION__,
-        protocolVersion: PROTOCOL_VERSION,
-        piVersion: PI_UPSTREAM_VERSION,
-        mcpTools: piCapabilityTools.map((tool) => tool.name),
-        configRoot: home.root,
-        notificationsEnabled: home.config.notifications?.enabled ?? true,
-      }),
-    );
+  try {
+    parentMonitor = installParentProcessMonitor(parentPid, shutdown);
+    wecomChannels.push(...await startConfiguredWecomChannels({
+      appPath: home.appPath,
+      workspaceId: home.config.workingDirectory,
+      store: metadata.channels,
+      agent: agentService,
+      log: (record) => {
+        const message = `[wecom] ${record.event}`;
+        if (record.level === 'error') console.error(message);
+        else if (record.level === 'warn') console.warn(message);
+        else if (record.level === 'info') console.info(message);
+      },
+    }));
+  } catch (error) {
+    parentMonitor?.dispose();
+    await cleanup();
+    throw error;
+  }
+  server.once('error', (error) => {
+    console.error(error);
+    process.exitCode = 1;
+    parentMonitor?.dispose();
+    void cleanup().catch((cleanupError) => console.error(cleanupError));
   });
+  try {
+    server.listen(requestedPort, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Runtime did not bind a TCP port');
+      console.log(
+        JSON.stringify({
+          event: 'ready',
+          host: '127.0.0.1',
+          port: address.port,
+          version: __APP_VERSION__,
+          protocolVersion: PROTOCOL_VERSION,
+          piVersion: PI_UPSTREAM_VERSION,
+          mcpTools: piCapabilityTools.map((tool) => tool.name),
+          configRoot: home.root,
+          notificationsEnabled: home.config.notifications?.enabled ?? true,
+        }),
+      );
+    });
+  } catch (error) {
+    parentMonitor.dispose();
+    await cleanup();
+    throw error;
+  }
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 }

@@ -1,5 +1,6 @@
 export * from './agent/index.js';
 export * from './capabilities/index.js';
+export * from './channels/index.js';
 export * from './config/index.js';
 export * from './notifications/index.js';
 export * from './packages/index.js';

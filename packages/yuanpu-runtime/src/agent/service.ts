@@ -217,7 +217,9 @@ export class PersistentAgentService implements AgentService {
   async *subscribe(
     caller: AuthenticatedAgentCaller,
     runId: string,
+    options: { signal?: AbortSignal } = {},
   ): AsyncIterable<AgentRunRecord> {
+    if (options.signal?.aborted) return;
     const values: AgentRunRecord[] = [];
     let wake: (() => void) | undefined;
     const listener = (run: AgentRunRecord) => {
@@ -228,9 +230,11 @@ export class PersistentAgentService implements AgentService {
     const listeners = this.#subscribers.get(runId) ?? new Set();
     listeners.add(listener);
     this.#subscribers.set(runId, listeners);
+    const onAbort = () => wake?.();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
     try {
       const initial = await this.get(caller, runId);
-      if (!initial) return;
+      if (!initial || options.signal?.aborted) return;
       values.unshift(initial);
       while (true) {
         while (values.length > 0) {
@@ -238,7 +242,7 @@ export class PersistentAgentService implements AgentService {
           yield value;
           if (isTerminal(value)) return;
         }
-        if (this.#closed) return;
+        if (this.#closed || options.signal?.aborted) return;
         await new Promise<void>((resolve) => {
           const waiter = () => {
             this.#subscriptionWaiters.delete(waiter);
@@ -246,10 +250,11 @@ export class PersistentAgentService implements AgentService {
           };
           wake = waiter;
           this.#subscriptionWaiters.add(waiter);
-          if (this.#closed) waiter();
+          if (this.#closed || options.signal?.aborted) waiter();
         });
       }
     } finally {
+      options.signal?.removeEventListener('abort', onAbort);
       if (wake) this.#subscriptionWaiters.delete(wake);
       listeners.delete(listener);
       if (listeners.size === 0) this.#subscribers.delete(runId);

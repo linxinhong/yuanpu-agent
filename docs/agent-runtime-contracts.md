@@ -19,7 +19,10 @@ type or table declaration alone is still not evidence that a provider exists.
   opens the authenticated `GET /v1/host/events` SSE stream and acknowledges events through
   `POST /v1/host/events/receipts`; only the bootstrap Bearer token authorizes either route. Every
   submission carries the contract version and preserves the rejection/result shapes in
-  `@yuanpu-agent/protocol`. IM is not advertised until its trusted adapter exists.
+  `@yuanpu-agent/protocol`. Runtime now also owns the first trusted IM adapter: an optional
+  Enterprise WeChat intelligent-bot WebSocket connection configured under
+  `~/.yuanpu/app/connections/wecom.json`. It is disabled unless explicitly configured and resolves
+  its Secret only from a system Keychain reference at process start.
 - A future incompatible change increments the affected contract version. Additive optional fields
   may retain the version only when old consumers can safely ignore them. Runtime update manifests
   continue to use the existing exact desktop/Runtime protocol check until a separately tested
@@ -114,6 +117,13 @@ support. A confirmed idempotent retry updates the same delivery record, keeps th
 attempts, and may move `result_unknown` or `failed` back to `delivering`; an ordinary `start` cannot.
 Agent success alone must not be presented as successful channel delivery.
 
+The Enterprise WeChat adapter uses the narrower provider states `pending → delivering → accepted |
+failed | unknown`. `accepted` means only that the official SDK received `errcode=0`; it is not proof
+of client display. A nonzero provider receipt is `failed`. A reply written without a conclusive
+receipt, including timeout, disconnect, process exit, or recovery from `delivering`, is `unknown` and
+is never retried automatically. A transport known to be disconnected before a write is attempted is
+`failed`, not `unknown`. These delivery outcomes never resubmit the Agent run.
+
 Host events are versioned envelopes with stable `eventId`, per-process `sequence`, and timestamp.
 Hosts deduplicate by `eventId`; reconnect may replay events. The initial event union is run-state
 change and notification request. Receipts distinguish accepted, duplicate, unsupported, and rejected.
@@ -138,7 +148,7 @@ Yuanpu workflow metadata lives in `~/.yuanpu/workflows/automation.sqlite`. It is
 session store: Pi owns conversation content, while Yuanpu owns external conversation bindings, run
 metadata, deduplication, and delivery state. The Runtime is the single writer.
 
-Schema version 3 is managed by `packages/yuanpu-runtime/src/persistence/index.ts` using Node 24's
+Schema version 4 is managed by `packages/yuanpu-runtime/src/persistence/index.ts` using Node 24's
 built-in `node:sqlite` driver:
 
 | Table | Owner and purpose |
@@ -153,6 +163,10 @@ built-in `node:sqlite` driver:
 | `yp_agent_run_outputs` | Scheduler-only completed output needed for restart-safe delivery |
 | `yp_schedules` | schedule definition, revision, time zone, misfire/overlap policy and next trigger |
 | `yp_schedule_triggers` | revision-scoped trigger outbox, Agent run link and skipped-trigger history |
+| `yp_channel_connections` | IM adapter; immutable connection-to-provider-account and credential-reference digests |
+| `yp_channel_pairings` | IM adapter; connection-scoped digests for trusted senders, never raw provider identities |
+| `yp_channel_inbound` | IM adapter; durable provider-message deduplication, original reply request route and run link |
+| `yp_channel_outbound` | IM adapter; reply digest and `pending` / `delivering` / `accepted` / `failed` / `unknown` state |
 
 Migrations run in `BEGIN IMMEDIATE` transactions, are forward-only and additive, and refuse a schema
 newer than the running Runtime. For a staged Runtime activation, Electron snapshots the closed
@@ -164,6 +178,11 @@ destructive migration after that boundary requires a separately designed backup/
 Bindings, runs, deduplication, and idempotency include both authenticated authority and subject; a
 shared channel connection does not collapse different senders. Composite foreign keys prevent a run
 from referencing another owner's binding and prevent inbound deduplication from pointing at another
+owner's run. An IM input is retained only across the crash window before the Agent run is durably
+linked, then its table field is cleared. This is ordinary local application data, not secure erasure:
+SQLite pages or WAL files may retain prior bytes, and Pi separately owns the resulting conversation
+content. Logs and task evidence must never contain message bodies, raw frames, provider identities,
+or attachment URLs.
 owner's run. Durable `AgentRunRecord` is deliberately separate from the submission: it contains
 owner/context metadata and input/output digests, while live completion may attach optional output.
 The run table therefore does not store the complete `AgentRunRequest`, output message, or duplicate
@@ -196,5 +215,11 @@ acceptance card runs.
 - Closing the last window keeps today's platform behavior: non-macOS quits the App; macOS may remain
   active under Electron's current lifecycle. No tray/background promise is added. An explicit App
   quit must stop Runtime and managed child processes; process-lifecycle hardening is TASK-013.
-- The first IM platform and its verified identity environment remain a TASK-017 decision. Generic
-  `im` contracts do not claim any platform SDK or live message support.
+- The first IM platform is Enterprise WeChat intelligent-bot API mode over the official
+  `@wecom/aibot-node-sdk@1.0.7`. The adapter implements text private-message routing, pairing,
+  durable deduplication, original-`req_id` reply and delivery-state separation. Group routing code
+  remains disabled until a real isolated-group trigger test. Paired non-text messages are not sent
+  to Agent or downloaded; their user-visible unsupported response uses the same durable dedupe and
+  outbound delivery states. The previous authenticated WSS spike
+  does not prove message exchange; after the test robot was deleted, private/group message E2E,
+  client display, offline delivery and provider rate-limit behavior remain explicitly unverified.
