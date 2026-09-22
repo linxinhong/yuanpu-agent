@@ -15,6 +15,8 @@ import type {
   PluginConfigDocument,
   PluginConfigScope,
   PluginSearchResult,
+  NotificationNavigationTarget,
+  AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 
 import './styles.css';
@@ -816,13 +818,20 @@ function SkillPage({ active }: { active: boolean }) {
   );
 }
 
-function ChatPanel({ active }: { active: boolean }) {
+function ChatPanel({
+  active,
+  navigationTarget,
+}: {
+  active: boolean;
+  navigationTarget?: NotificationNavigationTarget;
+}) {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [runtime, setRuntime] = useState({ connected: false, piVersion: '—' });
   const [approvals, setApprovals] = useState<CapabilityApprovalSummary[]>([]);
   const [approvalBusy, setApprovalBusy] = useState<string>();
+  const [locatedRun, setLocatedRun] = useState<AgentRunRecord | 'loading' | 'error'>();
   const nextId = useRef(2);
   const conversation = useRef<HTMLDivElement>(null);
   const desktop = window.yuanpu;
@@ -847,6 +856,21 @@ function ChatPanel({ active }: { active: boolean }) {
     const timer = window.setInterval(() => void refreshApprovals(), 1_500);
     return () => window.clearInterval(timer);
   }, [desktop, active]);
+
+  useEffect(() => {
+    const runId = navigationTarget?.runId;
+    if (!desktop || !runId) {
+      setLocatedRun(undefined);
+      return;
+    }
+    let cancelled = false;
+    setLocatedRun('loading');
+    void desktop.getAgentRun(runId).then(
+      (run) => { if (!cancelled) setLocatedRun(run); },
+      () => { if (!cancelled) setLocatedRun('error'); },
+    );
+    return () => { cancelled = true; };
+  }, [desktop, navigationTarget?.runId]);
 
   useEffect(() => {
     conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'smooth' });
@@ -937,6 +961,17 @@ function ChatPanel({ active }: { active: boolean }) {
         <div className="runtime-meta">
           <span>Pi {runtime.piVersion}</span>
           <span className="mcp-count">2 个 MCP 元工具</span>
+          {navigationTarget && (
+            <span role="status">
+              {locatedRun === 'loading'
+                ? '正在加载任务记录…'
+                : locatedRun === 'error'
+                  ? '任务记录不可用'
+                  : locatedRun
+                    ? `已定位任务 ${locatedRun.runId} · ${locatedRun.status} · 会话 ${locatedRun.context.conversation.conversationId}`
+                    : `已定位会话 ${navigationTarget.conversationId}`}
+            </span>
+          )}
         </div>
       </header>
 
@@ -1010,12 +1045,18 @@ function ChatPanel({ active }: { active: boolean }) {
 function App() {
   const [view, setView] = useState<AppView>('chat');
   const [configRoot, setConfigRoot] = useState('~/.yuanpu');
+  const [notificationTarget, setNotificationTarget] = useState<NotificationNavigationTarget>();
 
   useEffect(() => {
     void window.yuanpu?.runtimeInfo()
       .then((info) => setConfigRoot(info.configRoot))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => window.yuanpu?.onNotificationNavigation((target) => {
+    setNotificationTarget(target);
+    setView('chat');
+  }), []);
 
   return (
     <main className="app-shell">
@@ -1053,7 +1094,7 @@ function App() {
         </div>
       </aside>
 
-      <ChatPanel active={view === 'chat'} />
+      <ChatPanel active={view === 'chat'} navigationTarget={notificationTarget} />
       <SkillPage active={view === 'skills'} />
     </main>
   );

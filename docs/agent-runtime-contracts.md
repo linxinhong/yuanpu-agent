@@ -13,8 +13,10 @@ type or table declaration alone is still not evidence that a provider exists.
 - Runtime exposes the live AgentService to its authenticated desktop host at `POST /v1/agent/runs`,
   `GET /v1/agent/runs/:runId`, and `POST /v1/agent/runs/:runId/cancel`. The legacy `POST /v1/chat`
   path submits to the same service and waits for its run, preserving its existing response shape.
-  IM and Scheduler transports are not advertised until their trusted adapters exist. Host-event
-  transport remains TASK-015. Every submission carries the contract version and preserves the
+  IM and Scheduler transports are not advertised until their trusted adapters exist. Electron now
+  opens the authenticated `GET /v1/host/events` SSE stream and acknowledges events through
+  `POST /v1/host/events/receipts`; only the bootstrap Bearer token authorizes either route. Every
+  submission carries the contract version and preserves the
   rejection/result shapes in `@yuanpu-agent/protocol`.
 - A future incompatible change increments the affected contract version. Additive optional fields
   may retain the version only when old consumers can safely ignore them. Runtime update manifests
@@ -114,10 +116,19 @@ Host events are versioned envelopes with stable `eventId`, per-process `sequence
 Hosts deduplicate by `eventId`; reconnect may replay events. The initial event union is run-state
 change and notification request. Receipts distinguish accepted, duplicate, unsupported, and rejected.
 
+`notify_user` is a built-in host capability discovered and invoked through the existing
+`search_capabilities` / `execute_capability` pair; it does not add a third Pi tool. Its target comes
+from the active trusted run context, not model arguments. Trusted Scheduler/channel modules can call
+the same notification router directly without invoking a model. Pending events replay until an
+authenticated receipt arrives, so a lost receipt cannot cause a second native notification after the
+Electron host deduplicates the stable event id.
+
 Notification handling reports `submitted`, `suppressed`, `unavailable`, or `failed`, always with
 `userVisibility: unknown`. OS submission is not proof that a person saw or read a notification.
 Notification targets contain only host-validated conversation/run ids; they are not arbitrary URLs
-or commands.
+or commands. A click is routed only after `POST /v1/notifications/targets/validate` returns a
+canonical target owned by the desktop principal. The renderer receives that minimal target through
+preload IPC and never receives notification-provided navigation URLs or executable content.
 
 ## SQLite ownership and migration
 

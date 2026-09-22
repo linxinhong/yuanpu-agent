@@ -1,5 +1,6 @@
 import {
   createDemoCapabilitySource,
+  createNotificationCapabilitySource,
   CapabilityApprovalStore,
   ManagedMcpCapabilitySource,
   createYuanpuMcpServer,
@@ -15,6 +16,8 @@ import {
   capabilityManifestDigest,
   openYuanpuMetadataDatabase,
   PersistentAgentService,
+  HostNotificationRouter,
+  requestTerminalRunNotification,
   validateCapabilityConfig,
   detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
@@ -31,6 +34,9 @@ import {
   type PluginConfigScope,
   type PluginConfigDocument,
   type PluginConfigValidation,
+  type HostEventReceipt,
+  type NotificationNavigationTarget,
+  type NotificationTargetValidation,
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
@@ -92,6 +98,10 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     chunks.push(bytes);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function readBoundedJsonResponse(response: Response, maximumBytes = 256 * 1024): Promise<unknown> {
@@ -390,7 +400,9 @@ async function serve(): Promise<void> {
       secretPolicy: 'environment-only',
     };
   };
-  const capabilitySources = [createDemoCapabilitySource()];
+  const notificationRouter = new HostNotificationRouter();
+  const notificationSource = createNotificationCapabilitySource(notificationRouter);
+  const capabilitySources = [createDemoCapabilitySource(), notificationSource];
   let pythonSource = createConfiguredPythonSource(
     join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
     pythonConfigFile,
@@ -422,6 +434,12 @@ async function serve(): Promise<void> {
     approvals,
     maximumConcurrentRuns: 4,
     maximumQueuedRuns: 100,
+    onRunStateChanged: (run) => {
+      const receipt = requestTerminalRunNotification(notificationRouter, run);
+      void receipt?.catch((error) => {
+        console.error('Terminal run notification failed:', error instanceof Error ? error.message : String(error));
+      });
+    },
   });
   const desktopCaller: AuthenticatedAgentCaller = {
     entryPoint: 'desktop',
@@ -446,7 +464,7 @@ async function serve(): Promise<void> {
       pythonConfigFile,
     );
     mcp = createYuanpuMcpServer(
-      [createDemoCapabilitySource(), ...(pythonSource ? [pythonSource] : [])],
+      [createDemoCapabilitySource(), notificationSource, ...(pythonSource ? [pythonSource] : [])],
       approvals,
       { discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS },
     );
@@ -509,8 +527,105 @@ async function serve(): Promise<void> {
             piVersion: PI_UPSTREAM_VERSION,
             mcpTools: piCapabilityTools.map((tool) => tool.name),
             configRoot: home.root,
+            notificationsEnabled: home.config.notifications?.enabled ?? true,
           }),
         );
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.hostEvents && request.method === 'GET') {
+        response.statusCode = 200;
+        response.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        response.setHeader('cache-control', 'no-cache, no-transform');
+        response.setHeader('connection', 'keep-alive');
+        response.flushHeaders();
+        response.write(': connected\n\n');
+        const lastEventId = typeof request.headers['last-event-id'] === 'string'
+          ? request.headers['last-event-id']
+          : undefined;
+        const unsubscribe = notificationRouter.subscribe(lastEventId, (event) => {
+          response.write(`id: ${event.eventId}\ndata: ${JSON.stringify(event)}\n\n`);
+        });
+        response.once('close', unsubscribe);
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.hostEventReceipts && request.method === 'POST') {
+        const rawBody = await readJsonBody(request);
+        if (!isRecord(rawBody)) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid host event receipt.' }));
+          return;
+        }
+        const body = rawBody as Partial<HostEventReceipt>;
+        const notification = body.notification;
+        if (
+          typeof body.eventId !== 'string'
+          || body.eventId.length < 1
+          || body.eventId.length > 200
+          || !['accepted', 'duplicate', 'unsupported', 'rejected'].includes(body.status ?? '')
+          || (body.message !== undefined && (
+            typeof body.message !== 'string' || body.message.length > 1_000
+          ))
+          || (notification !== undefined && (
+            !isRecord(notification)
+            || typeof notification.requestId !== 'string'
+            || notification.requestId.length < 1
+            || notification.requestId.length > 200
+            || !['submitted', 'suppressed', 'unavailable', 'failed'].includes(notification.status)
+            || notification.userVisibility !== 'unknown'
+            || (notification.message !== undefined && (
+              typeof notification.message !== 'string' || notification.message.length > 1_000
+            ))
+          ))
+        ) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid host event receipt.' }));
+          return;
+        }
+        const acknowledged = notificationRouter.acknowledge(body as HostEventReceipt);
+        response.statusCode = acknowledged ? 200 : 404;
+        response.end(JSON.stringify({ acknowledged }));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.notificationTargetValidation && request.method === 'POST') {
+        const rawBody = await readJsonBody(request);
+        if (!isRecord(rawBody)
+          || (rawBody.conversationId !== undefined && (
+            typeof rawBody.conversationId !== 'string'
+            || rawBody.conversationId.length < 1
+            || rawBody.conversationId.length > 512
+          ))
+          || (rawBody.runId !== undefined && (
+            typeof rawBody.runId !== 'string'
+            || rawBody.runId.length < 1
+            || rawBody.runId.length > 200
+          ))) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid notification navigation target.' }));
+          return;
+        }
+        const body = rawBody as NotificationNavigationTarget;
+        const requestedConversationId = typeof body.conversationId === 'string'
+          ? body.conversationId
+          : undefined;
+        const requestedRunId = typeof body.runId === 'string'
+          ? body.runId
+          : undefined;
+        let result: NotificationTargetValidation;
+        if (requestedRunId) {
+          const run = await agentService.get(desktopCaller, requestedRunId);
+          const conversationId = run?.context.conversation.conversationId;
+          result = run && conversationId && (!requestedConversationId || requestedConversationId === conversationId)
+            ? { valid: true, target: { conversationId, runId: run.runId } }
+            : { valid: false, message: 'The notification target is not owned by this desktop user.' };
+        } else if (requestedConversationId === 'default') {
+          result = { valid: true, target: { conversationId: 'default' } };
+        } else {
+          result = { valid: false, message: 'The notification target does not identify a known conversation or run.' };
+        }
+        response.end(JSON.stringify(result));
         return;
       }
 
@@ -992,6 +1107,7 @@ async function serve(): Promise<void> {
   const cleanup = () => {
     cleanupPromise ??= (async () => {
       const results = await Promise.allSettled([
+        Promise.resolve().then(() => notificationRouter.close()),
         agentService.close(),
         ...(pythonSource ? [pythonSource.close()] : []),
       ]);
@@ -1013,6 +1129,7 @@ async function serve(): Promise<void> {
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = () => {
     shuttingDown = true;
+    notificationRouter.close();
     if (shutdownPromise) return;
     const forcedExit = setTimeout(() => process.exit(1), 7_500);
     shutdownPromise = (async () => {
@@ -1076,6 +1193,7 @@ async function serve(): Promise<void> {
         piVersion: PI_UPSTREAM_VERSION,
         mcpTools: piCapabilityTools.map((tool) => tool.name),
         configRoot: home.root,
+        notificationsEnabled: home.config.notifications?.enabled ?? true,
       }),
     );
   });

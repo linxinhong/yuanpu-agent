@@ -56,3 +56,24 @@ test('Yuanpu home migrates the legacy flat layout without losing package paths',
   await access(join(home.skillsPath, 'example'));
   await access(join(home.agentPath, 'models-store.json'));
 });
+
+test('notification preference is read from app config and rejects non-boolean values', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-notification-config-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'app'), { recursive: true });
+  const configPath = join(root, 'app', 'config.json');
+  const base = {
+    schemaVersion: 1,
+    provider: 'openai',
+    model: 'gpt-5.6-luna',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    workingDirectory: root,
+  };
+  await writeFile(configPath, JSON.stringify({ ...base, notifications: { enabled: false } }));
+  assert.equal((await ensureYuanpuHome(root)).config.notifications.enabled, false);
+
+  await writeFile(configPath, JSON.stringify({ ...base, notifications: { enabled: 'no' } }));
+  await assert.rejects(ensureYuanpuHome(root), /Invalid Yuanpu config/);
+  await writeFile(configPath, JSON.stringify({ ...base, notifications: null }));
+  await assert.rejects(ensureYuanpuHome(root), /Invalid Yuanpu config/);
+});

@@ -329,6 +329,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     piVersion: '0.86.1',
     mcpTools: ['search_capabilities', 'execute_capability'],
     configRoot: home,
+    notificationsEnabled: true,
   });
   assert.deepEqual(greeting, { message: 'Hello, Integration!' });
   assert.equal(plugins.length, 1);

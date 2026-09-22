@@ -52,6 +52,7 @@ export interface CapabilityDescriptor extends Omit<CapabilityDefinition, 'name'>
 export interface CapabilityContext {
   runId?: string;
   sessionId?: string;
+  conversationId?: string;
   workspaceId?: string;
   userId?: string;
   roles?: string[];

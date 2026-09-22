@@ -55,6 +55,15 @@ test('deduplicates concurrent starts and performs a bounded graceful stop', asyn
   assert.equal((await events(eventFile)).filter((event) => event.event === 'term').length, 1);
 });
 
+test('loads a validated notification run target through the authenticated Runtime bridge', async (context) => {
+  const { manager } = await createManager(context, 'healthy');
+  const run = await manager.getAgentRun('run-fixture');
+  assert.equal(run.runId, 'run-fixture');
+  assert.equal(run.status, 'succeeded');
+  assert.equal(run.context.conversation.conversationId, 'default');
+  assert.throws(() => manager.getAgentRun(''), /runId must be a non-empty string/);
+});
+
 test('stop cancels a start that has not spawned its Runtime yet', async (context) => {
   const { manager, eventFile } = await createManager(context, 'healthy');
   const starting = manager.start().then(

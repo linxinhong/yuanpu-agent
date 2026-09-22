@@ -1,5 +1,8 @@
 export const PROTOCOL_VERSION = 3;
 
+import type { NotificationNavigationTarget } from './host-events.js';
+import type { AgentRunRecord } from './agent.js';
+
 export * from './agent.js';
 export * from './host-events.js';
 
@@ -8,6 +11,9 @@ export const RUNTIME_ROUTES = {
   greeting: '/v1/greeting',
   chat: '/v1/chat',
   agentRuns: '/v1/agent/runs',
+  hostEvents: '/v1/host/events',
+  hostEventReceipts: '/v1/host/events/receipts',
+  notificationTargetValidation: '/v1/notifications/targets/validate',
   localSkills: '/v1/skills/local',
   plugins: '/v1/plugins',
   pluginSearch: '/v1/plugins/search',
@@ -30,6 +36,7 @@ export interface RuntimeInfo {
   piVersion: string;
   mcpTools: readonly string[];
   configRoot: string;
+  notificationsEnabled: boolean;
 }
 
 export interface RuntimeGreeting {
@@ -203,6 +210,7 @@ export interface DesktopBridge {
   runtimeInfo(): Promise<RuntimeInfo>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
+  getAgentRun(runId: string): Promise<AgentRunRecord>;
   checkRuntimeUpdate(): Promise<RuntimeUpdateState>;
   checkDesktopUpdate(): Promise<void>;
   searchPlugins(query: string): Promise<PluginSearchResult[]>;
@@ -222,4 +230,5 @@ export interface DesktopBridge {
     requestId: string,
     decision: CapabilityApprovalDecisionInput['decision'],
   ): Promise<CapabilityApprovalDecisionResult>;
+  onNotificationNavigation(listener: (target: NotificationNavigationTarget) => void): () => void;
 }

@@ -1,10 +1,11 @@
 import type { DesktopBridge } from '@yuanpu-agent/protocol';
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 const bridge: DesktopBridge = {
   runtimeInfo: () => ipcRenderer.invoke('runtime:info'),
   greeting: (name) => ipcRenderer.invoke('runtime:greeting', name),
   chat: (message) => ipcRenderer.invoke('runtime:chat', message),
+  getAgentRun: (runId) => ipcRenderer.invoke('agent:runs:get', runId),
   checkRuntimeUpdate: () => ipcRenderer.invoke('runtime:update'),
   checkDesktopUpdate: () => ipcRenderer.invoke('desktop:update'),
   searchPlugins: (query) => ipcRenderer.invoke('plugins:search', query),
@@ -27,6 +28,11 @@ const bridge: DesktopBridge = {
   decideCapabilityApproval: (requestId, decision) => (
     ipcRenderer.invoke('capabilities:approvals:decide', requestId, decision)
   ),
+  onNotificationNavigation: (listener) => {
+    const handler = (_event: IpcRendererEvent, target: Parameters<typeof listener>[0]) => listener(target);
+    ipcRenderer.on('notifications:navigate', handler);
+    return () => ipcRenderer.removeListener('notifications:navigate', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('yuanpu', bridge);

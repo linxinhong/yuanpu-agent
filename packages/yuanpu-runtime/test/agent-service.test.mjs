@@ -73,6 +73,27 @@ function futureExpiry(offsetMs = 60_000) {
   return new Date(Date.now() + offsetMs).toISOString();
 }
 
+test('publishes durable run state transitions to the host observer', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const observed = [];
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute() {
+        return { kind: 'completed', output: { message: 'done', tools: [] } };
+      },
+    },
+    onRunStateChanged: (run) => observed.push(run),
+  });
+  const submitted = await service.submit(caller(), request({ idempotencyKey: 'observer-1' }));
+  assert.equal(submitted.accepted, true);
+  await waitUntil(() => observed.some((run) => run.status === 'succeeded'));
+  assert.deepEqual(observed.map((run) => run.status), ['queued', 'running', 'succeeded']);
+  assert.equal(observed.every((run) => run.runId === submitted.runId), true);
+  await service.close();
+  database.close();
+});
+
 test('serializes one conversation while running independent conversations concurrently', async () => {
   const database = openYuanpuMetadataDatabase(':memory:');
   const gates = new Map();

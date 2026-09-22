@@ -31,6 +31,31 @@ const server = createServer((request, response) => {
       piVersion: 'fixture',
       mcpTools: [],
       configRoot: '/fixture',
+      notificationsEnabled: true,
+    }));
+    return;
+  }
+  if (request.url === '/v1/agent/runs/run-fixture') {
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({
+      runId: 'run-fixture',
+      owner: {
+        entryPoint: 'desktop',
+        identity: {
+          kind: 'local_user', subjectId: 'local-user', authorityId: 'local-desktop', authenticatedBy: 'electron',
+        },
+      },
+      context: {
+        workspaceId: '/fixture',
+        conversation: { namespace: 'desktop', conversationId: 'default' },
+        delivery: { kind: 'desktop' },
+      },
+      requestFingerprint: 'fixture',
+      inputDigest: 'fixture',
+      status: 'succeeded',
+      externalEffectState: 'possible',
+      createdAt: '2026-09-22T00:00:00.000Z',
+      updatedAt: '2026-09-22T00:00:01.000Z',
     }));
     return;
   }
@@ -49,6 +74,7 @@ server.listen(0, '127.0.0.1', () => {
     piVersion: 'fixture',
     mcpTools: [],
     configRoot: '/fixture',
+    notificationsEnabled: true,
   })}\n`);
   if ((mode === 'crash-once' && startNumber === 1) || mode === 'always-crash') {
     setTimeout(() => {
