@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 import {
@@ -70,7 +71,8 @@ test('cron skips nonexistent DST time and uses only the first ambiguous wall tim
 test('each schedule revision fires once and default overlap policy skips a concurrent occurrence', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-once-'));
   context.after(() => rm(root, { recursive: true, force: true }));
-  const metadata = openYuanpuMetadataDatabase(join(root, 'automation.sqlite'));
+  const databasePath = join(root, 'automation.sqlite');
+  const metadata = openYuanpuMetadataDatabase(databasePath);
   let now = new Date('2026-09-22T00:00:30.000Z');
   const executions = [];
   const executor = {
@@ -105,6 +107,12 @@ test('each schedule revision fires once and default overlap policy skips a concu
   now = new Date('2026-09-22T00:01:00.000Z');
   await scheduler.tick();
   await eventually(() => executions.length === 1);
+  const inspection = new DatabaseSync(databasePath, { readOnly: true });
+  const persistedTrigger = inspection.prepare(
+    'SELECT request_json FROM yp_schedule_triggers WHERE schedule_id = ?',
+  ).get(created.scheduleId);
+  inspection.close();
+  assert.doesNotMatch(persistedTrigger.request_json, /Prepare the report/);
   await scheduler.tick();
   assert.equal(executions.length, 1);
 
