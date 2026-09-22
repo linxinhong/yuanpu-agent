@@ -801,7 +801,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-022
     title: "试点 Jev 辅助验收证据核验"
-    status: in_progress
+    status: done
     goal: "用小规模对照评估验证 Jev 是否减少证据审阅耗时和遗漏，并交付可选的只读开发工具。"
     scope:
       in: ["独立开发脚本、最小证据输入格式与本地精确检查","Jev Choice 语义核验、人工复核报告与人工标注对照集","数据最小化、离线测试、耗时/成本/误判评估"]
@@ -832,8 +832,14 @@ tasks:
       owner: "sol-owner-task-022"
       attempts: 0
       claimed_at: "2026-09-22T06:56:20.251Z"
-      completed_at: null
+      completed_at: "2026-09-22T07:31:58.120Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-022"
       branch: "task/task-022-jev-evidence-review"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "TASK-022 branch merged into main at e799870729e04e32580d08810e6e4edc01157541; final reviewed branch revision was 6dfa0e4."}
+        - {type: "test", check: "focused evidence-review tests", status: "passed", summary: "Node 24.15.0 focused suite passed 11/11 on integrated main, covering data minimization, path and secret rejection, exact evidence checks, service failures, low confidence, and impossible human metrics."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Integrated main passed the full build, Yuanpu typecheck, and test suite with Node 24.15.0 and pnpm 11.22.0."}
+        - {type: "review", check: "independent Sol security and standards review", status: "passed", summary: "Independent review closed Unix, URI, UNC and Windows path exfiltration gaps, invalid human-metric acceptance, duplicate evidence ids, and test placement; final verdict PASS with no blocker."}
+        - {type: "evaluation", check: "synthetic Jev pilot", status: "passed", summary: "One bounded jev-1.13.0 call used only 24 synthetic cases; no critical counterexample was incorrectly supported. Human timing and false-support baselines remain unverified, so the recorded recommendation is do_not_adopt."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-022.md and .tasks/verification/TASK-022/results.md record inputs, commands, review fixes, measured model behavior, and the unverified adoption boundary."}
       follow_up_candidates: []
