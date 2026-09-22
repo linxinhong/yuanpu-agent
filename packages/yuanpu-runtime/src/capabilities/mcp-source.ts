@@ -337,6 +337,9 @@ export class ManagedMcpCapabilitySource {
           supervisor,
         ];
       }
+      if (this.#closing) {
+        throw new ManagedMcpSourceError('unavailable', 'MCP source is closing.');
+      }
       const transport = new ProcessGroupStdioTransport({
         command,
         args,
