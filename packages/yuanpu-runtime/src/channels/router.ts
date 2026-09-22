@@ -35,6 +35,8 @@ function terminalContent(run: AgentRunRecord): string | undefined {
   return undefined;
 }
 
+const unsupportedMessageContent = '暂不支持这种消息类型，请发送文字消息。';
+
 export class ChannelRouter {
   readonly #config: ChannelConnectionConfig;
   readonly #store: ChannelStore;
@@ -109,19 +111,23 @@ export class ChannelRouter {
         return { accepted: false, code: 'group_not_allowed' };
       }
     }
-    if (message.messageType !== 'text' || typeof message.text !== 'string' || !message.text.trim()) {
+    const providerMessageDigest = digestChannelValue(
+      this.#config.connectionId,
+      'message',
+      message.providerMessageId,
+    );
+    if (message.messageType !== 'text') {
+      await this.#handleUnsupported(message, providerMessageDigest, senderDigest, conversationDigest);
       return { accepted: false, code: 'unsupported_message' };
+    }
+    if (typeof message.text !== 'string' || !message.text.trim()) {
+      return { accepted: false, code: 'invalid_message' };
     }
     const normalizedText = message.text.trim();
     const isCancel = normalizedText.startsWith('/cancel');
     const cancelTargetRunId = /^\/cancel\s+([^\s]+)$/.exec(normalizedText)?.[1];
     if (isCancel && !cancelTargetRunId) return { accepted: false, code: 'invalid_message' };
 
-    const providerMessageDigest = digestChannelValue(
-      this.#config.connectionId,
-      'message',
-      message.providerMessageId,
-    );
     const accepted = this.#store.acceptInbound({
       inboundId: this.#createId(),
       provider: 'wecom',
@@ -219,6 +225,9 @@ export class ChannelRouter {
 
   async #recoverAfterReady(): Promise<void> {
     if (this.#closed) return;
+    for (const inbound of this.#store.recoverableUnsupported('wecom', this.#config.connectionId)) {
+      await this.#deliverUnsupported(inbound);
+    }
     for (const inbound of this.#store.recoverableInbound('wecom', this.#config.connectionId)) {
       if (inbound.runId) this.#watch(inbound, this.#caller(inbound.conversationDigest));
     }
@@ -260,6 +269,71 @@ export class ChannelRouter {
       this.#watch(attached, caller);
     }
     return submission;
+  }
+
+  async #handleUnsupported(
+    message: NormalizedChannelMessage,
+    providerMessageId: string,
+    senderDigest: string,
+    conversationDigest: string,
+  ): Promise<void> {
+    const unsupportedDigest = contentDigest(`unsupported:${message.messageType}`);
+    const accepted = this.#store.acceptInbound({
+      inboundId: this.#createId(),
+      provider: 'wecom',
+      connectionId: this.#config.connectionId,
+      providerMessageId,
+      providerRequestId: message.providerRequestId,
+      senderDigest,
+      conversationType: message.conversationType,
+      conversationDigest,
+      messageType: message.messageType,
+      contentDigest: unsupportedDigest,
+      action: 'unsupported',
+      receivedAt: this.#now().toISOString(),
+    });
+    if (
+      accepted.record.providerRequestId !== message.providerRequestId
+      || accepted.record.senderDigest !== senderDigest
+      || accepted.record.conversationType !== message.conversationType
+      || accepted.record.conversationDigest !== conversationDigest
+      || accepted.record.messageType !== message.messageType
+      || accepted.record.contentDigest !== unsupportedDigest
+      || accepted.record.action !== 'unsupported'
+    ) {
+      return;
+    }
+    await this.#deliverUnsupported(accepted.record);
+  }
+
+  async #deliverUnsupported(inbound: ChannelInboundRoute): Promise<void> {
+    const now = this.#now().toISOString();
+    const outbound = this.#store.createOutbound({
+      outboundId: this.#createId(),
+      inboundId: inbound.inboundId,
+      contentDigest: contentDigest(unsupportedMessageContent),
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    }).record;
+    if (!this.#store.claimOutbound(outbound.outboundId, this.#now().toISOString())) return;
+    if (this.#closed) {
+      this.#store.finishOutbound(outbound.outboundId, 'unknown', this.#now().toISOString(), 'router_closed');
+      return;
+    }
+    const result = await this.#transport.reply({
+      providerRequestId: inbound.providerRequestId,
+      providerMessageId: inbound.providerMessageId,
+    }, outbound.outboundId, unsupportedMessageContent).catch(() => ({
+      status: 'unknown' as const,
+      code: 'transport_uncertain',
+    }));
+    this.#store.finishOutbound(
+      outbound.outboundId,
+      result.status,
+      this.#now().toISOString(),
+      result.status === 'accepted' ? undefined : result.code,
+    );
   }
 
   async #deliverWhenTerminal(inbound: ChannelInboundRoute, caller: AuthenticatedAgentCaller): Promise<void> {

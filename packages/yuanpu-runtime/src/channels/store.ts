@@ -16,7 +16,7 @@ export interface ChannelInboundRoute {
   messageType: string;
   contentDigest?: string;
   pendingInput?: string;
-  action?: 'run' | 'cancel';
+  action?: 'run' | 'cancel' | 'unsupported';
   cancelTargetRunId?: string;
   runId?: string;
   receivedAt: string;
@@ -25,7 +25,7 @@ export interface ChannelInboundRoute {
 export interface ChannelOutboundRecord {
   outboundId: string;
   inboundId: string;
-  runId: string;
+  runId?: string;
   contentDigest: string;
   status: ChannelOutboundStatus;
   failureCode?: string;
@@ -45,7 +45,7 @@ interface InboundRow {
   message_type: string;
   content_digest: string | null;
   input_text: string | null;
-  action: 'run' | 'cancel';
+  action: 'run' | 'cancel' | 'unsupported';
   cancel_target_run_id: string | null;
   run_id: string | null;
   received_at: string;
@@ -54,7 +54,7 @@ interface InboundRow {
 interface OutboundRow {
   outbound_id: string;
   inbound_id: string;
-  run_id: string;
+  run_id: string | null;
   content_digest: string;
   status: ChannelOutboundStatus;
   failure_code: string | null;
@@ -86,7 +86,7 @@ function outboundFromRow(row: OutboundRow): ChannelOutboundRecord {
   return {
     outboundId: row.outbound_id,
     inboundId: row.inbound_id,
-    runId: row.run_id,
+    ...(row.run_id ? { runId: row.run_id } : {}),
     contentDigest: row.content_digest,
     status: row.status,
     ...(row.failure_code ? { failureCode: row.failure_code } : {}),
@@ -235,6 +235,17 @@ export class ChannelStore {
     return rows.map(inboundFromRow);
   }
 
+  recoverableUnsupported(provider: string, connectionId: string): ChannelInboundRoute[] {
+    const rows = this.database.prepare(`
+      SELECT i.* FROM yp_channel_inbound i
+      LEFT JOIN yp_channel_outbound o ON o.inbound_id = i.inbound_id
+      WHERE i.provider = ? AND i.connection_id = ? AND i.action = 'unsupported'
+        AND (o.outbound_id IS NULL OR o.status = 'pending')
+      ORDER BY i.received_at
+    `).all(provider, connectionId) as unknown as InboundRow[];
+    return rows.map(inboundFromRow);
+  }
+
   createOutbound(input: ChannelOutboundRecord): { inserted: boolean; record: ChannelOutboundRecord } {
     const inserted = this.database.prepare(`
       INSERT OR IGNORE INTO yp_channel_outbound(
@@ -244,7 +255,7 @@ export class ChannelStore {
     `).run(
       input.outboundId,
       input.inboundId,
-      input.runId,
+      input.runId ?? null,
       input.contentDigest,
       input.status,
       input.failureCode ?? null,
@@ -252,8 +263,8 @@ export class ChannelStore {
       input.updatedAt,
     ).changes === 1;
     const row = this.database.prepare(
-      'SELECT * FROM yp_channel_outbound WHERE run_id = ?',
-    ).get(input.runId) as unknown as OutboundRow;
+      'SELECT * FROM yp_channel_outbound WHERE inbound_id = ?',
+    ).get(input.inboundId) as unknown as OutboundRow;
     return { inserted, record: outboundFromRow(row) };
   }
 
@@ -297,6 +308,13 @@ export class ChannelStore {
     const row = this.database.prepare(
       'SELECT * FROM yp_channel_outbound WHERE run_id = ?',
     ).get(runId) as unknown as OutboundRow | undefined;
+    return row ? outboundFromRow(row) : undefined;
+  }
+
+  getOutboundForInbound(inboundId: string): ChannelOutboundRecord | undefined {
+    const row = this.database.prepare(
+      'SELECT * FROM yp_channel_outbound WHERE inbound_id = ?',
+    ).get(inboundId) as unknown as OutboundRow | undefined;
     return row ? outboundFromRow(row) : undefined;
   }
 }

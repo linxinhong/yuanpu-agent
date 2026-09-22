@@ -219,7 +219,7 @@ const migrations: readonly Migration[] = [{
       message_type TEXT NOT NULL,
       content_digest TEXT,
       input_text TEXT,
-      action TEXT NOT NULL DEFAULT 'run' CHECK (action IN ('run', 'cancel')),
+      action TEXT NOT NULL DEFAULT 'run' CHECK (action IN ('run', 'cancel', 'unsupported')),
       cancel_target_run_id TEXT,
       run_id TEXT REFERENCES yp_agent_runs(run_id),
       received_at TEXT NOT NULL,
@@ -235,7 +235,7 @@ const migrations: readonly Migration[] = [{
     CREATE TABLE yp_channel_outbound (
       outbound_id TEXT PRIMARY KEY,
       inbound_id TEXT NOT NULL UNIQUE REFERENCES yp_channel_inbound(inbound_id),
-      run_id TEXT NOT NULL UNIQUE REFERENCES yp_agent_runs(run_id),
+      run_id TEXT UNIQUE REFERENCES yp_agent_runs(run_id),
       content_digest TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN (
         'pending', 'delivering', 'accepted', 'failed', 'unknown'

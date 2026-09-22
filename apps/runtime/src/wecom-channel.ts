@@ -197,6 +197,7 @@ export async function startConfiguredWecomChannels(
         || !credentialRefPattern.test(connection.credentialRefs.botSecret)
         || connection.credentialRefs.botSecret !== `keychain:yuanpu/im/${connection.connectionId}/bot-secret`
         || connection.directMessagePolicy !== 'paired-only'
+        || connection.groupPolicy !== 'allowlist-paired-sender-and-provider-at-mention'
         || connection.acceptedMessageTypes?.length !== 1
         || connection.acceptedMessageTypes[0] !== 'text'
       ) {

@@ -150,6 +150,7 @@ test('rejects plaintext credentials, non-Keychain references, and premature grou
       },
     }),
     enabledConnection({ credentialRefs: { botSecret: 'env:FORBIDDEN' } }),
+    enabledConnection({ groupPolicy: 'allow-all' }),
     enabledConnection({
       connectionId: 'imc_other',
       credentialRefs: { botSecret: 'keychain:yuanpu/im/imc_fixture/bot-secret' },

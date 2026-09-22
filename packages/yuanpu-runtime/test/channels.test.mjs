@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   ChannelRouter,
   PersistentAgentService,
+  contentDigest,
   digestChannelValue,
   openYuanpuMetadataDatabase,
 } from '../dist/index.mjs';
@@ -151,15 +152,93 @@ test('rejects unauthenticated channel identities before Agent dispatch', async (
     conversationType: 'group',
     conversationId: 'fixture-group',
   })), { accepted: false, code: 'group_disabled' });
-  assert.deepEqual(await context.router.handleInbound(message({ messageType: 'file', text: undefined })), {
-    accepted: false,
-    code: 'unsupported_message',
-  });
   assert.equal(context.executions.length, 0);
   assert.equal(context.transport.replies.length, 0);
   await context.router.close();
   await context.service.close();
   context.database.close();
+});
+
+test('durably replies to a paired non-text message once without dispatching Agent', async () => {
+  const context = await fixture();
+  const unsupported = message({ messageType: 'file', text: undefined });
+  assert.deepEqual(await context.router.handleInbound(unsupported), {
+    accepted: false,
+    code: 'unsupported_message',
+  });
+  assert.deepEqual(await context.router.handleInbound(unsupported), {
+    accepted: false,
+    code: 'unsupported_message',
+  });
+  assert.equal(context.executions.length, 0);
+  assert.equal(context.transport.replies.length, 1);
+  assert.match(context.transport.replies[0].content, /文字消息/);
+  assert.equal(
+    context.database.channels.getOutbound(context.transport.replies[0].outboundId).status,
+    'accepted',
+  );
+  await context.router.close();
+  await context.service.close();
+  context.database.close();
+});
+
+test('recovers a persisted unsupported reply without sending content to Agent', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const channelConfig = config();
+  const now = new Date().toISOString();
+  database.channels.bindConnection({
+    provider: 'wecom',
+    connectionId: channelConfig.connectionId,
+    providerAccountDigest: digestChannelValue(
+      channelConfig.connectionId,
+      'account',
+      channelConfig.providerAccountRef,
+    ),
+    credentialBindingDigest: channelConfig.credentialBindingDigest,
+    now,
+  });
+  const inbound = database.channels.acceptInbound({
+    inboundId: 'fixture-unsupported-inbound',
+    provider: 'wecom',
+    connectionId: channelConfig.connectionId,
+    providerMessageId: digestChannelValue(channelConfig.connectionId, 'message', 'fixture-file-message'),
+    providerRequestId: 'fixture-file-request',
+    senderDigest: digestChannelValue(channelConfig.connectionId, 'sender', 'member-fixture-a'),
+    conversationType: 'single',
+    conversationDigest: digestChannelValue(
+      channelConfig.connectionId,
+      'conversation:single',
+      'member-fixture-a',
+    ),
+    messageType: 'file',
+    contentDigest: contentDigest('unsupported:file'),
+    action: 'unsupported',
+    receivedAt: now,
+  }).record;
+  let executions = 0;
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute() {
+        executions += 1;
+        throw new Error('unsupported input must not reach Agent');
+      },
+    },
+  });
+  const transport = new FixtureTransport();
+  const router = new ChannelRouter({
+    config: channelConfig,
+    store: database.channels,
+    agent: service,
+    transport,
+  });
+  router.start();
+  await waitUntil(() => transport.replies.length === 1);
+  assert.equal(executions, 0);
+  assert.equal(database.channels.getOutboundForInbound(inbound.inboundId).status, 'accepted');
+  await router.close();
+  await service.close();
+  database.close();
 });
 
 test('persists before dispatch, deduplicates replay, and replies with the original request route', async () => {

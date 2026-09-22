@@ -218,6 +218,8 @@ acceptance card runs.
 - The first IM platform is Enterprise WeChat intelligent-bot API mode over the official
   `@wecom/aibot-node-sdk@1.0.7`. The adapter implements text private-message routing, pairing,
   durable deduplication, original-`req_id` reply and delivery-state separation. Group routing code
-  remains disabled until a real isolated-group trigger test. The previous authenticated WSS spike
+  remains disabled until a real isolated-group trigger test. Paired non-text messages are not sent
+  to Agent or downloaded; their user-visible unsupported response uses the same durable dedupe and
+  outbound delivery states. The previous authenticated WSS spike
   does not prove message exchange; after the test robot was deleted, private/group message E2E,
   client display, offline delivery and provider rate-limit behavior remain explicitly unverified.
