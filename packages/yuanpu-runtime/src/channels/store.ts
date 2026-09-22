@@ -1,0 +1,239 @@
+import type { DatabaseSync } from 'node:sqlite';
+
+import type { ChannelConversationType } from './contracts.js';
+
+export type ChannelOutboundStatus = 'pending' | 'delivering' | 'accepted' | 'failed' | 'unknown';
+
+export interface ChannelInboundRoute {
+  inboundId: string;
+  provider: string;
+  connectionId: string;
+  providerMessageId: string;
+  providerRequestId: string;
+  senderDigest: string;
+  conversationType: ChannelConversationType;
+  conversationDigest: string;
+  messageType: string;
+  contentDigest?: string;
+  runId?: string;
+  receivedAt: string;
+}
+
+export interface ChannelOutboundRecord {
+  outboundId: string;
+  inboundId: string;
+  runId: string;
+  contentDigest: string;
+  status: ChannelOutboundStatus;
+  failureCode?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface InboundRow {
+  inbound_id: string;
+  provider: string;
+  connection_id: string;
+  provider_message_id: string;
+  provider_request_id: string;
+  sender_digest: string;
+  conversation_type: ChannelConversationType;
+  conversation_digest: string;
+  message_type: string;
+  content_digest: string | null;
+  run_id: string | null;
+  received_at: string;
+}
+
+interface OutboundRow {
+  outbound_id: string;
+  inbound_id: string;
+  run_id: string;
+  content_digest: string;
+  status: ChannelOutboundStatus;
+  failure_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function inboundFromRow(row: InboundRow): ChannelInboundRoute {
+  return {
+    inboundId: row.inbound_id,
+    provider: row.provider,
+    connectionId: row.connection_id,
+    providerMessageId: row.provider_message_id,
+    providerRequestId: row.provider_request_id,
+    senderDigest: row.sender_digest,
+    conversationType: row.conversation_type,
+    conversationDigest: row.conversation_digest,
+    messageType: row.message_type,
+    ...(row.content_digest ? { contentDigest: row.content_digest } : {}),
+    ...(row.run_id ? { runId: row.run_id } : {}),
+    receivedAt: row.received_at,
+  };
+}
+
+function outboundFromRow(row: OutboundRow): ChannelOutboundRecord {
+  return {
+    outboundId: row.outbound_id,
+    inboundId: row.inbound_id,
+    runId: row.run_id,
+    contentDigest: row.content_digest,
+    status: row.status,
+    ...(row.failure_code ? { failureCode: row.failure_code } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export class ChannelStore {
+  constructor(private readonly database: DatabaseSync) {}
+
+  pair(provider: string, connectionId: string, senderDigest: string, now: string): void {
+    this.database.prepare(`
+      INSERT OR IGNORE INTO yp_channel_pairings(provider, connection_id, sender_digest, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(provider, connectionId, senderDigest, now);
+  }
+
+  unpair(provider: string, connectionId: string, senderDigest: string): void {
+    this.database.prepare(`
+      DELETE FROM yp_channel_pairings
+      WHERE provider = ? AND connection_id = ? AND sender_digest = ?
+    `).run(provider, connectionId, senderDigest);
+  }
+
+  isPaired(provider: string, connectionId: string, senderDigest: string): boolean {
+    return Boolean(this.database.prepare(`
+      SELECT 1 FROM yp_channel_pairings
+      WHERE provider = ? AND connection_id = ? AND sender_digest = ?
+    `).get(provider, connectionId, senderDigest));
+  }
+
+  acceptInbound(input: ChannelInboundRoute): { inserted: boolean; record: ChannelInboundRoute } {
+    const inserted = this.database.prepare(`
+      INSERT OR IGNORE INTO yp_channel_inbound(
+        inbound_id, provider, connection_id, provider_message_id, provider_request_id,
+        sender_digest, conversation_type, conversation_digest, message_type,
+        content_digest, run_id, received_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.inboundId,
+      input.provider,
+      input.connectionId,
+      input.providerMessageId,
+      input.providerRequestId,
+      input.senderDigest,
+      input.conversationType,
+      input.conversationDigest,
+      input.messageType,
+      input.contentDigest ?? null,
+      input.runId ?? null,
+      input.receivedAt,
+    ).changes === 1;
+    const row = this.database.prepare(`
+      SELECT * FROM yp_channel_inbound
+      WHERE provider = ? AND connection_id = ? AND provider_message_id = ?
+    `).get(input.provider, input.connectionId, input.providerMessageId) as unknown as InboundRow;
+    return { inserted, record: inboundFromRow(row) };
+  }
+
+  attachRun(inboundId: string, runId: string): ChannelInboundRoute {
+    this.database.prepare(`
+      UPDATE yp_channel_inbound SET run_id = COALESCE(run_id, ?) WHERE inbound_id = ?
+    `).run(runId, inboundId);
+    return this.getInbound(inboundId)!;
+  }
+
+  getInbound(inboundId: string): ChannelInboundRoute | undefined {
+    const row = this.database.prepare(
+      'SELECT * FROM yp_channel_inbound WHERE inbound_id = ?',
+    ).get(inboundId) as unknown as InboundRow | undefined;
+    return row ? inboundFromRow(row) : undefined;
+  }
+
+  latestRunId(provider: string, connectionId: string, conversationDigest: string): string | undefined {
+    const row = this.database.prepare(`
+      SELECT run_id FROM yp_channel_inbound
+      WHERE provider = ? AND connection_id = ? AND conversation_digest = ? AND run_id IS NOT NULL
+      ORDER BY received_at DESC LIMIT 1
+    `).get(provider, connectionId, conversationDigest) as { run_id: string } | undefined;
+    return row?.run_id;
+  }
+
+  recoverableInbound(provider: string, connectionId: string): ChannelInboundRoute[] {
+    const rows = this.database.prepare(`
+      SELECT i.* FROM yp_channel_inbound i
+      LEFT JOIN yp_channel_outbound o ON o.inbound_id = i.inbound_id
+      WHERE i.provider = ? AND i.connection_id = ? AND i.run_id IS NOT NULL
+        AND (o.outbound_id IS NULL OR o.status = 'pending')
+      ORDER BY i.received_at
+    `).all(provider, connectionId) as unknown as InboundRow[];
+    return rows.map(inboundFromRow);
+  }
+
+  createOutbound(input: ChannelOutboundRecord): { inserted: boolean; record: ChannelOutboundRecord } {
+    const inserted = this.database.prepare(`
+      INSERT OR IGNORE INTO yp_channel_outbound(
+        outbound_id, inbound_id, run_id, content_digest, status,
+        failure_code, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.outboundId,
+      input.inboundId,
+      input.runId,
+      input.contentDigest,
+      input.status,
+      input.failureCode ?? null,
+      input.createdAt,
+      input.updatedAt,
+    ).changes === 1;
+    const row = this.database.prepare(
+      'SELECT * FROM yp_channel_outbound WHERE run_id = ?',
+    ).get(input.runId) as unknown as OutboundRow;
+    return { inserted, record: outboundFromRow(row) };
+  }
+
+  claimOutbound(outboundId: string, now: string): boolean {
+    return this.database.prepare(`
+      UPDATE yp_channel_outbound SET status = 'delivering', updated_at = ?
+      WHERE outbound_id = ? AND status = 'pending'
+    `).run(now, outboundId).changes === 1;
+  }
+
+  finishOutbound(
+    outboundId: string,
+    status: Extract<ChannelOutboundStatus, 'accepted' | 'failed' | 'unknown'>,
+    now: string,
+    failureCode?: string,
+  ): ChannelOutboundRecord {
+    this.database.prepare(`
+      UPDATE yp_channel_outbound SET status = ?, failure_code = ?, updated_at = ?
+      WHERE outbound_id = ? AND status = 'delivering'
+    `).run(status, failureCode ?? null, now, outboundId);
+    return this.getOutbound(outboundId)!;
+  }
+
+  markDeliveringUnknown(provider: string, connectionId: string, now: string): number {
+    return Number(this.database.prepare(`
+      UPDATE yp_channel_outbound SET status = 'unknown', failure_code = 'process_interrupted', updated_at = ?
+      WHERE status = 'delivering' AND inbound_id IN (
+        SELECT inbound_id FROM yp_channel_inbound WHERE provider = ? AND connection_id = ?
+      )
+    `).run(now, provider, connectionId).changes);
+  }
+
+  getOutbound(outboundId: string): ChannelOutboundRecord | undefined {
+    const row = this.database.prepare(
+      'SELECT * FROM yp_channel_outbound WHERE outbound_id = ?',
+    ).get(outboundId) as unknown as OutboundRow | undefined;
+    return row ? outboundFromRow(row) : undefined;
+  }
+
+  getOutboundForRun(runId: string): ChannelOutboundRecord | undefined {
+    const row = this.database.prepare(
+      'SELECT * FROM yp_channel_outbound WHERE run_id = ?',
+    ).get(runId) as unknown as OutboundRow | undefined;
+    return row ? outboundFromRow(row) : undefined;
+  }
+}

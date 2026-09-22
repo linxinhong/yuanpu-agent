@@ -3,11 +3,12 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { AgentRunStore } from './agent-run-store.js';
+import { ChannelStore } from '../channels/store.js';
 import { SchedulerStore } from '../scheduler/store.js';
 
 export * from './agent-run-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 3;
+export const YUANPU_METADATA_SCHEMA_VERSION = 4;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -183,6 +184,52 @@ const migrations: readonly Migration[] = [{
     CREATE INDEX yp_schedule_triggers_submission
       ON yp_schedule_triggers(status, created_at);
   `,
+}, {
+  version: 4,
+  sql: `
+    CREATE TABLE yp_channel_pairings (
+      provider TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      sender_digest TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (provider, connection_id, sender_digest)
+    ) STRICT;
+
+    CREATE TABLE yp_channel_inbound (
+      inbound_id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      provider_message_id TEXT NOT NULL,
+      provider_request_id TEXT NOT NULL,
+      sender_digest TEXT NOT NULL,
+      conversation_type TEXT NOT NULL CHECK (conversation_type IN ('single', 'group')),
+      conversation_digest TEXT NOT NULL,
+      message_type TEXT NOT NULL,
+      content_digest TEXT,
+      run_id TEXT REFERENCES yp_agent_runs(run_id),
+      received_at TEXT NOT NULL,
+      UNIQUE (provider, connection_id, provider_message_id)
+    ) STRICT;
+
+    CREATE INDEX yp_channel_inbound_conversation
+      ON yp_channel_inbound(provider, connection_id, conversation_digest, received_at DESC);
+
+    CREATE TABLE yp_channel_outbound (
+      outbound_id TEXT PRIMARY KEY,
+      inbound_id TEXT NOT NULL UNIQUE REFERENCES yp_channel_inbound(inbound_id),
+      run_id TEXT NOT NULL UNIQUE REFERENCES yp_agent_runs(run_id),
+      content_digest TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN (
+        'pending', 'delivering', 'accepted', 'failed', 'unknown'
+      )),
+      failure_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX yp_channel_outbound_status
+      ON yp_channel_outbound(status, updated_at);
+  `,
 }];
 
 function applyMigrations(database: DatabaseSync): number {
@@ -222,11 +269,13 @@ export class YuanpuMetadataDatabase {
   readonly driver = YUANPU_SQLITE_DRIVER;
   readonly schemaVersion: number;
   readonly agentRuns: AgentRunStore;
+  readonly channels: ChannelStore;
   readonly schedules: SchedulerStore;
 
   constructor(private readonly database: DatabaseSync) {
     this.schemaVersion = applyMigrations(database);
     this.agentRuns = new AgentRunStore(database);
+    this.channels = new ChannelStore(database);
     this.schedules = new SchedulerStore(database);
   }
 
