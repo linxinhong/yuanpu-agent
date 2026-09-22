@@ -5,7 +5,7 @@
 - 记录日期：2026-09-22
 - 分支：`task/task-022-jev-evidence-review`
 - 来源 revision：`d355ea8`
-- 测试 revision：`9340dfb`（实现、独立评审修复、测试稳定性与最终路径边界修复）
+- 测试 revision：`aa7eb4b`（实现、独立评审修复、测试稳定性与 Unix/Windows 路径边界修复）
 
 ## 交付入口
 
