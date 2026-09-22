@@ -626,7 +626,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-016
     title: "实现持久化定时任务与结果投递"
-    status: ready
+    status: in_progress
     goal: "App 运行时定时触发 Pi，重新打开后按策略恢复，并保留每次执行与投递结果。"
     scope:
       in: ["scheduler 时间计划、时区、漏跑与并发规则","AgentService 提交及持久投递接口","Runtime 计划管理 API 和运行历史"]
@@ -650,12 +650,12 @@ tasks:
     investigation_hints: ["新增 scheduler，复用 persistence 与 agent；apps/runtime/src/index.ts 只装配和注册路由","契约由 TASK-011 固定；结果目标采用可注入 delivery 接口，不提前依赖某个平台 SDK","可控时钟行为测试与真实 SQLite 重启测试 → pnpm check → SEA 持久任务冒烟；存储格式变化需兼容验证"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "sol-task016-owner-20260922-72012"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-22T10:21:05.679Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-016"
+      branch: "task/task-016-persistent-scheduler"
       evidence: []
       follow_up_candidates: []
   - id: TASK-017
