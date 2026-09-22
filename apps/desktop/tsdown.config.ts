@@ -5,6 +5,8 @@ export default defineConfig({
     'src/main.ts',
     'src/preload.ts',
     'src/renderer-security.ts',
+    'src/host-event-client.ts',
+    'src/notification-host.ts',
     'src/runtime-manager.ts',
     'src/runtime-updater.ts',
   ],

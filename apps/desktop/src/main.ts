@@ -1,9 +1,11 @@
 import { join } from 'node:path';
 
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, type IpcMainInvokeEvent } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import type { NotificationNavigationTarget } from '@yuanpu-agent/protocol';
 
 import { RuntimeManager } from './runtime-manager.js';
+import { ElectronNotificationHost, type NativeNotification } from './notification-host.js';
 import { isTrustedRendererUrl, packagedRendererUrl } from './renderer-security.js';
 
 let runtime: RuntimeManager;
@@ -11,6 +13,23 @@ let mainWindow: BrowserWindow | undefined;
 let trustedRendererEntry = '';
 let quitInProgress = false;
 let quitAllowed = false;
+let notificationHost: ElectronNotificationHost | undefined;
+let pendingNotificationTarget: NotificationNavigationTarget | undefined;
+let notificationsEnabled = true;
+
+function flushNotificationNavigation(): void {
+  if (!mainWindow || mainWindow.webContents.isLoadingMainFrame() || !pendingNotificationTarget) return;
+  mainWindow.webContents.send('notifications:navigate', pendingNotificationTarget);
+  pendingNotificationTarget = undefined;
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow) createWindow();
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
 
 function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
   if (
@@ -46,6 +65,7 @@ function createWindow(): void {
     },
   });
   mainWindow = window;
+  window.webContents.on('did-finish-load', flushNotificationNavigation);
   window.once('closed', () => {
     if (mainWindow === window) mainWindow = undefined;
   });
@@ -120,7 +140,27 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('error', (error) => console.error('Desktop update failed:', error.message));
-  await runtime.start();
+  const runtimeInfo = await runtime.start();
+  notificationsEnabled = runtimeInfo.notificationsEnabled ?? true;
+  notificationHost = new ElectronNotificationHost({
+    platform: {
+      isSupported: () => Notification.isSupported(),
+      // Electron has no cross-platform built-in permission query. A native `failed`
+      // event is still reported precisely; injected adapters cover known denial states.
+      permissionState: () => 'unknown',
+      create: (options) => new Notification(options) as unknown as NativeNotification,
+    },
+    enabled: () => notificationsEnabled && process.env.YUANPU_NOTIFICATIONS_ENABLED !== '0',
+    validateTarget: (target) => runtime.validateNotificationTarget(target),
+    focus: focusMainWindow,
+    navigate: (target) => {
+      pendingNotificationTarget = target;
+      focusMainWindow();
+      flushNotificationNavigation();
+    },
+    onError: (error) => console.error('Notification activation failed:', error.message),
+  });
+  runtime.connectHostEvents((event) => notificationHost!.handle(event));
   createWindow();
 
   app.on('activate', () => {
@@ -138,6 +178,7 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (quitInProgress) return;
   quitInProgress = true;
+  notificationHost?.stop();
   void Promise.resolve(runtime?.stop()).finally(() => {
     quitAllowed = true;
     app.quit();

@@ -34,6 +34,7 @@ export interface HostEventReceipt {
   eventId: string;
   status: 'accepted' | 'duplicate' | 'unsupported' | 'rejected';
   message?: string;
+  notification?: NotificationReceipt;
 }
 
 export interface NotificationReceipt {
@@ -44,3 +45,14 @@ export interface NotificationReceipt {
   message?: string;
 }
 
+/** Host-validated destination only. It never contains a URL, command, or renderer route. */
+export interface NotificationNavigationTarget {
+  conversationId?: string;
+  runId?: string;
+}
+
+export interface NotificationTargetValidation {
+  valid: boolean;
+  target?: NotificationNavigationTarget;
+  message?: string;
+}

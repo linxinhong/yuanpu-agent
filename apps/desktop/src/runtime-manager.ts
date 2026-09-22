@@ -17,6 +17,10 @@ import {
   type RuntimeGreeting,
   type RuntimeInfo,
   type RuntimeUpdateState,
+  type HostEvent,
+  type HostEventReceipt,
+  type NotificationNavigationTarget,
+  type NotificationTargetValidation,
 } from '@yuanpu-agent/protocol';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
@@ -25,6 +29,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { RuntimeUpdater, type RuntimeActivation } from './runtime-updater.js';
+import { AuthenticatedHostEventClient } from './host-event-client.js';
 
 const DEFAULT_MANIFEST_URL =
   'https://github.com/linxinhong/yuanpu-agent/releases/latest/download/manifest.json';
@@ -59,6 +64,7 @@ export class RuntimeManager {
   private stopPromise?: Promise<void>;
   private restartTimer?: NodeJS.Timeout;
   private activationConfirmationTimer?: NodeJS.Timeout;
+  private hostEventClient?: AuthenticatedHostEventClient;
   private restartAttempts: number[] = [];
   private shouldRun = false;
   private readonly token = randomBytes(32).toString('hex');
@@ -410,6 +416,23 @@ export class RuntimeManager {
     return this.request(RUNTIME_ROUTES.health);
   }
 
+  connectHostEvents(handler: (event: HostEvent) => Promise<HostEventReceipt>): void {
+    if (this.hostEventClient) throw new Error('The Runtime host event connection is already configured.');
+    this.hostEventClient = new AuthenticatedHostEventClient(async () => {
+      const ready = await this.start();
+      return { host: ready.host, port: ready.port, token: this.token };
+    }, handler, { onError: (error) => this.reportError(error) });
+    this.hostEventClient.start();
+  }
+
+  validateNotificationTarget(target: NotificationNavigationTarget): Promise<NotificationTargetValidation> {
+    return this.request(RUNTIME_ROUTES.notificationTargetValidation, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(target),
+    });
+  }
+
   listCapabilityApprovals(): Promise<CapabilityApprovalSummary[]> {
     return this.request(RUNTIME_ROUTES.capabilityApprovals);
   }
@@ -544,6 +567,8 @@ export class RuntimeManager {
 
   async stop(): Promise<void> {
     this.shouldRun = false;
+    await this.hostEventClient?.stop();
+    this.hostEventClient = undefined;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = undefined;
     if (this.activationConfirmationTimer) clearTimeout(this.activationConfirmationTimer);

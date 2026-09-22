@@ -51,6 +51,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
           capabilityClient: this.#options.getCapabilityClient(),
           capabilityContext: {
             sessionId: input.piSessionId,
+            conversationId: input.run.context.conversation.conversationId,
             workspaceId: input.run.context.workspaceId,
             userId: input.run.owner.identity.subjectId,
           },

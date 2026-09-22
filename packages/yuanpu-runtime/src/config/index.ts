@@ -15,6 +15,7 @@ export interface YuanpuConfig {
   catalogUrl?: string;
   baseUrl?: string;
   api?: 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
+  notifications?: { enabled: boolean };
 }
 
 export interface YuanpuHome {
@@ -54,6 +55,10 @@ function validateConfig(value: unknown, configPath: string): YuanpuConfig {
       'anthropic-messages',
       'google-generative-ai',
     ].includes(config.api))
+    || (config.notifications !== undefined && (
+      typeof config.notifications !== 'object'
+      || typeof config.notifications.enabled !== 'boolean'
+    ))
   ) {
     throw new Error(`Invalid Yuanpu config: ${configPath}`);
   }

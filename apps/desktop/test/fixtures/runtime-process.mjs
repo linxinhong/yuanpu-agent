@@ -31,6 +31,7 @@ const server = createServer((request, response) => {
       piVersion: 'fixture',
       mcpTools: [],
       configRoot: '/fixture',
+      notificationsEnabled: true,
     }));
     return;
   }
@@ -49,6 +50,7 @@ server.listen(0, '127.0.0.1', () => {
     piVersion: 'fixture',
     mcpTools: [],
     configRoot: '/fixture',
+    notificationsEnabled: true,
   })}\n`);
   if ((mode === 'crash-once' && startNumber === 1) || mode === 'always-crash') {
     setTimeout(() => {

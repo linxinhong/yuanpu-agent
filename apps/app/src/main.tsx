@@ -15,6 +15,7 @@ import type {
   PluginConfigDocument,
   PluginConfigScope,
   PluginSearchResult,
+  NotificationNavigationTarget,
 } from '@yuanpu-agent/protocol';
 
 import './styles.css';
@@ -816,7 +817,13 @@ function SkillPage({ active }: { active: boolean }) {
   );
 }
 
-function ChatPanel({ active }: { active: boolean }) {
+function ChatPanel({
+  active,
+  navigationTarget,
+}: {
+  active: boolean;
+  navigationTarget?: NotificationNavigationTarget;
+}) {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -937,6 +944,11 @@ function ChatPanel({ active }: { active: boolean }) {
         <div className="runtime-meta">
           <span>Pi {runtime.piVersion}</span>
           <span className="mcp-count">2 个 MCP 元工具</span>
+          {navigationTarget && (
+            <span role="status">
+              已定位到 {navigationTarget.runId ? `任务 ${navigationTarget.runId}` : `会话 ${navigationTarget.conversationId}`}
+            </span>
+          )}
         </div>
       </header>
 
@@ -1010,12 +1022,18 @@ function ChatPanel({ active }: { active: boolean }) {
 function App() {
   const [view, setView] = useState<AppView>('chat');
   const [configRoot, setConfigRoot] = useState('~/.yuanpu');
+  const [notificationTarget, setNotificationTarget] = useState<NotificationNavigationTarget>();
 
   useEffect(() => {
     void window.yuanpu?.runtimeInfo()
       .then((info) => setConfigRoot(info.configRoot))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => window.yuanpu?.onNotificationNavigation((target) => {
+    setNotificationTarget(target);
+    setView('chat');
+  }), []);
 
   return (
     <main className="app-shell">
@@ -1053,7 +1071,7 @@ function App() {
         </div>
       </aside>
 
-      <ChatPanel active={view === 'chat'} />
+      <ChatPanel active={view === 'chat'} navigationTarget={notificationTarget} />
       <SkillPage active={view === 'skills'} />
     </main>
   );
