@@ -568,15 +568,16 @@ async function serve(): Promise<void> {
         let approvalSignal: AbortSignal | undefined;
         try {
           if (!execution) throw new Error('Approved capability execution is no longer available.');
-          if (body.decision === 'approved' && execution.runId) {
-            approvalSignal = agentService.beginApproval(execution.runId, body.requestId);
+          if (execution.runId) {
+            approvalSignal = await agentService.beginApproval(execution.runId, body.requestId);
           }
           await approvals.decide(body.requestId, body.decision);
           if (body.decision === 'denied') {
-            if (execution.runId) {
+            if (execution.runId && approvalSignal) {
               agentService.failApproval(
                 execution.runId,
                 body.requestId,
+                approvalSignal,
                 'Capability approval was denied by the desktop user.',
               );
             }
@@ -599,21 +600,27 @@ async function serve(): Promise<void> {
             .join('\n') || JSON.stringify(result.structuredContent ?? {});
           if (execution.runId) {
             if (result.isError) {
-              agentService.failApproval(execution.runId, body.requestId, message);
+              agentService.failApproval(execution.runId, body.requestId, approvalSignal!, message);
             } else {
-              agentService.completeApproval(execution.runId, body.requestId, {
-                message,
-                tools: [{ name: execution.capabilityId, status: 'completed' }],
-              });
+              agentService.completeApproval(
+                execution.runId,
+                body.requestId,
+                approvalSignal!,
+                {
+                  message,
+                  tools: [{ name: execution.capabilityId, status: 'completed' }],
+                },
+              );
             }
           }
           response.end(JSON.stringify({ requestId: body.requestId, status: 'completed', message }));
         } catch (error) {
-          if (execution?.runId) {
+          if (execution?.runId && approvalSignal) {
             try {
               agentService.failApproval(
                 execution.runId,
                 body.requestId,
+                approvalSignal,
                 error instanceof Error ? error.message : String(error),
               );
             } catch {
@@ -943,8 +950,9 @@ async function serve(): Promise<void> {
   });
 
   const shutdown = () => {
+    const cleaning = cleanup();
     server.close(() => {
-      void cleanup().finally(() => process.exit(0));
+      void cleaning.finally(() => process.exit(0));
     });
   };
   process.once('SIGINT', shutdown);

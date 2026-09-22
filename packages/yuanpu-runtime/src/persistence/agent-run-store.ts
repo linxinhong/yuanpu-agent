@@ -18,7 +18,17 @@ export type PersistedSubmissionResult =
   | { kind: 'idempotency_conflict' }
   | { kind: 'queue_full' }
   | { kind: 'binding_not_found' }
+  | { kind: 'binding_context_conflict' }
   | { kind: 'workspace_conflict' };
+
+interface ConversationBindingRow {
+  binding_id: string;
+  pi_session_id: string;
+  workspace_id: string;
+  namespace: string;
+  conversation_id: string;
+  thread_id: string;
+}
 
 interface AgentRunRow {
   run_id: string;
@@ -155,16 +165,18 @@ export class AgentRunStore {
       const conversation = request.conversation;
       let binding = conversation.sessionBindingId
         ? this.database.prepare(`
-            SELECT binding_id, pi_session_id, workspace_id FROM yp_conversation_bindings
+            SELECT binding_id, pi_session_id, workspace_id, namespace, conversation_id, thread_id
+            FROM yp_conversation_bindings
             WHERE binding_id = ? AND entry_point = ? AND authority_id = ? AND subject_id = ?
           `).get(
             conversation.sessionBindingId,
             request.entryPoint,
             request.identity.authorityId,
             request.identity.subjectId,
-          ) as { binding_id: string; pi_session_id: string; workspace_id: string } | undefined
+          ) as ConversationBindingRow | undefined
         : this.database.prepare(`
-            SELECT binding_id, pi_session_id, workspace_id FROM yp_conversation_bindings
+            SELECT binding_id, pi_session_id, workspace_id, namespace, conversation_id, thread_id
+            FROM yp_conversation_bindings
             WHERE entry_point = ? AND authority_id = ? AND subject_id = ?
               AND namespace = ? AND conversation_id = ? AND thread_id = ?
           `).get(
@@ -174,9 +186,20 @@ export class AgentRunStore {
             conversation.namespace,
             conversation.conversationId,
             conversation.threadId ?? '',
-          ) as { binding_id: string; pi_session_id: string; workspace_id: string } | undefined;
+          ) as ConversationBindingRow | undefined;
 
       if (conversation.sessionBindingId && !binding) return { kind: 'binding_not_found' };
+      if (
+        conversation.sessionBindingId
+        && binding
+        && (
+          binding.namespace !== conversation.namespace
+          || binding.conversation_id !== conversation.conversationId
+          || binding.thread_id !== (conversation.threadId ?? '')
+        )
+      ) {
+        return { kind: 'binding_context_conflict' };
+      }
       if (binding && binding.workspace_id !== request.workspaceId) return { kind: 'workspace_conflict' };
       if (!binding) {
         this.database.prepare(`
@@ -201,6 +224,9 @@ export class AgentRunStore {
           binding_id: input.bindingId,
           pi_session_id: input.piSessionId,
           workspace_id: request.workspaceId,
+          namespace: conversation.namespace,
+          conversation_id: conversation.conversationId,
+          thread_id: conversation.threadId ?? '',
         };
       }
 
@@ -248,7 +274,7 @@ export class AgentRunStore {
       JOIN yp_agent_run_queue_payloads p ON p.run_id = r.run_id
       JOIN yp_conversation_bindings b ON b.binding_id = r.binding_id
       WHERE r.status = 'queued'
-      ORDER BY r.created_at, r.run_id
+      ORDER BY r.created_at, r.rowid
     `).all() as unknown as Array<AgentRunRow & { input_text: string; pi_session_id: string }>;
     return rows.map((row) => ({
       run: rowToRun(row),
@@ -348,6 +374,31 @@ export class AgentRunStore {
     );
     if (result.changes !== 1) throw new Error(`Run ${input.runId} cannot finish from its current state.`);
     return this.get(input.runId)!;
+  }
+
+  interrupt(runId: string, now: string): AgentRunRecord {
+    const run = this.get(runId);
+    if (!run || (run.status !== 'running' && run.status !== 'waiting_approval')) {
+      throw new Error(`Run ${runId} cannot be interrupted from its current state.`);
+    }
+    const status = recoverStatus(run.status, run.externalEffectState);
+    const result = this.database.prepare(`
+      UPDATE yp_agent_runs
+      SET status = ?, failure_code = ?, failure_message = ?, failure_retryable = 0,
+        approval_request_id = NULL, approval_session_id = NULL,
+        approval_workspace_id = NULL, approval_expires_at = NULL, updated_at = ?
+      WHERE run_id = ? AND status IN ('running', 'waiting_approval')
+    `).run(
+      status,
+      status === 'result_unknown' ? 'service_shutdown_result_unknown' : 'service_shutdown_interrupted',
+      status === 'result_unknown'
+        ? 'Runtime stopped after execution began; external effects may have completed.'
+        : 'Runtime stopped before execution began and the run may be retried.',
+      now,
+      runId,
+    );
+    if (result.changes !== 1) throw new Error(`Run ${runId} cannot be interrupted from its current state.`);
+    return this.get(runId)!;
   }
 
   recoverAfterRestart(now: string): AgentRunRecord[] {

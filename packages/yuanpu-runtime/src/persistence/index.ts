@@ -121,6 +121,13 @@ const migrations: readonly Migration[] = [{
       input_text TEXT NOT NULL,
       created_at TEXT NOT NULL
     ) STRICT;
+
+    UPDATE yp_agent_runs
+    SET status = 'interrupted',
+      failure_code = 'migration_payload_unavailable',
+      failure_message = 'Queued input was not retained by metadata schema v1 and cannot be resumed.',
+      failure_retryable = 1
+    WHERE status = 'queued';
   `,
 }];
 

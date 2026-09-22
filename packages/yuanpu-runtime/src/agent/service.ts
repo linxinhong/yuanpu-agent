@@ -77,7 +77,12 @@ export class PersistentAgentService implements AgentService {
   readonly #now: () => Date;
   readonly #createId: () => string;
   readonly #activeBindings = new Set<string>();
+  readonly #waitingBindings = new Map<string, string>();
   readonly #abortControllers = new Map<string, AbortController>();
+  readonly #approvalRuns = new Set<string>();
+  readonly #approvalSettlements = new Map<string, { promise: Promise<void>; resolve(): void }>();
+  readonly #slotWaiters = new Set<() => void>();
+  readonly #subscriptionWaiters = new Set<() => void>();
   readonly #liveOutputs = new Map<string, AgentRunOutput>();
   readonly #subscribers = new Map<string, Set<(run: AgentRunRecord) => void>>();
   readonly #activeWorkers = new Set<Promise<void>>();
@@ -139,6 +144,9 @@ export class PersistentAgentService implements AgentService {
     if (result.kind === 'binding_not_found') {
       return rejection('forbidden', 'The requested session binding does not belong to this caller.');
     }
+    if (result.kind === 'binding_context_conflict') {
+      return rejection('forbidden', 'The requested session binding belongs to another conversation.');
+    }
     if (result.kind === 'workspace_conflict') {
       return rejection('forbidden', 'The conversation is already bound to another workspace.');
     }
@@ -190,16 +198,11 @@ export class PersistentAgentService implements AgentService {
       controller.abort(new Error('Agent run cancelled by its owner.'));
       await this.#approvals?.cancelRun(runId);
     } else if (run.status === 'waiting_approval') {
-      const cancelled = this.#store.finish({
+      const cancelled = this.#finishCancelled(
         runId,
-        status: 'cancelled',
-        now: this.#now().toISOString(),
-        failure: {
-          code: 'cancelled',
-          message: 'Cancelled while waiting for approval; prior side effects were not reversed.',
-          retryable: false,
-        },
-      });
+        'Cancelled while waiting for approval; prior side effects were not reversed.',
+      );
+      this.#releaseApprovalRun(runId);
       this.#emit(cancelled);
       await this.#approvals?.cancelRun(runId);
     }
@@ -230,11 +233,19 @@ export class PersistentAgentService implements AgentService {
           yield value;
           if (isTerminal(value)) return;
         }
+        if (this.#closed) return;
         await new Promise<void>((resolve) => {
-          wake = resolve;
+          const waiter = () => {
+            this.#subscriptionWaiters.delete(waiter);
+            resolve();
+          };
+          wake = waiter;
+          this.#subscriptionWaiters.add(waiter);
+          if (this.#closed) waiter();
         });
       }
     } finally {
+      if (wake) this.#subscriptionWaiters.delete(wake);
       listeners.delete(listener);
       if (listeners.size === 0) this.#subscribers.delete(runId);
     }
@@ -243,10 +254,17 @@ export class PersistentAgentService implements AgentService {
   completeApproval(
     runId: string,
     approvalRequestId: string,
+    approvalSignal: AbortSignal,
     output: AgentRunOutput,
   ): AgentRunRecord {
-    if (this.#abortControllers.get(runId)?.signal.aborted) {
-      this.failApproval(runId, approvalRequestId, 'Approved capability execution was cancelled.');
+    this.#assertApprovalOwner(runId, approvalSignal);
+    if (approvalSignal.aborted) {
+      this.failApproval(
+        runId,
+        approvalRequestId,
+        approvalSignal,
+        'Approved capability execution was cancelled.',
+      );
       throw new Error('Approved capability execution was cancelled.');
     }
     const run = this.#store.get(runId);
@@ -264,13 +282,19 @@ export class PersistentAgentService implements AgentService {
       outputDigest: digest(JSON.stringify(output)),
     });
     const live = { ...completed, output };
-    this.#abortControllers.delete(runId);
+    this.#releaseApprovalRun(runId);
     this.#rememberOutput(runId, output);
     this.#emit(live);
     return live;
   }
 
-  failApproval(runId: string, approvalRequestId: string, message: string): AgentRunRecord {
+  failApproval(
+    runId: string,
+    approvalRequestId: string,
+    approvalSignal: AbortSignal,
+    message: string,
+  ): AgentRunRecord {
+    this.#assertApprovalOwner(runId, approvalSignal);
     const run = this.#store.get(runId);
     if (
       !run
@@ -279,25 +303,39 @@ export class PersistentAgentService implements AgentService {
     ) {
       throw new Error('Approval does not belong to a waiting Agent run.');
     }
-    const cancelled = this.#abortControllers.get(runId)?.signal.aborted === true;
-    const failed = this.#store.finish({
-      runId,
-      status: cancelled ? 'cancelled' : 'failed',
-      now: this.#now().toISOString(),
-      failure: {
-        code: cancelled ? 'cancelled' : 'approval_failed',
-        message: cancelled
-          ? 'Cancelled during approved capability execution; prior side effects were not reversed.'
-          : message,
-        retryable: false,
-      },
-    });
-    this.#abortControllers.delete(runId);
+    const cancelled = approvalSignal.aborted;
+    const failed = cancelled && this.#closed
+      ? this.#store.interrupt(runId, this.#now().toISOString())
+      : this.#store.finish({
+          runId,
+          status: cancelled ? 'cancelled' : 'failed',
+          now: this.#now().toISOString(),
+          failure: {
+            code: cancelled ? 'cancelled' : 'approval_failed',
+            message: cancelled
+              ? 'Cancelled during approved capability execution; prior side effects were not reversed.'
+              : message,
+            retryable: false,
+          },
+        });
+    this.#releaseApprovalRun(runId);
     this.#emit(failed);
     return failed;
   }
 
-  beginApproval(runId: string, approvalRequestId: string): AbortSignal {
+  async beginApproval(runId: string, approvalRequestId: string): Promise<AbortSignal> {
+    const pending = this.#store.get(runId);
+    if (
+      !pending
+      || pending.status !== 'waiting_approval'
+      || pending.pendingApproval?.approvalRequestId !== approvalRequestId
+    ) {
+      throw new Error('Approval does not belong to a waiting Agent run.');
+    }
+    while (!this.#closed && this.#activeExecutionCount() >= this.#maximumConcurrentRuns) {
+      await new Promise<void>((resolve) => this.#slotWaiters.add(resolve));
+    }
+    if (this.#closed) throw new Error('Agent service is shutting down.');
     const run = this.#store.resumeAfterApproval(
       runId,
       approvalRequestId,
@@ -305,6 +343,10 @@ export class PersistentAgentService implements AgentService {
     );
     const controller = new AbortController();
     this.#abortControllers.set(runId, controller);
+    this.#approvalRuns.add(runId);
+    let settle!: () => void;
+    const promise = new Promise<void>((resolve) => { settle = resolve; });
+    this.#approvalSettlements.set(runId, { promise, resolve: settle });
     this.#emit(run);
     return controller.signal;
   }
@@ -321,10 +363,23 @@ export class PersistentAgentService implements AgentService {
 
   async close(): Promise<void> {
     this.#closed = true;
+    for (const wake of [...this.#subscriptionWaiters]) wake();
+    for (const wake of [...this.#slotWaiters]) wake();
+    this.#slotWaiters.clear();
+    for (const runId of [...this.#waitingBindings.keys()]) {
+      if (this.#approvalRuns.has(runId)) continue;
+      const interrupted = this.#store.interrupt(runId, this.#now().toISOString());
+      await this.#approvals?.cancelRun(runId);
+      this.#releaseApprovalRun(runId);
+      this.#emit(interrupted);
+    }
     for (const controller of this.#abortControllers.values()) {
       controller.abort(new Error('Agent service is shutting down.'));
     }
-    await Promise.allSettled([...this.#activeWorkers]);
+    await Promise.allSettled([
+      ...this.#activeWorkers,
+      ...[...this.#approvalSettlements.values()].map((settlement) => settlement.promise),
+    ]);
     await this.#executor.close?.();
   }
 
@@ -342,7 +397,7 @@ export class PersistentAgentService implements AgentService {
   }
 
   #dispatch(): void {
-    while (!this.#closed && this.#activeWorkers.size < this.#maximumConcurrentRuns) {
+    while (!this.#closed && this.#activeExecutionCount() < this.#maximumConcurrentRuns) {
       const next = this.#store.listQueued().find((candidate) => {
         const bindingId = candidate.run.context.conversation.sessionBindingId;
         return bindingId && !this.#activeBindings.has(bindingId);
@@ -354,8 +409,11 @@ export class PersistentAgentService implements AgentService {
       this.#activeBindings.add(bindingId);
       this.#emit(claimed.run);
       const worker = this.#execute(claimed).finally(() => {
-        this.#activeBindings.delete(bindingId);
+        if (!this.#waitingBindings.has(claimed.run.runId)) {
+          this.#activeBindings.delete(bindingId);
+        }
         this.#activeWorkers.delete(worker);
+        this.#notifySlotWaiters();
         this.#scheduleDispatch();
       });
       this.#activeWorkers.add(worker);
@@ -373,16 +431,12 @@ export class PersistentAgentService implements AgentService {
         signal: controller.signal,
       });
       if (controller.signal.aborted) {
-        const cancelled = this.#store.finish({
-          runId: claimed.run.runId,
-          status: 'cancelled',
-          now: this.#now().toISOString(),
-          failure: {
-            code: 'cancelled',
-            message: 'Cancelled during execution; prior side effects were not reversed.',
-            retryable: false,
-          },
-        });
+        const cancelled = this.#closed
+          ? this.#store.interrupt(claimed.run.runId, this.#now().toISOString())
+          : this.#finishCancelled(
+              claimed.run.runId,
+              'Cancelled during execution; prior side effects were not reversed.',
+            );
         await this.#approvals?.cancelRun(claimed.run.runId);
         this.#emit(cancelled);
         return;
@@ -392,6 +446,10 @@ export class PersistentAgentService implements AgentService {
           throw new Error('Capability approval was bound to another Agent run.');
         }
         const waiting = this.#store.markWaitingApproval(result.approval, this.#now().toISOString());
+        this.#waitingBindings.set(
+          claimed.run.runId,
+          claimed.run.context.conversation.sessionBindingId!,
+        );
         this.#rememberOutput(claimed.run.runId, result.output);
         this.#emit({ ...waiting, output: result.output });
         return;
@@ -406,18 +464,23 @@ export class PersistentAgentService implements AgentService {
       this.#emit({ ...completed, output: result.output });
     } catch (error) {
       const cancelled = controller.signal.aborted;
-      const failed = this.#store.finish({
-        runId: claimed.run.runId,
-        status: cancelled ? 'cancelled' : 'failed',
-        now: this.#now().toISOString(),
-        failure: {
-          code: cancelled ? 'cancelled' : 'execution_failed',
-          message: cancelled
-            ? 'Cancelled during execution; prior side effects were not reversed.'
-            : error instanceof Error ? error.message : String(error),
-          retryable: !cancelled,
-        },
-      });
+      const failed = cancelled
+        ? this.#closed
+          ? this.#store.interrupt(claimed.run.runId, this.#now().toISOString())
+          : this.#finishCancelled(
+              claimed.run.runId,
+              'Cancelled during execution; prior side effects were not reversed.',
+            )
+        : this.#store.finish({
+            runId: claimed.run.runId,
+            status: 'failed',
+            now: this.#now().toISOString(),
+            failure: {
+              code: 'execution_failed',
+              message: error instanceof Error ? error.message : String(error),
+              retryable: true,
+            },
+          });
       await this.#approvals?.cancelRun(claimed.run.runId);
       this.#emit(failed);
     } finally {
@@ -432,5 +495,42 @@ export class PersistentAgentService implements AgentService {
       const oldest = this.#liveOutputs.keys().next().value as string | undefined;
       if (oldest) this.#liveOutputs.delete(oldest);
     }
+  }
+
+  #finishCancelled(runId: string, message: string): AgentRunRecord {
+    return this.#store.finish({
+      runId,
+      status: 'cancelled',
+      now: this.#now().toISOString(),
+      failure: { code: 'cancelled', message, retryable: false },
+    });
+  }
+
+  #activeExecutionCount(): number {
+    return this.#activeWorkers.size + this.#approvalRuns.size;
+  }
+
+  #notifySlotWaiters(): void {
+    for (const wake of [...this.#slotWaiters]) wake();
+    this.#slotWaiters.clear();
+  }
+
+  #assertApprovalOwner(runId: string, approvalSignal: AbortSignal): void {
+    if (this.#abortControllers.get(runId)?.signal !== approvalSignal) {
+      throw new Error('Approval execution is not owned by this request.');
+    }
+  }
+
+  #releaseApprovalRun(runId: string): void {
+    this.#abortControllers.delete(runId);
+    this.#approvalRuns.delete(runId);
+    const settlement = this.#approvalSettlements.get(runId);
+    this.#approvalSettlements.delete(runId);
+    settlement?.resolve();
+    const bindingId = this.#waitingBindings.get(runId);
+    this.#waitingBindings.delete(runId);
+    if (bindingId) this.#activeBindings.delete(bindingId);
+    this.#notifySlotWaiters();
+    this.#scheduleDispatch();
   }
 }

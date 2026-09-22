@@ -3,7 +3,7 @@ import {
   type AgentRunExecutionInput,
   type AgentRunExecutionResult,
   type AgentRunExecutor,
-  type CapabilityApprovalStore,
+  type CapabilityApprovalRecord,
   type CapabilityToolClient,
   type CreateYuanpuChatOptions,
   type YuanpuChatSession,
@@ -11,8 +11,9 @@ import {
 
 interface RuntimeAgentExecutorOptions {
   getCapabilityClient(): CapabilityToolClient;
-  approvals: CapabilityApprovalStore;
+  approvals: { get(requestId: string): CapabilityApprovalRecord | undefined };
   sessionsPath: string;
+  maximumPooledSessions?: number;
   chat: Omit<CreateYuanpuChatOptions, 'capabilityClient' | 'capabilityContext' | 'piSession'>;
 }
 
@@ -27,9 +28,14 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
   readonly #sessions = new Map<string, PooledSession>();
   readonly #retired = new Set<PooledSession>();
   readonly #disposals = new Set<Promise<void>>();
+  readonly #maximumPooledSessions: number;
 
   constructor(options: RuntimeAgentExecutorOptions) {
     this.#options = options;
+    this.#maximumPooledSessions = options.maximumPooledSessions ?? 16;
+    if (!Number.isSafeInteger(this.#maximumPooledSessions) || this.#maximumPooledSessions < 1) {
+      throw new Error('maximumPooledSessions must be a positive integer.');
+    }
   }
 
   async execute(input: AgentRunExecutionInput): Promise<AgentRunExecutionResult> {
@@ -51,6 +57,9 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
           piSession: { id: input.piSessionId, directory: this.#options.sessionsPath },
         }),
       };
+      this.#sessions.set(bindingId, pooled);
+    } else {
+      this.#sessions.delete(bindingId);
       this.#sessions.set(bindingId, pooled);
     }
     pooled.active += 1;
@@ -85,6 +94,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
     } finally {
       pooled.active -= 1;
       this.#disposeIfRetired(pooled);
+      this.#retireOverflow();
     }
   }
 
@@ -107,5 +117,17 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
     const disposal = pooled.promise.then((session) => session.dispose(), () => undefined);
     this.#disposals.add(disposal);
     void disposal.finally(() => this.#disposals.delete(disposal));
+  }
+
+  #retireOverflow(): void {
+    while (this.#sessions.size > this.#maximumPooledSessions) {
+      const idle = [...this.#sessions].find(([, pooled]) => pooled.active === 0);
+      if (!idle) return;
+      const [bindingId, pooled] = idle;
+      this.#sessions.delete(bindingId);
+      pooled.retired = true;
+      this.#retired.add(pooled);
+      this.#disposeIfRetired(pooled);
+    }
   }
 }

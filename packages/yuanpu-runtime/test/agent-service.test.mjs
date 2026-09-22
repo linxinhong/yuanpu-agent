@@ -38,8 +38,10 @@ function request(overrides = {}) {
     },
     workspaceId: overrides.workspaceId ?? '/workspace',
     conversation: {
-      namespace: 'desktop',
+      namespace: overrides.namespace ?? 'desktop',
       conversationId: overrides.conversationId ?? 'conversation-1',
+      ...(overrides.threadId ? { threadId: overrides.threadId } : {}),
+      ...(overrides.sessionBindingId ? { sessionBindingId: overrides.sessionBindingId } : {}),
     },
     input: { type: 'text', text: overrides.text ?? 'hello' },
     idempotencyKey: overrides.idempotencyKey ?? 'request-1',
@@ -193,6 +195,33 @@ test('running cancellation records cancellation without claiming that effects we
   database.close();
 });
 
+test('rejects an explicit session binding that names another conversation', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute(input) {
+        return { kind: 'completed', output: { message: input.input, tools: [] } };
+      },
+    },
+  });
+  const first = await service.submit(caller(), request({ idempotencyKey: 'binding-a' }));
+  await service.waitForIdle();
+  const bindingId = (await service.get(caller(), first.runId)).context.conversation.sessionBindingId;
+  const conflict = await service.submit(caller(), request({
+    idempotencyKey: 'binding-b',
+    conversationId: 'conversation-2',
+    sessionBindingId: bindingId,
+  }));
+  assert.deepEqual(conflict, {
+    accepted: false,
+    code: 'forbidden',
+    message: 'The requested session binding belongs to another conversation.',
+  });
+  await service.close();
+  database.close();
+});
+
 test('isolates Pi sessions and failures across identities and workspaces', async () => {
   const database = openYuanpuMetadataDatabase(':memory:');
   const sessions = new Map();
@@ -314,20 +343,171 @@ test('binds approval completion to the original run', async () => {
   const submission = await service.submit(caller(), request());
   await waitUntil(async () => (await service.get(caller(), submission.runId)).status === 'waiting_approval');
   assert.throws(
-    () => service.completeApproval(submission.runId, 'approval-other', { message: 'no', tools: [] }),
-    /does not belong/,
+    () => service.completeApproval(
+      submission.runId,
+      'approval-other',
+      new AbortController().signal,
+      { message: 'no', tools: [] },
+    ),
+    /not owned/,
   );
-  const approvalSignal = service.beginApproval(submission.runId, 'approval-1');
+  const approvalSignal = await service.beginApproval(submission.runId, 'approval-1');
   assert.equal(approvalSignal.aborted, false);
   assert.equal((await service.get(caller(), submission.runId)).status, 'running');
   const completed = service.completeApproval(
     submission.runId,
     'approval-1',
+    approvalSignal,
     { message: 'approved result', tools: [{ name: 'capability', status: 'completed' }] },
   );
   assert.equal(completed.status, 'succeeded');
   assert.equal(completed.output.message, 'approved result');
   await service.close();
+  database.close();
+});
+
+test('holds a conversation binding while waiting and counts approved execution against concurrency', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const starts = [];
+  const otherGate = deferred();
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    maximumConcurrentRuns: 1,
+    executor: {
+      async execute(input) {
+        starts.push(input.run.runId);
+        if (input.run.context.conversation.conversationId === 'conversation-1') {
+          return {
+            kind: 'waiting_approval',
+            approval: {
+              runId: input.run.runId,
+              approvalRequestId: 'approval-held',
+              sessionId: input.piSessionId,
+              workspaceId: input.run.context.workspaceId,
+              expiresAt: '2026-09-22T01:00:00.000Z',
+            },
+            output: { message: 'Approval required', tools: [] },
+          };
+        }
+        await otherGate.promise;
+        return { kind: 'completed', output: { message: 'other', tools: [] } };
+      },
+    },
+  });
+  const waiting = await service.submit(caller(), request({ idempotencyKey: 'waiting' }));
+  await waitUntil(async () => (await service.get(caller(), waiting.runId)).status === 'waiting_approval');
+  const sameBinding = await service.submit(caller(), request({ idempotencyKey: 'same-binding' }));
+  const other = await service.submit(caller(), request({
+    idempotencyKey: 'other-binding', conversationId: 'conversation-2',
+  }));
+  await waitUntil(() => starts.includes(other.runId));
+  assert.equal(starts.includes(sameBinding.runId), false);
+
+  let approvalStarted = false;
+  const approvalPromise = service.beginApproval(waiting.runId, 'approval-held').then((signal) => {
+    approvalStarted = true;
+    return signal;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(approvalStarted, false);
+  otherGate.resolve();
+  const approvalSignal = await approvalPromise;
+  assert.equal(starts.includes(sameBinding.runId), false);
+  service.completeApproval(
+    waiting.runId,
+    'approval-held',
+    approvalSignal,
+    { message: 'approved', tools: [] },
+  );
+  await waitUntil(() => starts.includes(sameBinding.runId));
+  await waitUntil(async () => (await service.get(caller(), sameBinding.runId)).status === 'waiting_approval');
+  const sameSignal = await service.beginApproval(sameBinding.runId, 'approval-held');
+  service.completeApproval(
+    sameBinding.runId,
+    'approval-held',
+    sameSignal,
+    { message: 'approved again', tools: [] },
+  );
+  await service.close();
+  database.close();
+});
+
+test('grants a single approval execution owner under concurrent decisions', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute(input) {
+        return {
+          kind: 'waiting_approval',
+          approval: {
+            runId: input.run.runId,
+            approvalRequestId: 'approval-owner',
+            sessionId: input.piSessionId,
+            workspaceId: input.run.context.workspaceId,
+            expiresAt: '2026-09-22T01:00:00.000Z',
+          },
+          output: { message: 'Approval required', tools: [] },
+        };
+      },
+    },
+  });
+  const submission = await service.submit(caller(), request());
+  await waitUntil(async () => (await service.get(caller(), submission.runId)).status === 'waiting_approval');
+  const decisions = await Promise.allSettled([
+    service.beginApproval(submission.runId, 'approval-owner'),
+    service.beginApproval(submission.runId, 'approval-owner'),
+  ]);
+  assert.equal(decisions.filter((decision) => decision.status === 'fulfilled').length, 1);
+  assert.equal(decisions.filter((decision) => decision.status === 'rejected').length, 1);
+  const winner = decisions.find((decision) => decision.status === 'fulfilled').value;
+  assert.throws(
+    () => service.failApproval(
+      submission.runId,
+      'approval-owner',
+      new AbortController().signal,
+      'losing decision',
+    ),
+    /not owned/,
+  );
+  service.completeApproval(
+    submission.runId,
+    'approval-owner',
+    winner,
+    { message: 'winner', tools: [] },
+  );
+  assert.equal((await service.get(caller(), submission.runId)).status, 'succeeded');
+  await service.close();
+  database.close();
+});
+
+test('shutdown records active work as result unknown, preserves queued work, and closes subscribers', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const started = deferred();
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    maximumConcurrentRuns: 1,
+    executor: {
+      async execute(input) {
+        started.resolve();
+        await new Promise((resolve, reject) => {
+          input.signal.addEventListener('abort', () => reject(input.signal.reason), { once: true });
+        });
+      },
+    },
+  });
+  const active = await service.submit(caller(), request({ idempotencyKey: 'active' }));
+  const queued = await service.submit(caller(), request({
+    idempotencyKey: 'queued', conversationId: 'conversation-2',
+  }));
+  await started.promise;
+  const subscription = service.subscribe(caller(), queued.runId)[Symbol.asyncIterator]();
+  assert.equal((await subscription.next()).value.status, 'queued');
+  const pending = subscription.next();
+  await service.close();
+  assert.deepEqual(await pending, { value: undefined, done: true });
+  assert.equal((await service.get(caller(), active.runId)).status, 'result_unknown');
+  assert.equal((await service.get(caller(), queued.runId)).status, 'queued');
   database.close();
 });
 
@@ -354,13 +534,14 @@ test('orders approval execution against cancellation and records uncertain side 
   });
   const submission = await service.submit(caller(), request());
   await waitUntil(async () => (await service.get(caller(), submission.runId)).status === 'waiting_approval');
-  const signal = service.beginApproval(submission.runId, 'approval-race');
+  const signal = await service.beginApproval(submission.runId, 'approval-race');
   const receipt = await service.cancel(caller(), submission.runId);
   assert.equal(receipt.result, 'cancellation_requested');
   assert.equal(signal.aborted, true);
   const cancelled = service.failApproval(
     submission.runId,
     'approval-race',
+    signal,
     'Capability call observed cancellation.',
   );
   assert.equal(cancelled.status, 'cancelled');

@@ -176,6 +176,15 @@ test('migration upgrades a schema-v1 run database without losing records', async
       '${'a'.repeat(64)}', '${'b'.repeat(64)}', '{}', 'succeeded',
       'possible', 'fixture', 'fixture'
     );
+    INSERT INTO yp_agent_runs(
+      run_id, entry_point, authority_id, subject_id, idempotency_key,
+      request_fingerprint, input_digest, request_metadata_json, status,
+      external_effect_state, created_at, updated_at
+    ) VALUES (
+      'v1-queued', 'desktop', 'desktop', 'user', 'queued-request',
+      '${'c'.repeat(64)}', '${'d'.repeat(64)}', '{}', 'queued',
+      'none', 'fixture', 'fixture'
+    );
   `);
   v1.close();
 
@@ -186,6 +195,17 @@ test('migration upgrades a schema-v1 run database without losing records', async
   assert.equal(inspection.prepare(
     'SELECT status FROM yp_agent_runs WHERE run_id = ?',
   ).get('v1-run').status, 'succeeded');
+  const migratedQueued = inspection.prepare(`
+    SELECT status, failure_code, failure_message, failure_retryable
+    FROM yp_agent_runs WHERE run_id = ?
+  `).get('v1-queued');
+  assert.equal(migratedQueued.status, 'interrupted');
+  assert.equal(migratedQueued.failure_code, 'migration_payload_unavailable');
+  assert.equal(
+    migratedQueued.failure_message,
+    'Queued input was not retained by metadata schema v1 and cannot be resumed.',
+  );
+  assert.equal(migratedQueued.failure_retryable, 1);
   const columns = inspection.prepare('PRAGMA table_info(yp_agent_runs)').all().map((row) => row.name);
   assert.equal(columns.includes('failure_message'), true);
   assert.equal(columns.includes('failure_retryable'), true);
