@@ -699,7 +699,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-018
     title: "实现首个 IM 对话渠道"
-    status: ready
+    status: in_progress
     goal: "可信 IM 用户能通过机器人操作本机 Pi 并收到原会话回复。"
     scope:
       in: ["channels 共用路由及一个内置 adapter","配对、收发、消息去重、断线重连和取消","以持久队列实现回复发送与失败记录"]
@@ -723,12 +723,12 @@ tasks:
     investigation_hints: ["packages/yuanpu-runtime/src/channels/adapters 为新增入口；复用 agent、persistence；apps/runtime 负责装配","收到消息须使用平台认证上下文，不能信任正文自报 sender；记忆/工作区按配对策略选择","协议 fixture/重放/错误身份测试 → pnpm check → 真实测试机器人双会话收发；依赖 SEA 打包检查"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "sol-task018-owner-72012"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-22T12:22:50.706Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-018"
+      branch: "task/task-018-wecom-channel"
       evidence: []
       follow_up_candidates: []
   - id: TASK-019
