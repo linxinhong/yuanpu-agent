@@ -232,6 +232,27 @@ test('a real unresponsive process does not hide a healthy Python MCP source', as
   assert.match(result.failures?.[0]?.message ?? '', /initialization failed|timeout/i);
 });
 
+test('close interrupts an MCP process that is still stuck in initialization', async () => {
+  const source = pythonSource({
+    sourceInstanceId: 'test.initialization-close',
+    command: process.execPath,
+    args: ['-e', 'setInterval(() => undefined, 60000)'],
+    initializationTimeoutMs: 1_000,
+  });
+  const connecting = source.list({});
+  let pid = source.processId;
+  for (let attempt = 0; !pid && attempt < 50; attempt += 1) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    pid = source.processId;
+  }
+  assert.ok(pid);
+  const startedAt = Date.now();
+  await source.close();
+  assert.ok(Date.now() - startedAt < 500, 'close waited for the initialization timeout');
+  await assert.rejects(connecting, /initialization failed|closing|closed/i);
+  assert.throws(() => process.kill(pid, 0));
+});
+
 test('tool discovery timeout terminates the initialized MCP process', async () => {
   const fixture = resolve('test/fixtures/hanging-list-tools.mjs');
   const source = pythonSource({

@@ -307,6 +307,9 @@ export class ManagedMcpCapabilitySource {
       const appData = join(this.#options.privateHome, 'app-data');
       const localAppData = join(this.#options.privateHome, 'local-app-data');
       await Promise.all([mkdir(appData, { recursive: true }), mkdir(localAppData, { recursive: true })]);
+      if (this.#closing) {
+        throw new ManagedMcpSourceError('unavailable', 'MCP source is closing.');
+      }
       const isolatedEnv: Record<string, string> = {
         ...this.#options.env,
         HOME: this.#options.privateHome,
@@ -341,6 +344,7 @@ export class ManagedMcpCapabilitySource {
         env: isolatedEnv,
       });
       const client = new Client({ name: 'yuanpu-agent', version: '0.1.0' });
+      this.#transport = transport;
       transport.onclose = () => {
         if (this.#transport === transport) {
           this.#transport = undefined;
@@ -352,11 +356,15 @@ export class ManagedMcpCapabilitySource {
       transport.onerror = () => undefined;
       try {
         await client.connect(transport, { timeout: this.#options.initializationTimeoutMs });
-        this.#transport = transport;
+        if (this.#closing) {
+          await transport.close();
+          throw new ManagedMcpSourceError('unavailable', 'MCP source is closing.');
+        }
         this.#client = client;
         return client;
       } catch (error) {
         await transport.close().catch(() => undefined);
+        if (this.#transport === transport) this.#transport = undefined;
         const message = error instanceof Error ? error.message : String(error);
         throw new ManagedMcpSourceError(
           /timeout/i.test(message) ? 'timeout' : 'unavailable',
@@ -474,6 +482,9 @@ export class ManagedMcpCapabilitySource {
 
   async close(): Promise<void> {
     this.#closing = true;
+    // A transport is published before MCP initialization completes. Close it
+    // first so an unresponsive initialize handshake cannot outlive the App.
+    await this.#transport?.close().catch(() => undefined);
     await this.#connecting?.catch(() => undefined);
     const client = this.#client;
     const transport = this.#transport;
