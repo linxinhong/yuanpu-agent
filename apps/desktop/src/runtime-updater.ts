@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { PROTOCOL_VERSION, type RuntimeUpdateState } from '@yuanpu-agent/protocol';
@@ -9,6 +9,11 @@ import { PROTOCOL_VERSION, type RuntimeUpdateState } from '@yuanpu-agent/protoco
 const execFileAsync = promisify(execFile);
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const MAX_RUNTIME_BYTES = 512 * 1024 * 1024;
+const DATABASE_FILES: ReadonlyArray<readonly [suffix: string, backupName: string]> = [
+  ['', 'database'],
+  ['-wal', 'database-wal'],
+  ['-shm', 'database-shm'],
+];
 
 interface RuntimeArtifact {
   filename: string;
@@ -31,11 +36,29 @@ interface StagedRuntime {
   sha256: string;
 }
 
+interface CurrentRuntime {
+  version: string;
+  executable: string;
+}
+
+interface PendingActivation {
+  previous: CurrentRuntime | null;
+  activated: CurrentRuntime;
+  databaseBackup: boolean;
+}
+
+export interface RuntimeActivation {
+  executable: string;
+  version?: string;
+  pending: boolean;
+}
+
 export interface RuntimeUpdaterOptions {
   runtimeRoot: string;
   desktopVersion: string;
   platform?: NodeJS.Platform;
   arch?: string;
+  metadataDatabasePath?: string;
 }
 
 function versionParts(version: string): number[] {
@@ -54,6 +77,17 @@ export function compareRuntimeVersions(left: string, right: string): number {
 
 function normalizedExecutableVersion(stdout: string): string {
   return stdout.trim().replace(/^v/, '');
+}
+
+function isCurrentRuntime(value: unknown): value is CurrentRuntime {
+  const runtime = value as Partial<CurrentRuntime> | null;
+  return Boolean(
+    runtime
+    && typeof runtime.version === 'string'
+    && VERSION_PATTERN.test(runtime.version)
+    && typeof runtime.executable === 'string'
+    && runtime.executable,
+  );
 }
 
 export class RuntimeUpdater {
@@ -77,6 +111,83 @@ export class RuntimeUpdater {
     return this.platform === 'win32' ? 'runtime.exe' : 'runtime';
   }
 
+  private get currentPath(): string {
+    return join(this.options.runtimeRoot, 'current.json');
+  }
+
+  private get pendingActivationPath(): string {
+    return join(this.options.runtimeRoot, 'activation-pending.json');
+  }
+
+  private get databaseBackupRoot(): string {
+    return join(this.options.runtimeRoot, 'activation-database-backup');
+  }
+
+  private async pathExists(path: string): Promise<boolean> {
+    try {
+      await lstat(path);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
+  private async backupMetadataDatabase(): Promise<boolean> {
+    const databasePath = this.options.metadataDatabasePath;
+    await rm(this.databaseBackupRoot, { recursive: true, force: true });
+    if (!databasePath || !await this.pathExists(databasePath)) return false;
+    if ((await lstat(databasePath)).isSymbolicLink()) {
+      throw new Error('Refusing to back up a symbolic-link metadata database.');
+    }
+    await mkdir(this.databaseBackupRoot, { recursive: true });
+    for (const [suffix, name] of DATABASE_FILES) {
+      const source = `${databasePath}${suffix}`;
+      if (await this.pathExists(source)) await copyFile(source, join(this.databaseBackupRoot, name));
+    }
+    return true;
+  }
+
+  private async restoreMetadataDatabase(required: boolean): Promise<void> {
+    if (!required) {
+      await rm(this.databaseBackupRoot, { recursive: true, force: true });
+      return;
+    }
+    const databasePath = this.options.metadataDatabasePath;
+    const databaseBackup = join(this.databaseBackupRoot, 'database');
+    if (!databasePath || !await this.pathExists(databaseBackup)) {
+      throw new Error('Runtime rollback database backup is unavailable.');
+    }
+    await mkdir(dirname(databasePath), { recursive: true });
+    for (const [suffix, name] of DATABASE_FILES) {
+      const backup = join(this.databaseBackupRoot, name);
+      const destination = `${databasePath}${suffix}`;
+      if (!await this.pathExists(backup)) {
+        await rm(destination, { force: true });
+        continue;
+      }
+      const temporary = `${destination}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+      try {
+        await copyFile(backup, temporary);
+        await rename(temporary, destination);
+      } finally {
+        await rm(temporary, { force: true });
+      }
+    }
+    await rm(this.databaseBackupRoot, { recursive: true, force: true });
+  }
+
+  private async writeJsonAtomically(path: string, value: unknown): Promise<void> {
+    await mkdir(this.options.runtimeRoot, { recursive: true });
+    const temporary = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
+      await rename(temporary, path);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
+
   private async validateExecutable(path: string, version: string): Promise<void> {
     if (this.platform !== 'win32') await chmod(path, 0o755);
     const { stdout } = await execFileAsync(path, ['--version'], { timeout: 10_000 });
@@ -85,15 +196,45 @@ export class RuntimeUpdater {
     }
   }
 
-  private async managedExecutable(): Promise<string | undefined> {
+  private async currentRuntime(): Promise<CurrentRuntime | undefined> {
     try {
-      const current = JSON.parse(
-        await readFile(join(this.options.runtimeRoot, 'current.json'), 'utf8'),
-      ) as { executable?: unknown };
-      return typeof current.executable === 'string' ? current.executable : undefined;
+      const current = JSON.parse(await readFile(this.currentPath, 'utf8')) as Partial<CurrentRuntime>;
+      return isCurrentRuntime(current)
+        ? { version: current.version, executable: current.executable }
+        : undefined;
     } catch {
       return undefined;
     }
+  }
+
+  private async pendingActivation(): Promise<PendingActivation | undefined> {
+    try {
+      const pending = JSON.parse(
+        await readFile(this.pendingActivationPath, 'utf8'),
+      ) as Partial<PendingActivation>;
+      if (!isCurrentRuntime(pending.activated)) return undefined;
+      if (pending.previous !== null && !isCurrentRuntime(pending.previous)) return undefined;
+      if (typeof pending.databaseBackup !== 'boolean') return undefined;
+      return {
+        previous: pending.previous ?? null,
+        activated: pending.activated,
+        databaseBackup: pending.databaseBackup,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async recoverUnconfirmedActivation(): Promise<void> {
+    const pending = await this.pendingActivation();
+    if (!pending) {
+      await rm(this.pendingActivationPath, { force: true });
+      return;
+    }
+    await this.restoreMetadataDatabase(pending.databaseBackup);
+    if (pending.previous) await this.writeJsonAtomically(this.currentPath, pending.previous);
+    else await rm(this.currentPath, { force: true });
+    await rm(this.pendingActivationPath, { force: true });
   }
 
   private async promoteStaged(): Promise<void> {
@@ -130,27 +271,58 @@ export class RuntimeUpdater {
       await rename(stagedPath, destination);
       if (this.platform !== 'win32') await chmod(destination, 0o755);
 
-      const currentPath = join(this.options.runtimeRoot, 'current.json');
-      const temporaryCurrent = `${currentPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-      try {
-        await writeFile(
-          temporaryCurrent,
-          `${JSON.stringify({ version: staged.version, executable: destination }, null, 2)}\n`,
-          { flag: 'wx' },
-        );
-        await rename(temporaryCurrent, currentPath);
-      } finally {
-        await rm(temporaryCurrent, { force: true });
-      }
+      const previous = await this.currentRuntime();
+      const activated = { version: staged.version, executable: destination };
+      const databaseBackup = await this.backupMetadataDatabase();
+      await this.writeJsonAtomically(
+        this.pendingActivationPath,
+        { previous: previous ?? null, activated, databaseBackup },
+      );
+      await this.writeJsonAtomically(this.currentPath, activated);
       await rm(this.stagingRoot, { recursive: true, force: true });
     } catch {
       await rm(this.stagingRoot, { recursive: true, force: true });
     }
   }
 
-  async activate(fallbackExecutable: string): Promise<string> {
+  async prepareActivation(fallbackExecutable: string): Promise<RuntimeActivation> {
+    // A previous launch that never confirmed health is treated as failed before
+    // considering another staged update. This keeps crash loops on the last
+    // known-good Runtime instead of repeatedly retrying an unconfirmed binary.
+    await this.recoverUnconfirmedActivation();
     await this.promoteStaged();
-    return (await this.managedExecutable()) ?? fallbackExecutable;
+    const current = await this.currentRuntime();
+    const pending = await this.pendingActivation();
+    return {
+      executable: current?.executable ?? fallbackExecutable,
+      ...(current ? { version: current.version } : {}),
+      pending: Boolean(pending && pending.activated.executable === current?.executable),
+    };
+  }
+
+  async confirmActivation(executable: string): Promise<void> {
+    const pending = await this.pendingActivation();
+    if (!pending || pending.activated.executable !== executable) return;
+    await rm(this.pendingActivationPath, { force: true });
+    await rm(this.databaseBackupRoot, { recursive: true, force: true });
+  }
+
+  async rollbackActivation(executable: string): Promise<string | undefined> {
+    const pending = await this.pendingActivation();
+    if (!pending || pending.activated.executable !== executable) {
+      return (await this.currentRuntime())?.executable;
+    }
+    await this.restoreMetadataDatabase(pending.databaseBackup);
+    if (pending.previous) await this.writeJsonAtomically(this.currentPath, pending.previous);
+    else await rm(this.currentPath, { force: true });
+    await rm(this.pendingActivationPath, { force: true });
+    return pending.previous?.executable;
+  }
+
+  async activate(fallbackExecutable: string): Promise<string> {
+    const activation = await this.prepareActivation(fallbackExecutable);
+    await this.confirmActivation(activation.executable);
+    return activation.executable;
   }
 
   async stage(currentVersion: string, manifestUrl: string): Promise<RuntimeUpdateState> {

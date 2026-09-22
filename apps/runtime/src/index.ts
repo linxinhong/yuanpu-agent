@@ -41,6 +41,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { RuntimeAgentExecutor } from './agent-runtime.js';
+import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 
 declare const __APP_VERSION__: string;
 
@@ -52,6 +53,7 @@ const execFileAsync = promisify(execFile);
 interface RuntimeBootstrap {
   token: string;
   approvalPublicKey: string;
+  parentPid: number;
 }
 
 async function readBootstrap(): Promise<RuntimeBootstrap> {
@@ -68,10 +70,16 @@ async function readBootstrap(): Promise<RuntimeBootstrap> {
     || value.token.length < 32
     || typeof value.approvalPublicKey !== 'string'
     || !value.approvalPublicKey
+    || !Number.isSafeInteger(value.parentPid)
+    || Number(value.parentPid) <= 1
   ) {
     throw new Error('Runtime bootstrap credentials are invalid');
   }
-  return { token: value.token, approvalPublicKey: value.approvalPublicKey };
+  return {
+    token: value.token,
+    approvalPublicKey: value.approvalPublicKey,
+    parentPid: Number(value.parentPid),
+  };
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -189,6 +197,56 @@ async function capabilitySmoke(): Promise<void> {
   }
 }
 
+async function capabilityLifecycleSmoke(parentPid: number): Promise<void> {
+  const privateHome = await mkdtemp(join(tmpdir(), 'yuanpu-mcp-lifecycle-'));
+  const pythonSource = createConfiguredPythonSource(privateHome);
+  if (!pythonSource) {
+    await rm(privateHome, { recursive: true, force: true });
+    throw new Error('Capability lifecycle smoke requires a configured MCP executable and root.');
+  }
+  let parentMonitor: ParentProcessMonitor | undefined;
+  let closing: Promise<void> | undefined;
+  const close = () => {
+    if (closing) return;
+    const forcedExit = setTimeout(() => process.exit(1), 5_000);
+    forcedExit.unref();
+    closing = pythonSource.close()
+      .finally(() => rm(privateHome, { recursive: true, force: true }))
+      .finally(() => {
+        parentMonitor?.dispose();
+        clearTimeout(forcedExit);
+        process.exit(0);
+      });
+  };
+  try {
+    const tools = await pythonSource.list({});
+    const spawnTool = tools.find((tool) => tool.name === 'yuanpu_spawn_child');
+    if (!spawnTool) throw new Error('Lifecycle smoke MCP did not expose yuanpu_spawn_child.');
+    const result = await pythonSource.execute({
+      capabilityId: spawnTool.name,
+      originalName: spawnTool.name,
+      arguments: {},
+    }, {});
+    const descendantPid = result?.structuredContent?.pid;
+    if (typeof descendantPid !== 'number') {
+      throw new Error('Lifecycle smoke MCP did not report its descendant PID.');
+    }
+    parentMonitor = installParentProcessMonitor(parentPid, close);
+    process.once('SIGINT', close);
+    process.once('SIGTERM', close);
+    console.log(JSON.stringify({
+      event: 'ready',
+      runtimePid: process.pid,
+      mcpPid: pythonSource.processId,
+      descendantPid,
+    }));
+  } catch (error) {
+    await pythonSource.close().catch(() => undefined);
+    await rm(privateHome, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 function sqliteSmoke(path: string | undefined): void {
   if (!path) throw new Error('--sqlite-smoke requires an explicit database path.');
   const database = openYuanpuMetadataDatabase(resolve(path));
@@ -227,7 +285,7 @@ function readConfigInput(value: unknown): PluginConfigInput {
 async function serve(): Promise<void> {
   const portIndex = args.indexOf('--port');
   const requestedPort = portIndex >= 0 ? Number(args[portIndex + 1]) : 0;
-  const { token, approvalPublicKey } = await readBootstrap();
+  const { token, approvalPublicKey, parentPid } = await readBootstrap();
   const approvalVerificationKey = createPublicKey({
     key: Buffer.from(approvalPublicKey, 'base64'),
     format: 'der',
@@ -424,9 +482,17 @@ async function serve(): Promise<void> {
     throw new Error('Agent run is not available to the desktop caller.');
   };
 
+  let shuttingDown = false;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     response.setHeader('content-type', 'application/json; charset=utf-8');
+
+    if (shuttingDown) {
+      response.statusCode = 503;
+      response.setHeader('connection', 'close');
+      response.end(JSON.stringify({ error: 'Runtime is shutting down.' }));
+      return;
+    }
 
     if (request.headers.authorization !== `Bearer ${token}`) {
       response.statusCode = 401;
@@ -934,6 +1000,45 @@ async function serve(): Promise<void> {
     void cleanup();
   });
 
+  let parentMonitor: ParentProcessMonitor | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = () => {
+    shuttingDown = true;
+    if (shutdownPromise) return;
+    const forcedExit = setTimeout(() => process.exit(1), 7_500);
+    forcedExit.unref();
+    shutdownPromise = (async () => {
+      parentMonitor?.dispose();
+      let drained = false;
+      const closeServer = new Promise<void>((resolveClose) => {
+        try {
+          server.close(() => {
+            drained = true;
+            resolveClose();
+          });
+        } catch {
+          drained = true;
+          resolveClose();
+        }
+      });
+      const drainTimeout = new Promise<void>((resolveTimeout) => {
+        const timeout = setTimeout(resolveTimeout, 5_000);
+        timeout.unref();
+      });
+      await Promise.race([closeServer, drainTimeout]);
+      if (!drained) server.closeAllConnections();
+      const cleanupTimeout = new Promise<void>((resolveTimeout) => {
+        const timeout = setTimeout(resolveTimeout, 2_000);
+        timeout.unref();
+      });
+      await Promise.race([cleanup(), cleanupTimeout]);
+    })().finally(() => {
+      clearTimeout(forcedExit);
+      process.exit(0);
+    });
+  };
+
+  parentMonitor = installParentProcessMonitor(parentPid, shutdown);
   server.listen(requestedPort, '127.0.0.1', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Runtime did not bind a TCP port');
@@ -950,13 +1055,6 @@ async function serve(): Promise<void> {
       }),
     );
   });
-
-  const shutdown = () => {
-    const cleaning = cleanup();
-    server.close(() => {
-      void cleaning.finally(() => process.exit(0));
-    });
-  };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 }
@@ -970,6 +1068,13 @@ if (args.includes('--version') || args.includes('-v')) {
   });
 } else if (args.includes('--capability-smoke')) {
   void capabilitySmoke().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+} else if (args.includes('--capability-lifecycle-smoke')) {
+  const parentPidIndex = args.indexOf('--parent-pid');
+  const parentPid = Number(args[parentPidIndex + 1]);
+  void capabilityLifecycleSmoke(parentPid).catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });

@@ -81,7 +81,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
       YUANPU_PYTHON_MCP_ROOT: '',
     },
   });
-  child.stdin.end(`${JSON.stringify({ token, approvalPublicKey })}\n`);
+  child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
   context.after(async () => {
     child.kill();
     await rm(home, { recursive: true, force: true });
