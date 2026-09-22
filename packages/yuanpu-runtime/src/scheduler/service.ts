@@ -314,6 +314,7 @@ export class PersistentScheduler {
   #reserveDue(schedule: ScheduleRecord, now: Date): void {
     if (!schedule.nextTriggerAt) return;
     let occurrence = new Date(schedule.nextTriggerAt);
+    const originallyDue = occurrence;
     const oldestAllowed = new Date(now.getTime() - schedule.maximumLatenessMs);
     if (occurrence < oldestAllowed) {
       if (schedule.timing.kind === 'once' || schedule.misfirePolicy === 'skip') {
@@ -337,7 +338,17 @@ export class PersistentScheduler {
       );
     }
 
-    if (occurrence > now) return;
+    if (occurrence > now) {
+      this.#store.reserveTrigger({
+        schedule,
+        scheduledAt: originallyDue.toISOString(),
+        nextTriggerAt: occurrence.toISOString(),
+        request: this.#requestFor(schedule, originallyDue),
+        now: now.toISOString(),
+        skipMisfire: true,
+      });
+      return;
+    }
     let selected = occurrence;
     let next = followingOccurrence(schedule.timing, schedule.timeZone, selected);
     let iterations = 0;

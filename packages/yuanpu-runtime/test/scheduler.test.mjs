@@ -270,6 +270,72 @@ test('history exposes execution failures and waiting approval without retrying e
   metadata.close();
 });
 
+test('coalesce advances a sparse cron schedule when no missed occurrence remains inside the bound', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-sparse-misfire-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  let now = new Date('2026-09-22T23:59:00.000Z');
+  let executions = 0;
+  let metadata = openYuanpuMetadataDatabase(path);
+  let agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: {
+      async execute() {
+        executions += 1;
+        return { kind: 'completed', output: { message: '', tools: [] } };
+      },
+    },
+    now: () => now,
+  });
+  let scheduler = await PersistentScheduler.open({
+    store: metadata.schedules,
+    agent,
+    caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true,
+    now: () => now,
+    scanIntervalMs: 60_000,
+  });
+  const schedule = scheduler.create(scheduleInput({
+    timing: { kind: 'cron', expression: '0 0 * * *' },
+    maximumLatenessMs: 60_000,
+  }));
+  assert.equal(schedule.nextTriggerAt, '2026-09-23T00:00:00.000Z');
+  await scheduler.close();
+  await agent.close();
+  metadata.close();
+
+  now = new Date('2026-09-23T12:00:00.000Z');
+  metadata = openYuanpuMetadataDatabase(path);
+  agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: {
+      async execute() {
+        executions += 1;
+        return { kind: 'completed', output: { message: '', tools: [] } };
+      },
+    },
+    now: () => now,
+  });
+  scheduler = await PersistentScheduler.open({
+    store: metadata.schedules,
+    agent,
+    caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true,
+    now: () => now,
+    scanIntervalMs: 60_000,
+  });
+  assert.equal(executions, 0);
+  assert.equal(scheduler.history(schedule.scheduleId)[0].triggerStatus, 'skipped_misfire');
+  assert.equal(scheduler.get(schedule.scheduleId).nextTriggerAt, '2026-09-24T00:00:00.000Z');
+  await scheduler.tick();
+  assert.equal(scheduler.history(schedule.scheduleId).length, 1);
+  await scheduler.close();
+  await agent.close();
+  metadata.close();
+});
+
 test('delivery retries reuse one key while unknown Agent results are never resubmitted', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-delivery-'));
   context.after(() => rm(root, { recursive: true, force: true }));
