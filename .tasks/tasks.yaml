@@ -463,7 +463,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-012
     title: "实现多会话与持久任务执行"
-    status: ready
+    status: in_progress
     goal: "不同入口能提交、查询和取消独立会话中的任务，重启后保留可解释的执行状态。"
     scope:
       in: ["agent 与 persistence 实现、Pi 会话映射","现有桌面对话和 Runtime HTTP 消费者适配","现有审批绑定至 run 并恢复等待状态"]
@@ -487,12 +487,12 @@ tasks:
     investigation_hints: ["packages/yuanpu-runtime/src/agent、persistence、pi 和 capabilities/approval.ts；apps/runtime/src/index.ts getChat/resetChat/chat 路由","先落实 TASK-011 状态机；Pi 对话由公开 API 持久化，Yuanpu 不复制对话存储","新增行为测试归入 packages/yuanpu-runtime/test 与 apps/runtime/test；事务竞争、取消与崩溃恢复测试后运行 pnpm check"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "sol-owner-task-012-92584-72012"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-22T08:00:13.834Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-012"
+      branch: "task/task-012-multi-session"
       evidence: []
       follow_up_candidates: []
   - id: TASK-013
