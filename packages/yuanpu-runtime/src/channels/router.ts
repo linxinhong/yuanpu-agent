@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
-import { AGENT_CONTRACT_VERSION, type AgentRunRecord } from '@yuanpu-agent/protocol';
+import {
+  AGENT_CONTRACT_VERSION,
+  type AgentRunRecord,
+  type AgentRunSubmissionResult,
+} from '@yuanpu-agent/protocol';
 
 import type { AgentService, AuthenticatedAgentCaller } from '../agent/contracts.js';
 import type { ChannelStore, ChannelInboundRoute } from './store.js';
@@ -39,6 +43,10 @@ export class ChannelRouter {
   readonly #now: () => Date;
   readonly #createId: () => string;
   readonly #watching = new Set<string>();
+  readonly #watchingPromises = new Set<Promise<void>>();
+  readonly #inboundPromises = new Set<Promise<void>>();
+  readonly #watchAbort = new AbortController();
+  #recoveryPromise: Promise<void> = Promise.resolve();
   #closed = false;
 
   constructor(options: ChannelRouterOptions) {
@@ -52,22 +60,34 @@ export class ChannelRouter {
 
   start(): void {
     if (this.#closed) throw new Error('Channel router is closed.');
+    this.#store.bindConnection({
+      provider: 'wecom',
+      connectionId: this.#config.connectionId,
+      providerAccountDigest: digestChannelValue(
+        this.#config.connectionId,
+        'account',
+        this.#config.providerAccountRef,
+      ),
+      credentialBindingDigest: this.#config.credentialBindingDigest,
+      now: this.#now().toISOString(),
+    });
     for (const digest of this.#config.pairedSenderDigests) {
       this.#store.pair('wecom', this.#config.connectionId, digest, this.#now().toISOString());
     }
     this.#store.markDeliveringUnknown('wecom', this.#config.connectionId, this.#now().toISOString());
-    for (const inbound of this.#store.recoverableInbound('wecom', this.#config.connectionId)) {
-      if (inbound.runId) this.#watch(inbound, this.#caller(inbound.conversationDigest));
-    }
-    this.#transport.connect((message) => {
-      void this.handleInbound(message);
+    this.#transport.connect(async (message) => {
+      await this.handleInbound(message);
     });
+    this.#recoveryPromise = this.#transport.ready().then(() => this.#recoverAfterReady());
+    this.#trackInbound(this.#recoveryPromise);
   }
 
   async handleInbound(message: NormalizedChannelMessage): Promise<ChannelInboundReceipt> {
     if (this.#closed || message.connectionId !== this.#config.connectionId || message.provider !== 'wecom') {
       return { accepted: false, code: 'wrong_connection' };
     }
+    await this.#recoveryPromise;
+    if (this.#closed) return { accepted: false, code: 'wrong_connection' };
     if (message.providerBotId !== this.#config.providerAccountRef) {
       return { accepted: false, code: 'wrong_bot' };
     }
@@ -92,6 +112,10 @@ export class ChannelRouter {
     if (message.messageType !== 'text' || typeof message.text !== 'string' || !message.text.trim()) {
       return { accepted: false, code: 'unsupported_message' };
     }
+    const normalizedText = message.text.trim();
+    const isCancel = normalizedText.startsWith('/cancel');
+    const cancelTargetRunId = /^\/cancel\s+([^\s]+)$/.exec(normalizedText)?.[1];
+    if (isCancel && !cancelTargetRunId) return { accepted: false, code: 'invalid_message' };
 
     const providerMessageDigest = digestChannelValue(
       this.#config.connectionId,
@@ -109,17 +133,27 @@ export class ChannelRouter {
       conversationDigest,
       messageType: message.messageType,
       contentDigest: contentDigest(message.text),
+      pendingInput: message.text,
+      action: cancelTargetRunId ? 'cancel' : 'run',
+      ...(cancelTargetRunId ? { cancelTargetRunId } : {}),
       receivedAt: this.#now().toISOString(),
     });
-    if (accepted.record.senderDigest !== senderDigest) {
+    if (
+      accepted.record.providerRequestId !== message.providerRequestId
+      || accepted.record.senderDigest !== senderDigest
+      || accepted.record.conversationType !== message.conversationType
+      || accepted.record.conversationDigest !== conversationDigest
+      || accepted.record.messageType !== message.messageType
+      || accepted.record.contentDigest !== contentDigest(message.text)
+      || accepted.record.action !== (cancelTargetRunId ? 'cancel' : 'run')
+      || accepted.record.cancelTargetRunId !== cancelTargetRunId
+    ) {
       return { accepted: false, code: 'invalid_message' };
     }
-    const caller = this.#caller(conversationDigest);
-    if (message.text.trim() === '/cancel' || message.text.startsWith('/cancel ')) {
-      const requestedRunId = message.text.trim().slice('/cancel'.length).trim()
-        || this.#store.latestRunId('wecom', this.#config.connectionId, conversationDigest);
+    const caller = this.#caller(accepted.record.conversationDigest);
+    if (accepted.record.action === 'cancel') {
+      const requestedRunId = await this.#cancelPersistedInbound(accepted.record, caller);
       if (!requestedRunId) return { accepted: false, code: 'invalid_message' };
-      await this.#agent.cancel(caller, requestedRunId);
       return { accepted: true, duplicate: !accepted.inserted, runId: requestedRunId };
     }
 
@@ -127,30 +161,20 @@ export class ChannelRouter {
       this.#watch(accepted.record, caller);
       return { accepted: true, duplicate: true, runId: accepted.record.runId };
     }
-    const submission = await this.#agent.submit(caller, {
-      contractVersion: AGENT_CONTRACT_VERSION,
-      entryPoint: 'im',
-      identity: caller.identity,
-      workspaceId: this.#config.workspaceId,
-      conversation: {
-        namespace: `im:wecom:${digestChannelValue(this.#config.connectionId, 'account', this.#config.providerAccountRef)}`,
-        conversationId: `${message.conversationType}:${conversationDigest}`,
-      },
-      input: { type: 'text', text: message.text },
-      idempotencyKey: providerMessageDigest,
-      delivery: { kind: 'channel', routeId: accepted.record.inboundId },
-    });
+    if (!accepted.record.pendingInput) return { accepted: false, code: 'invalid_message' };
+    const submission = await this.#submitPersistedInbound(accepted.record, accepted.record.pendingInput, caller);
     if (!submission.accepted) return { accepted: false, code: 'submission_rejected' };
-    const inbound = this.#store.attachRun(accepted.record.inboundId, submission.runId);
-    this.#watch(inbound, caller);
     return { accepted: true, duplicate: !accepted.inserted || submission.duplicate, runId: submission.runId };
   }
 
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#watchAbort.abort();
     await this.#transport.close();
+    await Promise.allSettled([...this.#inboundPromises]);
     this.#store.markDeliveringUnknown('wecom', this.#config.connectionId, this.#now().toISOString());
+    await Promise.allSettled([...this.#watchingPromises]);
   }
 
   #caller(conversationDigest: string): AuthenticatedAgentCaller {
@@ -171,14 +195,78 @@ export class ChannelRouter {
   #watch(inbound: ChannelInboundRoute, caller: AuthenticatedAgentCaller): void {
     if (!inbound.runId || this.#watching.has(inbound.runId)) return;
     this.#watching.add(inbound.runId);
-    void this.#deliverWhenTerminal(inbound, caller).finally(() => {
+    const delivery = this.#deliverWhenTerminal(inbound, caller).catch(() => undefined).finally(() => {
       this.#watching.delete(inbound.runId!);
+      this.#watchingPromises.delete(delivery);
     });
+    this.#watchingPromises.add(delivery);
+  }
+
+  #trackInbound(task: Promise<void>): void {
+    const tracked = task.catch(() => undefined).finally(() => this.#inboundPromises.delete(tracked));
+    this.#inboundPromises.add(tracked);
+  }
+
+  async #resumePendingInbound(inbound: ChannelInboundRoute): Promise<void> {
+    if (!inbound.pendingInput || this.#closed) return;
+    const caller = this.#caller(inbound.conversationDigest);
+    if (inbound.action === 'cancel') {
+      await this.#cancelPersistedInbound(inbound, caller);
+    } else {
+      await this.#submitPersistedInbound(inbound, inbound.pendingInput, caller);
+    }
+  }
+
+  async #recoverAfterReady(): Promise<void> {
+    if (this.#closed) return;
+    for (const inbound of this.#store.recoverableInbound('wecom', this.#config.connectionId)) {
+      if (inbound.runId) this.#watch(inbound, this.#caller(inbound.conversationDigest));
+    }
+    for (const inbound of this.#store.pendingInbound('wecom', this.#config.connectionId)) {
+      if (inbound.pendingInput) await this.#resumePendingInbound(inbound);
+    }
+  }
+
+  async #cancelPersistedInbound(
+    inbound: ChannelInboundRoute,
+    caller: AuthenticatedAgentCaller,
+  ): Promise<string | undefined> {
+    if (!inbound.cancelTargetRunId) return undefined;
+    await this.#agent.cancel(caller, inbound.cancelTargetRunId);
+    this.#store.clearPendingInput(inbound.inboundId);
+    return inbound.cancelTargetRunId;
+  }
+
+  async #submitPersistedInbound(
+    inbound: ChannelInboundRoute,
+    input: string,
+    caller: AuthenticatedAgentCaller,
+  ): Promise<AgentRunSubmissionResult> {
+    const submission = await this.#agent.submit(caller, {
+      contractVersion: AGENT_CONTRACT_VERSION,
+      entryPoint: 'im',
+      identity: caller.identity,
+      workspaceId: this.#config.workspaceId,
+      conversation: {
+        namespace: `im:wecom:${digestChannelValue(this.#config.connectionId, 'account', this.#config.providerAccountRef)}`,
+        conversationId: `${inbound.conversationType}:${inbound.conversationDigest}`,
+      },
+      input: { type: 'text', text: input },
+      idempotencyKey: inbound.providerMessageId,
+      delivery: { kind: 'channel', routeId: inbound.inboundId },
+    });
+    if (submission.accepted) {
+      const attached = this.#store.attachRun(inbound.inboundId, submission.runId);
+      this.#watch(attached, caller);
+    }
+    return submission;
   }
 
   async #deliverWhenTerminal(inbound: ChannelInboundRoute, caller: AuthenticatedAgentCaller): Promise<void> {
     if (!inbound.runId) return;
-    for await (const run of this.#agent.subscribe(caller, inbound.runId)) {
+    for await (const run of this.#agent.subscribe(caller, inbound.runId, {
+      signal: this.#watchAbort.signal,
+    })) {
       const content = terminalContent(run);
       if (!content) continue;
       const now = this.#now().toISOString();
@@ -199,7 +287,10 @@ export class ChannelRouter {
       const result = await this.#transport.reply({
         providerRequestId: inbound.providerRequestId,
         providerMessageId: inbound.providerMessageId,
-      }, outbound.outboundId, content);
+      }, outbound.outboundId, content).catch(() => ({
+        status: 'unknown' as const,
+        code: 'transport_uncertain',
+      }));
       this.#store.finishOutbound(
         outbound.outboundId,
         result.status,

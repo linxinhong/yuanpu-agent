@@ -26,7 +26,8 @@ export type ChannelDeliveryResult =
   | { status: 'unknown'; code: string };
 
 export interface ChannelTransport {
-  connect(onMessage: (message: NormalizedChannelMessage) => void): void;
+  connect(onMessage: (message: NormalizedChannelMessage) => Promise<void>): void;
+  ready(): Promise<void>;
   reply(route: ChannelReplyRoute, outboundId: string, content: string): Promise<ChannelDeliveryResult>;
   close(): Promise<void> | void;
 }
@@ -35,6 +36,7 @@ export interface ChannelConnectionConfig {
   provider: 'wecom';
   connectionId: string;
   providerAccountRef: string;
+  credentialBindingDigest: string;
   workspaceId: string;
   acceptedMessageTypes: readonly ['text'];
   pairedSenderDigests: readonly string[];

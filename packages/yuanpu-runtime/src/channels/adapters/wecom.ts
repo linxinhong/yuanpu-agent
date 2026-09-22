@@ -34,6 +34,7 @@ interface WecomClientLike {
   disconnect(): void;
   on(event: 'message', handler: (frame: WecomFrame) => void): unknown;
   on(event: 'error', handler: (error: Error) => void): unknown;
+  on(event: 'authenticated', handler: () => void): unknown;
   replyStream(
     frame: { headers: { req_id: string } },
     streamId: string,
@@ -140,10 +141,16 @@ export class WecomSdkTransport implements ChannelTransport {
   readonly #log: RedactedChannelLogSink;
   #started = false;
   #closed = false;
+  readonly #inboundTasks = new Set<Promise<void>>();
+  readonly #readyPromise: Promise<void>;
+  readonly #resolveReady: () => void;
 
   constructor(options: WecomTransportOptions) {
     this.#connectionId = options.connectionId;
     this.#log = options.log ?? (() => undefined);
+    let resolveReady!: () => void;
+    this.#readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+    this.#resolveReady = resolveReady;
     const logger = createWecomRedactingLogger(this.#log);
     this.#client = options.clientFactory
       ? options.clientFactory({ botId: options.botId, secret: options.secret, logger })
@@ -160,19 +167,30 @@ export class WecomSdkTransport implements ChannelTransport {
         });
   }
 
-  connect(onMessage: (message: NormalizedChannelMessage) => void): void {
+  connect(onMessage: (message: NormalizedChannelMessage) => Promise<void>): void {
     if (this.#closed) throw new Error('WeCom transport is closed.');
     if (this.#started) return;
     this.#started = true;
     this.#client.on('message', (frame) => {
       const normalized = normalizeFrame(this.#connectionId, frame);
-      if (normalized) onMessage(normalized);
-      else this.#log({ level: 'warn', event: 'wecom.invalid_message' });
+      if (!normalized) {
+        this.#log({ level: 'warn', event: 'wecom.invalid_message' });
+        return;
+      }
+      const task = Promise.resolve().then(() => onMessage(normalized))
+        .catch(() => this.#log({ level: 'error', event: 'wecom.inbound_failed' }))
+        .finally(() => this.#inboundTasks.delete(task));
+      this.#inboundTasks.add(task);
     });
     this.#client.on('error', () => {
       this.#log({ level: 'error', event: 'wecom.transport_error' });
     });
+    this.#client.on('authenticated', () => this.#resolveReady());
     this.#client.connect();
+  }
+
+  ready(): Promise<void> {
+    return this.#readyPromise;
   }
 
   async reply(
@@ -190,8 +208,11 @@ export class WecomSdkTransport implements ChannelTransport {
         content,
         true,
       );
-      if (receipt.errcode === undefined || receipt.errcode === 0) return { status: 'accepted' };
-      return { status: 'failed', code: `provider_${receipt.errcode}` };
+      if (receipt.errcode === 0) return { status: 'accepted' };
+      if (typeof receipt.errcode === 'number') {
+        return { status: 'failed', code: `provider_${receipt.errcode}` };
+      }
+      return { status: 'unknown', code: 'malformed_receipt' };
     } catch (error) {
       if (
         error
@@ -205,9 +226,11 @@ export class WecomSdkTransport implements ChannelTransport {
     }
   }
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#resolveReady();
     if (this.#started) this.#client.disconnect();
+    await Promise.allSettled([...this.#inboundTasks]);
   }
 }

@@ -56,7 +56,7 @@ test('redacting logger never forwards SDK message text or variadic payloads at a
   assert.equal(records.every((record) => record.event === 'wecom.frame'), true);
 });
 
-test('normalizes only required fields and keeps raw frame out of the transport log', () => {
+test('normalizes only required fields and keeps raw frame out of the transport log', async () => {
   const client = new FixtureClient();
   const logs = [];
   const received = [];
@@ -83,6 +83,7 @@ test('normalizes only required fields and keeps raw frame out of the transport l
       response_url: 'https://forbidden.invalid/token',
     },
   });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(received, [{
     provider: 'wecom',
     connectionId: 'imc_fixture',
@@ -127,5 +128,40 @@ test('uses the original request id and distinguishes accepted, failed, and unkno
     status: 'unknown',
     code: 'transport_uncertain',
   });
+  client.result = {};
+  assert.deepEqual(await transport.reply(route, 'outbound-fixture-4', 'fixture reply'), {
+    status: 'unknown',
+    code: 'malformed_receipt',
+  });
   transport.close();
+});
+
+test('tracks an asynchronous inbound failure and reports only a redacted event before close', async () => {
+  const client = new FixtureClient();
+  const logs = [];
+  const transport = new WecomSdkTransport({
+    connectionId: 'imc_fixture',
+    botId: 'bot-fixture',
+    secret: 'secret-fixture',
+    log: (record) => logs.push(record),
+    clientFactory: () => client,
+  });
+  transport.connect(async () => {
+    throw new Error('fixture-sensitive-inbound-failure');
+  });
+  client.emit('message', {
+    headers: { req_id: 'request-fixture' },
+    body: {
+      msgid: 'message-fixture',
+      aibotid: 'bot-fixture',
+      chattype: 'single',
+      from: { userid: 'member-fixture' },
+      msgtype: 'text',
+      text: { content: 'fixture-private-content' },
+    },
+  });
+  await transport.close();
+  assert.equal(logs.some((record) => record.event === 'wecom.inbound_failed'), true);
+  assert.equal(JSON.stringify(logs).includes('fixture-sensitive-inbound-failure'), false);
+  assert.equal(JSON.stringify(logs).includes('fixture-private-content'), false);
 });

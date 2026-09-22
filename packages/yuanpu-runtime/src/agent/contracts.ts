@@ -20,7 +20,11 @@ export interface AgentService {
   submit(caller: AuthenticatedAgentCaller, input: unknown): Promise<AgentRunSubmissionResult>;
   get(caller: AuthenticatedAgentCaller, runId: string): Promise<AgentRunRecord | undefined>;
   cancel(caller: AuthenticatedAgentCaller, runId: string): Promise<AgentRunCancellationReceipt>;
-  subscribe(caller: AuthenticatedAgentCaller, runId: string): AsyncIterable<AgentRunRecord>;
+  subscribe(
+    caller: AuthenticatedAgentCaller,
+    runId: string,
+    options?: { signal?: AbortSignal },
+  ): AsyncIterable<AgentRunRecord>;
 }
 
 /** Constructed by a trusted transport/adapter, never deserialized from Agent model input. */

@@ -15,6 +15,9 @@ export interface ChannelInboundRoute {
   conversationDigest: string;
   messageType: string;
   contentDigest?: string;
+  pendingInput?: string;
+  action?: 'run' | 'cancel';
+  cancelTargetRunId?: string;
   runId?: string;
   receivedAt: string;
 }
@@ -41,6 +44,9 @@ interface InboundRow {
   conversation_digest: string;
   message_type: string;
   content_digest: string | null;
+  input_text: string | null;
+  action: 'run' | 'cancel';
+  cancel_target_run_id: string | null;
   run_id: string | null;
   received_at: string;
 }
@@ -68,6 +74,9 @@ function inboundFromRow(row: InboundRow): ChannelInboundRoute {
     conversationDigest: row.conversation_digest,
     messageType: row.message_type,
     ...(row.content_digest ? { contentDigest: row.content_digest } : {}),
+    ...(row.input_text ? { pendingInput: row.input_text } : {}),
+    action: row.action,
+    ...(row.cancel_target_run_id ? { cancelTargetRunId: row.cancel_target_run_id } : {}),
     ...(row.run_id ? { runId: row.run_id } : {}),
     receivedAt: row.received_at,
   };
@@ -88,6 +97,40 @@ function outboundFromRow(row: OutboundRow): ChannelOutboundRecord {
 
 export class ChannelStore {
   constructor(private readonly database: DatabaseSync) {}
+
+  bindConnection(input: {
+    provider: string;
+    connectionId: string;
+    providerAccountDigest: string;
+    credentialBindingDigest: string;
+    now: string;
+  }): void {
+    this.database.prepare(`
+      INSERT OR IGNORE INTO yp_channel_connections(
+        provider, connection_id, provider_account_digest, credential_binding_digest, created_at
+      ) VALUES (?, ?, ?, ?, ?)
+    `).run(
+      input.provider,
+      input.connectionId,
+      input.providerAccountDigest,
+      input.credentialBindingDigest,
+      input.now,
+    );
+    const row = this.database.prepare(`
+      SELECT provider_account_digest, credential_binding_digest
+      FROM yp_channel_connections WHERE provider = ? AND connection_id = ?
+    `).get(input.provider, input.connectionId) as {
+      provider_account_digest: string;
+      credential_binding_digest: string;
+    } | undefined;
+    if (
+      !row
+      || row.provider_account_digest !== input.providerAccountDigest
+      || row.credential_binding_digest !== input.credentialBindingDigest
+    ) {
+      throw new Error('Channel connection identity cannot be changed in place.');
+    }
+  }
 
   pair(provider: string, connectionId: string, senderDigest: string, now: string): void {
     this.database.prepare(`
@@ -115,8 +158,8 @@ export class ChannelStore {
       INSERT OR IGNORE INTO yp_channel_inbound(
         inbound_id, provider, connection_id, provider_message_id, provider_request_id,
         sender_digest, conversation_type, conversation_digest, message_type,
-        content_digest, run_id, received_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        content_digest, input_text, action, cancel_target_run_id, run_id, received_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.inboundId,
       input.provider,
@@ -128,6 +171,9 @@ export class ChannelStore {
       input.conversationDigest,
       input.messageType,
       input.contentDigest ?? null,
+      input.pendingInput ?? null,
+      input.action ?? 'run',
+      input.cancelTargetRunId ?? null,
       input.runId ?? null,
       input.receivedAt,
     ).changes === 1;
@@ -140,7 +186,9 @@ export class ChannelStore {
 
   attachRun(inboundId: string, runId: string): ChannelInboundRoute {
     this.database.prepare(`
-      UPDATE yp_channel_inbound SET run_id = COALESCE(run_id, ?) WHERE inbound_id = ?
+      UPDATE yp_channel_inbound
+      SET run_id = COALESCE(run_id, ?), input_text = NULL
+      WHERE inbound_id = ?
     `).run(runId, inboundId);
     return this.getInbound(inboundId)!;
   }
@@ -150,6 +198,21 @@ export class ChannelStore {
       'SELECT * FROM yp_channel_inbound WHERE inbound_id = ?',
     ).get(inboundId) as unknown as InboundRow | undefined;
     return row ? inboundFromRow(row) : undefined;
+  }
+
+  clearPendingInput(inboundId: string): void {
+    this.database.prepare(
+      'UPDATE yp_channel_inbound SET input_text = NULL WHERE inbound_id = ?',
+    ).run(inboundId);
+  }
+
+  pendingInbound(provider: string, connectionId: string): ChannelInboundRoute[] {
+    const rows = this.database.prepare(`
+      SELECT * FROM yp_channel_inbound
+      WHERE provider = ? AND connection_id = ? AND run_id IS NULL AND input_text IS NOT NULL
+      ORDER BY received_at
+    `).all(provider, connectionId) as unknown as InboundRow[];
+    return rows.map(inboundFromRow);
   }
 
   latestRunId(provider: string, connectionId: string, conversationDigest: string): string | undefined {

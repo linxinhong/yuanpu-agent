@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import {
   ChannelRouter,
   WecomSdkTransport,
+  digestChannelValue,
   type AgentService,
   type ChannelStore,
   type ChannelTransport,
@@ -54,6 +55,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function assertExactKeys(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
+    throw new Error(`Invalid Enterprise WeChat ${field}.`);
+  }
+}
+
 function stringArray(value: unknown, field: string, pattern?: RegExp): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || (pattern && !pattern.test(item)))) {
@@ -66,15 +73,33 @@ function parseDocument(value: unknown): PersistedWecomDocument {
   if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.connections)) {
     throw new Error('Invalid Enterprise WeChat connection document.');
   }
+  assertExactKeys(value, ['schemaVersion', 'connections'], 'connection document');
   const connections = value.connections.map((item): PersistedWecomConnection => {
     if (!isRecord(item) || typeof item.enabled !== 'boolean' || item.provider !== 'wecom') {
       throw new Error('Invalid Enterprise WeChat connection entry.');
     }
+    assertExactKeys(item, [
+      'enabled',
+      'provider',
+      'connectionId',
+      'providerAccountRef',
+      'credentialRefs',
+      'directMessagePolicy',
+      'groupPolicy',
+      'groupEnabled',
+      'pairedSenderDigests',
+      'groupAllowlistDigests',
+      'acceptedMessageTypes',
+    ], 'connection entry');
     if (typeof item.connectionId !== 'string' || !/^[A-Za-z0-9._-]{1,128}$/.test(item.connectionId)) {
       throw new Error('Invalid Enterprise WeChat connectionId.');
     }
-    if ('secret' in item || 'botSecret' in item || 'botId' in item) {
-      throw new Error('Enterprise WeChat credentials must be stored as references.');
+    const credentialRefs = item.credentialRefs;
+    if (credentialRefs !== undefined) {
+      if (!isRecord(credentialRefs)) {
+        throw new Error('Invalid Enterprise WeChat credentialRefs.');
+      }
+      assertExactKeys(credentialRefs, ['botSecret'], 'credentialRefs');
     }
     const acceptedMessageTypes = stringArray(item.acceptedMessageTypes, 'acceptedMessageTypes');
     if (acceptedMessageTypes.some((type) => type !== 'text')) {
@@ -85,9 +110,9 @@ function parseDocument(value: unknown): PersistedWecomDocument {
       provider: 'wecom',
       connectionId: item.connectionId,
       ...(typeof item.providerAccountRef === 'string' ? { providerAccountRef: item.providerAccountRef } : {}),
-      ...(isRecord(item.credentialRefs)
-        ? { credentialRefs: { ...(typeof item.credentialRefs.botSecret === 'string'
-            ? { botSecret: item.credentialRefs.botSecret }
+      ...(credentialRefs
+        ? { credentialRefs: { ...(typeof credentialRefs.botSecret === 'string'
+            ? { botSecret: credentialRefs.botSecret }
             : {}) } }
         : {}),
       ...(typeof item.directMessagePolicy === 'string'
@@ -100,6 +125,16 @@ function parseDocument(value: unknown): PersistedWecomDocument {
       acceptedMessageTypes,
     };
   });
+  if (new Set(connections.map((connection) => connection.connectionId)).size !== connections.length) {
+    throw new Error('Duplicate Enterprise WeChat connectionId.');
+  }
+  const enabledAccounts = connections
+    .filter((connection) => connection.enabled)
+    .map((connection) => connection.providerAccountRef)
+    .filter((reference): reference is string => Boolean(reference));
+  if (new Set(enabledAccounts).size !== enabledAccounts.length) {
+    throw new Error('Duplicate enabled Enterprise WeChat providerAccountRef.');
+  }
   return { schemaVersion: 1, connections };
 }
 
@@ -160,6 +195,7 @@ export async function startConfiguredWecomChannels(
         !connection.providerAccountRef
         || !connection.credentialRefs?.botSecret
         || !credentialRefPattern.test(connection.credentialRefs.botSecret)
+        || connection.credentialRefs.botSecret !== `keychain:yuanpu/im/${connection.connectionId}/bot-secret`
         || connection.directMessagePolicy !== 'paired-only'
         || connection.acceptedMessageTypes?.length !== 1
         || connection.acceptedMessageTypes[0] !== 'text'
@@ -192,6 +228,11 @@ export async function startConfiguredWecomChannels(
           provider: 'wecom',
           connectionId: connection.connectionId,
           providerAccountRef: connection.providerAccountRef,
+          credentialBindingDigest: digestChannelValue(
+            connection.connectionId,
+            'credential-reference',
+            connection.credentialRefs.botSecret,
+          ),
           workspaceId: options.workspaceId,
           acceptedMessageTypes: ['text'],
           pairedSenderDigests: connection.pairedSenderDigests ?? [],
@@ -202,8 +243,8 @@ export async function startConfiguredWecomChannels(
         agent: options.agent,
         transport,
       });
-      router.start();
       routers.push(router);
+      router.start();
     }
     return routers;
   } catch (error) {

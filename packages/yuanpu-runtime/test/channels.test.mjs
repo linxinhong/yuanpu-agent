@@ -32,6 +32,8 @@ class FixtureTransport {
     this.handler = handler;
   }
 
+  async ready() {}
+
   async reply(route, outboundId, content) {
     this.replies.push({ route, outboundId, content });
     return this.results.shift() ?? { status: 'accepted' };
@@ -39,6 +41,26 @@ class FixtureTransport {
 
   close() {
     this.closed = true;
+  }
+}
+
+class DeferredReadyTransport extends FixtureTransport {
+  constructor() {
+    super();
+    this.readyGate = deferred();
+  }
+
+  ready() {
+    return this.readyGate.promise;
+  }
+
+  becomeReady() {
+    this.readyGate.resolve();
+  }
+
+  close() {
+    this.becomeReady();
+    super.close();
   }
 }
 
@@ -69,6 +91,11 @@ function config(overrides = {}) {
     provider: 'wecom',
     connectionId: 'imc_fixture',
     providerAccountRef: 'bot-fixture',
+    credentialBindingDigest: digestChannelValue(
+      'imc_fixture',
+      'credential-reference',
+      'keychain:yuanpu/im/imc_fixture/bot-secret',
+    ),
     workspaceId: '/fixture-workspace',
     acceptedMessageTypes: ['text'],
     pairedSenderDigests: [
@@ -156,6 +183,31 @@ test('persists before dispatch, deduplicates replay, and replies with the origin
   context.database.close();
 });
 
+test('rejects a replay whose immutable route or content differs from the persisted inbound', async () => {
+  const context = await fixture();
+  const first = await context.router.handleInbound(message());
+  assert.equal(first.accepted, true);
+  for (const replay of [
+    message({ text: 'changed fixture body' }),
+    message({ conversationId: 'changed-conversation' }),
+    message({ providerRequestId: 'changed-request-route' }),
+  ]) {
+    assert.deepEqual(await context.router.handleInbound(replay), {
+      accepted: false,
+      code: 'invalid_message',
+    });
+  }
+  await waitUntil(() => context.transport.replies.length === 1);
+  assert.equal(context.executions.length, 1);
+  assert.deepEqual(context.transport.replies[0].route, {
+    providerRequestId: 'request-fixture-1',
+    providerMessageId: digestChannelValue('imc_fixture', 'message', 'message-fixture-1'),
+  });
+  await context.router.close();
+  await context.service.close();
+  context.database.close();
+});
+
 test('returns an acceptance receipt without waiting for model completion', async () => {
   const database = openYuanpuMetadataDatabase(':memory:');
   const gate = deferred();
@@ -181,6 +233,95 @@ test('returns an acceptance receipt without waiting for model completion', async
   await waitUntil(() => transport.replies.length === 1);
   await router.close();
   await service.close();
+  database.close();
+});
+
+test('closes promptly while an Agent run is still non-terminal', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const gate = deferred();
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute() {
+        await gate.promise;
+        return { kind: 'completed', output: { message: 'fixture delayed reply', tools: [] } };
+      },
+    },
+  });
+  const router = new ChannelRouter({
+    config: config(),
+    store: database.channels,
+    agent: service,
+    transport: new FixtureTransport(),
+  });
+  router.start();
+  const receipt = await router.handleInbound(message());
+  assert.equal(receipt.accepted, true);
+  await Promise.race([
+    router.close(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('channel close deadlocked')), 100)),
+  ]);
+  gate.resolve();
+  await service.close();
+  database.close();
+});
+
+test('requires an explicit cancellation target and restores cancellation as a control action', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const cancelled = [];
+  const fakeAgent = {
+    async submit() { throw new Error('cancel recovery must not submit an Agent run'); },
+    async get() { return undefined; },
+    async cancel(_caller, runId) {
+      cancelled.push(runId);
+      return { runId, result: 'not_found' };
+    },
+    async *subscribe() {},
+  };
+  const initial = new ChannelRouter({
+    config: config(),
+    store: database.channels,
+    agent: fakeAgent,
+    transport: new FixtureTransport(),
+  });
+  initial.start();
+  assert.deepEqual(await initial.handleInbound(message({ text: '/cancel' })), {
+    accepted: false,
+    code: 'invalid_message',
+  });
+  await initial.close();
+
+  database.channels.acceptInbound({
+    inboundId: 'cancel-inbound-fixture',
+    provider: 'wecom',
+    connectionId: 'imc_fixture',
+    providerMessageId: 'cancel-message-digest',
+    providerRequestId: 'cancel-request-fixture',
+    senderDigest: digestChannelValue('imc_fixture', 'sender', 'member-fixture-a'),
+    conversationType: 'single',
+    conversationDigest: digestChannelValue(
+      'imc_fixture',
+      'conversation:single',
+      'member-fixture-a',
+    ),
+    messageType: 'text',
+    contentDigest: 'c'.repeat(64),
+    pendingInput: '/cancel run-fixture-target',
+    action: 'cancel',
+    cancelTargetRunId: 'run-fixture-target',
+    receivedAt: new Date().toISOString(),
+  });
+  const recovered = new ChannelRouter({
+    config: config(),
+    store: database.channels,
+    agent: fakeAgent,
+    transport: new FixtureTransport(),
+  });
+  recovered.start();
+  await waitUntil(() => cancelled.length === 1);
+  assert.deepEqual(cancelled, ['run-fixture-target']);
+  assert.equal(database.channels.pendingInbound('wecom', 'imc_fixture').length, 0);
+  await recovered.close();
   database.close();
 });
 
@@ -241,6 +382,10 @@ test('marks an in-flight delivery unknown when the channel closes', async () => 
     await gate.promise;
     return { status: 'accepted' };
   };
+  transport.close = function close() {
+    this.closed = true;
+    gate.resolve();
+  };
   const context = await fixture({ transport });
   const receipt = await context.router.handleInbound(message());
   await waitUntil(() => transport.replies.length === 1);
@@ -281,4 +426,149 @@ test('restores pairings and deduplication after SQLite reopen and closes transpo
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('recovers a crash after Agent submission but before the inbound run link is attached', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const executions = [];
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute(input) {
+        executions.push(input.run.runId);
+        return { kind: 'completed', output: { message: 'fixture recovered reply', tools: [] } };
+      },
+    },
+  });
+  let simulateCrash = true;
+  const crashStore = new Proxy(database.channels, {
+    get(target, property) {
+      if (property === 'attachRun') {
+        return (...args) => {
+          if (simulateCrash) {
+            simulateCrash = false;
+            throw new Error('fixture crash before inbound link');
+          }
+          return target.attachRun(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const first = new ChannelRouter({
+    config: config(),
+    store: crashStore,
+    agent: service,
+    transport: new FixtureTransport(),
+  });
+  first.start();
+  await assert.rejects(first.handleInbound(message()), /fixture crash/);
+  await first.close();
+
+  const transport = new FixtureTransport();
+  const recovered = new ChannelRouter({
+    config: config(),
+    store: database.channels,
+    agent: service,
+    transport,
+  });
+  recovered.start();
+  await waitUntil(() => transport.replies.length === 1);
+  assert.equal(executions.length, 1);
+  const inbound = database.channels.pendingInbound('wecom', 'imc_fixture');
+  assert.equal(inbound.length, 0);
+  await recovered.close();
+  await service.close();
+  database.close();
+});
+
+test('waits for authenticated transport readiness before delivering a recovered terminal run', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute() {
+        return { kind: 'completed', output: { message: 'fixture terminal recovery', tools: [] } };
+      },
+    },
+  });
+  let simulateCrash = true;
+  const crashAfterAttachStore = new Proxy(database.channels, {
+    get(target, property) {
+      if (property === 'attachRun') {
+        return (...args) => {
+          const attached = target.attachRun(...args);
+          if (simulateCrash) {
+            simulateCrash = false;
+            throw new Error('fixture crash after inbound link');
+          }
+          return attached;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const first = new ChannelRouter({
+    config: config(),
+    store: crashAfterAttachStore,
+    agent: service,
+    transport: new FixtureTransport(),
+  });
+  first.start();
+  await assert.rejects(first.handleInbound(message()), /fixture crash/);
+  await first.close();
+
+  const transport = new DeferredReadyTransport();
+  const recovered = new ChannelRouter({
+    config: config(),
+    store: database.channels,
+    agent: service,
+    transport,
+  });
+  recovered.start();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(transport.replies.length, 0);
+  transport.becomeReady();
+  await waitUntil(() => transport.replies.length === 1);
+  assert.equal(transport.replies[0].content, 'fixture terminal recovery');
+  await recovered.close();
+  await service.close();
+  database.close();
+});
+
+test('refuses to reuse persisted pairings after changing provider account or credential binding', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    executor: {
+      async execute(input) {
+        return { kind: 'completed', output: { message: input.input, tools: [] } };
+      },
+    },
+  });
+  const first = new ChannelRouter({
+    config: config(),
+    store: database.channels,
+    agent: service,
+    transport: new FixtureTransport(),
+  });
+  first.start();
+  await first.close();
+  for (const changedConfig of [
+    config({ providerAccountRef: 'other-bot-fixture' }),
+    config({ credentialBindingDigest: 'b'.repeat(64) }),
+  ]) {
+    const changed = new ChannelRouter({
+      config: changedConfig,
+      store: database.channels,
+      agent: service,
+      transport: new FixtureTransport(),
+    });
+    assert.throws(() => changed.start(), /cannot be changed in place/);
+    await changed.close();
+  }
+  await service.close();
+  database.close();
 });

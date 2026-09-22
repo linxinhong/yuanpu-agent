@@ -187,12 +187,24 @@ const migrations: readonly Migration[] = [{
 }, {
   version: 4,
   sql: `
+    CREATE TABLE yp_channel_connections (
+      provider TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      provider_account_digest TEXT NOT NULL,
+      credential_binding_digest TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (provider, connection_id),
+      UNIQUE (provider, provider_account_digest)
+    ) STRICT;
+
     CREATE TABLE yp_channel_pairings (
       provider TEXT NOT NULL,
       connection_id TEXT NOT NULL,
       sender_digest TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      PRIMARY KEY (provider, connection_id, sender_digest)
+      PRIMARY KEY (provider, connection_id, sender_digest),
+      FOREIGN KEY (provider, connection_id)
+        REFERENCES yp_channel_connections(provider, connection_id)
     ) STRICT;
 
     CREATE TABLE yp_channel_inbound (
@@ -206,9 +218,15 @@ const migrations: readonly Migration[] = [{
       conversation_digest TEXT NOT NULL,
       message_type TEXT NOT NULL,
       content_digest TEXT,
+      input_text TEXT,
+      action TEXT NOT NULL DEFAULT 'run' CHECK (action IN ('run', 'cancel')),
+      cancel_target_run_id TEXT,
       run_id TEXT REFERENCES yp_agent_runs(run_id),
       received_at TEXT NOT NULL,
-      UNIQUE (provider, connection_id, provider_message_id)
+      UNIQUE (provider, connection_id, provider_message_id),
+      FOREIGN KEY (provider, connection_id)
+        REFERENCES yp_channel_connections(provider, connection_id),
+      CHECK (action <> 'cancel' OR cancel_target_run_id IS NOT NULL)
     ) STRICT;
 
     CREATE INDEX yp_channel_inbound_conversation
