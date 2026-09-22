@@ -50,6 +50,7 @@ import { promisify } from 'node:util';
 
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
+import { cleanupRuntimeResources, getDesktopNavigableRun } from './runtime-host.js';
 
 declare const __APP_VERSION__: string;
 
@@ -703,7 +704,12 @@ async function serve(): Promise<void> {
           : undefined;
         let result: NotificationTargetValidation;
         if (requestedRunId) {
-          const run = await agentService.get(desktopCaller, requestedRunId);
+          const run = await getDesktopNavigableRun(
+            agentService,
+            requestedRunId,
+            desktopCaller,
+            schedulerCaller,
+          );
           const conversationId = run?.context.conversation.conversationId;
           result = run && conversationId && (!requestedConversationId || requestedConversationId === conversationId)
             ? { valid: true, target: { conversationId, runId: run.runId } }
@@ -763,7 +769,12 @@ async function serve(): Promise<void> {
         ? url.pathname.slice(RUNTIME_ROUTES.agentRuns.length + 1).split('/')
         : undefined;
       if (agentRunPath?.length === 1 && request.method === 'GET') {
-        const run = await agentService.get(desktopCaller, decodeURIComponent(agentRunPath[0]!));
+        const run = await getDesktopNavigableRun(
+          agentService,
+          decodeURIComponent(agentRunPath[0]!),
+          desktopCaller,
+          schedulerCaller,
+        );
         response.statusCode = run ? 200 : 404;
         response.end(JSON.stringify(run ?? { error: 'Agent run not found.' }));
         return;
@@ -1263,21 +1274,13 @@ async function serve(): Promise<void> {
   });
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
-    cleanupPromise ??= (async () => {
-      await scheduler.close();
-      const results = await Promise.allSettled([
-        Promise.resolve().then(() => notificationRouter.close()),
-        agentService.close(),
-        ...(pythonSource ? [pythonSource.close()] : []),
-      ]);
-      metadata.close();
-      const failures = results
-        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-        .map((result) => result.reason);
-      if (failures.length > 0) {
-        throw new AggregateError(failures, 'Runtime cleanup did not complete cleanly.');
-      }
-    })();
+    cleanupPromise ??= cleanupRuntimeResources({
+      closeScheduler: () => scheduler.close(),
+      closeNotificationRouter: () => notificationRouter.close(),
+      closeAgentService: () => agentService.close(),
+      ...(pythonSource ? { closePythonSource: () => pythonSource!.close() } : {}),
+      closeMetadata: () => metadata.close(),
+    });
     return cleanupPromise;
   };
   server.on('close', () => {

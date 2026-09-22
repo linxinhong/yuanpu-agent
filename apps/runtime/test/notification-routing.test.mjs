@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { AGENT_CONTRACT_VERSION } from '@yuanpu-agent/protocol';
+import { AGENT_CONTRACT_VERSION, SCHEDULE_CONTRACT_VERSION } from '@yuanpu-agent/protocol';
 
 async function ready(child) {
   return await new Promise((resolve, reject) => {
@@ -119,20 +119,28 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
   const token = randomBytes(32).toString('hex');
   const keyPair = generateKeyPairSync('ed25519');
   const approvalPublicKey = keyPair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
-  const child = spawn(process.execPath, ['dist/index.cjs', '--serve', '--port', '0'], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      YUANPU_HOME: home,
-      NOTIFICATION_FIXTURE_KEY: 'fixture-only',
-      YUANPU_PYTHON_MCP_EXECUTABLE: '',
-      YUANPU_PYTHON_MCP_ROOT: '',
-    },
-  });
+  const startRuntime = async () => {
+    const childProcess = spawn(process.execPath, ['dist/index.cjs', '--serve', '--port', '0'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        YUANPU_HOME: home,
+        NOTIFICATION_FIXTURE_KEY: 'fixture-only',
+        YUANPU_PYTHON_MCP_EXECUTABLE: '',
+        YUANPU_PYTHON_MCP_ROOT: '',
+      },
+    });
+    childProcess.stdin.end(`${JSON.stringify({
+      token,
+      approvalPublicKey,
+      parentPid: process.pid,
+    })}\n`);
+    return { process: childProcess, runtime: await ready(childProcess) };
+  };
+  let started = await startRuntime();
+  let child = started.process;
   context.after(() => child.kill('SIGKILL'));
-  child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
-  const runtime = await ready(child);
-  const origin = `http://${runtime.host}:${runtime.port}`;
+  let origin = `http://${started.runtime.host}:${started.runtime.port}`;
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
   assert.equal((await fetch(`${origin}/v1/host/events`)).status, 401);
@@ -212,6 +220,60 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
     target: { conversationId: 'default' },
   });
   assert.equal((await validate({ conversationId: 'arbitrary-command' })).valid, false);
+
+  const scheduledConversationId = 'scheduled-notification-target';
+  const createScheduleResponse = await fetch(`${origin}/v1/schedules`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      contractVersion: SCHEDULE_CONTRACT_VERSION,
+      name: 'Notification target fixture',
+      prompt: 'scheduled fixture',
+      workspaceId: workspace,
+      timing: { kind: 'once', at: new Date(Date.now() - 1_000).toISOString() },
+      timeZone: 'UTC',
+      conversationId: scheduledConversationId,
+      delivery: { kind: 'desktop' },
+    }),
+  });
+  assert.equal(createScheduleResponse.status, 201);
+
+  child.kill('SIGTERM');
+  await waitForExit(child);
+
+  started = await startRuntime();
+  child = started.process;
+  origin = `http://${started.runtime.host}:${started.runtime.port}`;
+  const scheduledEventAbort = new AbortController();
+  const scheduledEventResponse = await fetch(`${origin}/v1/host/events`, {
+    headers,
+    signal: scheduledEventAbort.signal,
+  });
+  assert.equal(scheduledEventResponse.status, 200);
+  const scheduledEvent = await readSseEvent(scheduledEventResponse);
+  assert.equal(scheduledEvent.type, 'notification_requested');
+  assert.equal(scheduledEvent.payload.kind, 'run_succeeded');
+  assert.equal(scheduledEvent.payload.conversationId, scheduledConversationId);
+
+  assert.deepEqual(await validate({
+    runId: scheduledEvent.payload.runId,
+    conversationId: scheduledConversationId,
+  }), {
+    valid: true,
+    target: {
+      conversationId: scheduledConversationId,
+      runId: scheduledEvent.payload.runId,
+    },
+  });
+  const scheduledRunResponse = await fetch(
+    `${origin}/v1/agent/runs/${scheduledEvent.payload.runId}`,
+    { headers },
+  );
+  assert.equal(scheduledRunResponse.status, 200);
+  const scheduledRun = await scheduledRunResponse.json();
+  assert.equal(scheduledRun.owner.entryPoint, 'scheduler');
+  assert.equal(scheduledRun.context.conversation.conversationId, scheduledConversationId);
+  scheduledEventAbort.abort();
 
   child.kill('SIGTERM');
   await waitForExit(child);
