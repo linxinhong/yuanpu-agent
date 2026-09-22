@@ -564,7 +564,7 @@ tasks:
       - type: assertion
         expect: "证据包含 revision、环境、fixture/真实模式、命令与 pass/fail/unverified；缺失平台环境不得记为通过"
       - type: assertion
-        expect: "逐条建立验收项与原始证据的映射，由独立验证者确认结论；TASK-022 工具可用且试点评估通过时辅助筛查构建冒充业务通过、旧 revision 和缺平台证据，否则记录人工核验结果，不阻塞本卡"
+        expect: "逐条建立验收项与原始证据的映射，由独立验证者核查构建冒充业务通过、旧 revision 和缺平台证据，并确认最终结论"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-012","TASK-013"]
@@ -734,7 +734,7 @@ tasks:
       - type: assertion
         expect: "独立检查远程身份不能改变本机权限策略；未验证系统或外部平台逐项标记"
       - type: assertion
-        expect: "以事件序列和数据库事实区分执行失败、投递失败、投递未知及通知 submitted；身份映射、执行次数和合法状态转换由代码断言。TASK-022 通过评估后可辅助核验脱敏摘要，疑似串话或重复执行必须回查本地原始证据；工具不可用时人工完成"
+        expect: "以事件序列和数据库事实区分执行失败、投递失败、投递未知及通知 submitted；身份映射、执行次数和合法状态转换由代码断言，疑似串话或重复执行必须回查本地原始证据"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-015","TASK-016","TASK-018"]
@@ -804,7 +804,7 @@ tasks:
       - type: assertion
         expect: "macOS/Windows/Linux 分别记录可执行证据和未验证项；继承历史生产签名/制品信任缺口，不宣称已解决"
       - type: assertion
-        expect: "为每条用户旅程主张关联当前 revision、平台、真实/fixture 模式及证据位置；逐项复核局部通过被扩大为整体通过、模拟通知冒充展示、submitted 冒充已读和历史签名缺口遗漏。TASK-022 可辅助筛查，最终结论及任务状态仍由独立验证者依据原始证据确认"
+        expect: "为每条用户旅程主张关联当前 revision、平台、真实/fixture 模式及证据位置；独立验证者依据原始证据逐项复核局部通过被扩大为整体通过、模拟通知冒充展示、submitted 冒充已读和历史签名缺口遗漏"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-020"]
@@ -820,50 +820,6 @@ tasks:
       worktree: null
       branch: null
       evidence: []
-      follow_up_candidates: []
-  - id: TASK-022
-    title: "试点 Jev 辅助验收证据核验"
-    status: done
-    goal: "用小规模对照评估验证 Jev 是否减少证据审阅耗时和遗漏，并交付可选的只读开发工具。"
-    scope:
-      in: ["独立开发脚本、最小证据输入格式与本地精确检查","Jev Choice 语义核验、人工复核报告与人工标注对照集","数据最小化、离线测试、耗时/成本/误判评估"]
-      out: ["产品 Runtime/IM/通知执行链路集成","自动审批、自动重试业务动作、自动修改任务状态","源码/原始日志/聊天记录/数据库上传","替代独立业务验收"]
-    constraints: ["本次仅优化任务卡，不授权实现、提交或推送","作为独立可选工具推进，不成为 TASK-014/019/021 的硬依赖","默认 dry-run；首次真实评估仅用人工编写的虚构样例；真实项目摘要须另行明确授权发送至 TypeSafe","密钥仅由调用进程从配置读取，不写报告、argv 或请求正文；默认不缓存完整请求/响应"]
-    forbidden: ["将 supported 或高置信度当作业务 PASS 或执行许可","用模型判断替代身份、次数、状态转换和 revision 的精确检查","未经评估把工具接入必经 CI 或扩大数据输入范围"]
-    acceptance:
-      - type: assertion
-        expect: "本地按验收项关联证据 ID、revision、平台、fixture/真实模式和命令结果；缺失/不匹配明确报告。先执行精确检查，再对语义关系输出 supported/contradicted/insufficient 与置信度；supported 只代表所给摘要支持主张，不证明原始事实真实"
-      - type: assertion
-        expect: "出站仅允许审核过的验收短句、虚构/经授权脱敏摘要、枚举事件和替换 ID；原始文件路径及证据映射保留本地。字段白名单、长度限制和本地秘密扫描有拒绝测试，扫描不作为允许任意自由文本上传的依据"
-      - type: assertion
-        expect: "至少 24 个虚构人工标注样例覆盖三类关系，包含构建冒充验收、旧 revision、缺平台、fixture 冒充真实、submitted 冒充已读、投递未知、串话、重复执行及摘要内提示注入；调参集与固定留出集分离，业务结论始终人工复核"
-      - type: assertion
-        expect: "记录实际模型版本、问题模板版本、样本数、逐例预测/标注、混淆矩阵、错误 supported 数、人工复核耗时、端到端延迟和 token/实际可得费用；对照同等样本人工核验，报告是否提速及是否增加遗漏，不预先承诺准确率"
-      - type: assertion
-        expect: "留出集中的关键反例不得被标为 supported，辅助审阅不得比人工基线增加漏检且须观察到审阅耗时下降，才建议在阶段验收中试用；小样本结果不外推安全保证。未达标记录不采用的结论，评估交付可完成，不强制推广"
-      - type: assertion
-        expect: "无密钥、超时、限流、返回格式错误及低置信度均返回人工核验待办；请求有超时和调用预算，无无限重试。离线 fixture 与真实 API 结果分开记录，缺真实调用证据不得宣称效果已验证"
-      - type: command
-        run: "pnpm check"
-    dependencies: []
-    risk_level: L2
-    recommended_model: "gpt-5.6 sol"
-    investigation_hints: ["docs/application-architecture.md 第 14 节；.tasks/tasks.yaml 中 TASK-014/019/021 的验收条目；历史 memory 只在本地用于设计虚构反例","计划新增 scripts/verification/ 下独立工具与相邻 test；实施前核对仓库脚本惯例，不改 yuanpu-protocol 或产品依赖","实现时使用 typesafe-ai 技能核对官方 API/Choice/citation_check 文档；不直接照搬 cookbook 缓存或 Playground 分享机制","先跑字段拒绝、精确检查与 API 故障的离线行为测试，再做有界虚构样例评估；结果写 .tasks/verification/TASK-022/results.md，报告标明人工最终裁决与采用建议"]
-    escalation_conditions: ["需要真实业务文本或新增第三方处理商时明确数据和接收方，未获授权只推进虚构评估","缺密钥或真实 API 不可用时完成离线部分并标记效果 unverified，不影响其他任务人工验收"]
-    result:
-      owner: "sol-owner-task-022"
-      attempts: 0
-      claimed_at: "2026-09-22T06:56:20.251Z"
-      completed_at: "2026-09-22T07:31:58.120Z"
-      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-022"
-      branch: "task/task-022-jev-evidence-review"
-      evidence:
-        - {type: "commit", check: "integrated revision", status: "passed", summary: "TASK-022 branch merged into main at e799870729e04e32580d08810e6e4edc01157541; final reviewed branch revision was 6dfa0e4."}
-        - {type: "test", check: "focused evidence-review tests", status: "passed", summary: "Node 24.15.0 focused suite passed 11/11 on integrated main, covering data minimization, path and secret rejection, exact evidence checks, service failures, low confidence, and impossible human metrics."}
-        - {type: "command", check: "pnpm check", status: "passed", summary: "Integrated main passed the full build, Yuanpu typecheck, and test suite with Node 24.15.0 and pnpm 11.22.0."}
-        - {type: "review", check: "independent Sol security and standards review", status: "passed", summary: "Independent review closed Unix, URI, UNC and Windows path exfiltration gaps, invalid human-metric acceptance, duplicate evidence ids, and test placement; final verdict PASS with no blocker."}
-        - {type: "evaluation", check: "synthetic Jev pilot", status: "passed", summary: "One bounded jev-1.13.0 call used only 24 synthetic cases; no critical counterexample was incorrectly supported. Human timing and false-support baselines remain unverified, so the recorded recommendation is do_not_adopt."}
-        - {type: "memory", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-022.md and .tasks/verification/TASK-022/results.md record inputs, commands, review fixes, measured model behavior, and the unverified adoption boundary."}
       follow_up_candidates: []
   - id: TASK-023
     title: "确定微信 ClawBot 适配架构与安全边界"
