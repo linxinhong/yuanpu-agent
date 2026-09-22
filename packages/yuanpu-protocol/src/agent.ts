@@ -100,6 +100,7 @@ export type AgentContractErrorCode =
   | 'unsupported_contract_version'
   | 'identity_mismatch'
   | 'forbidden'
+  | 'queue_full'
   | 'idempotency_conflict'
   | 'invalid_transition'
   | 'run_not_found';

@@ -39,6 +39,7 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     ORDER BY name
   `).all().map((row) => row.name);
   assert.deepEqual(tables, [
+    'yp_agent_run_queue_payloads',
     'yp_agent_runs',
     'yp_conversation_bindings',
     'yp_delivery_attempts',
@@ -134,6 +135,83 @@ test('migration preserves a pre-existing real file fixture', async (context) => 
   inspection.close();
 });
 
+test('migration upgrades a schema-v1 run database without losing records', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-v1-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  const v1 = new DatabaseSync(path);
+  v1.exec(`
+    CREATE TABLE yp_schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    ) STRICT;
+    INSERT INTO yp_schema_migrations(version, applied_at) VALUES (1, 'fixture');
+    CREATE TABLE yp_agent_runs (
+      run_id TEXT PRIMARY KEY,
+      entry_point TEXT NOT NULL,
+      authority_id TEXT NOT NULL,
+      subject_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      input_digest TEXT NOT NULL,
+      request_metadata_json TEXT NOT NULL,
+      binding_id TEXT,
+      status TEXT NOT NULL,
+      external_effect_state TEXT NOT NULL,
+      approval_request_id TEXT,
+      approval_session_id TEXT,
+      approval_workspace_id TEXT,
+      approval_expires_at TEXT,
+      output_digest TEXT,
+      failure_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    INSERT INTO yp_agent_runs(
+      run_id, entry_point, authority_id, subject_id, idempotency_key,
+      request_fingerprint, input_digest, request_metadata_json, status,
+      external_effect_state, created_at, updated_at
+    ) VALUES (
+      'v1-run', 'desktop', 'desktop', 'user', 'request',
+      '${'a'.repeat(64)}', '${'b'.repeat(64)}', '{}', 'succeeded',
+      'possible', 'fixture', 'fixture'
+    );
+    INSERT INTO yp_agent_runs(
+      run_id, entry_point, authority_id, subject_id, idempotency_key,
+      request_fingerprint, input_digest, request_metadata_json, status,
+      external_effect_state, created_at, updated_at
+    ) VALUES (
+      'v1-queued', 'desktop', 'desktop', 'user', 'queued-request',
+      '${'c'.repeat(64)}', '${'d'.repeat(64)}', '{}', 'queued',
+      'none', 'fixture', 'fixture'
+    );
+  `);
+  v1.close();
+
+  const migrated = openYuanpuMetadataDatabase(path);
+  assert.equal(migrated.schemaVersion, YUANPU_METADATA_SCHEMA_VERSION);
+  migrated.close();
+  const inspection = new DatabaseSync(path, { readOnly: true });
+  assert.equal(inspection.prepare(
+    'SELECT status FROM yp_agent_runs WHERE run_id = ?',
+  ).get('v1-run').status, 'succeeded');
+  const migratedQueued = inspection.prepare(`
+    SELECT status, failure_code, failure_message, failure_retryable
+    FROM yp_agent_runs WHERE run_id = ?
+  `).get('v1-queued');
+  assert.equal(migratedQueued.status, 'interrupted');
+  assert.equal(migratedQueued.failure_code, 'migration_payload_unavailable');
+  assert.equal(
+    migratedQueued.failure_message,
+    'Queued input was not retained by metadata schema v1 and cannot be resumed.',
+  );
+  assert.equal(migratedQueued.failure_retryable, 1);
+  const columns = inspection.prepare('PRAGMA table_info(yp_agent_runs)').all().map((row) => row.name);
+  assert.equal(columns.includes('failure_message'), true);
+  assert.equal(columns.includes('failure_retryable'), true);
+  inspection.close();
+});
+
 test('refuses a database created by a newer Yuanpu schema', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-newer-'));
   context.after(() => rm(root, { recursive: true, force: true }));
@@ -150,6 +228,6 @@ test('refuses a database created by a newer Yuanpu schema', async (context) => {
 
   assert.throws(
     () => openYuanpuMetadataDatabase(path),
-    /schema 99 is newer than supported 1/,
+    new RegExp(`schema 99 is newer than supported ${YUANPU_METADATA_SCHEMA_VERSION}`),
   );
 });

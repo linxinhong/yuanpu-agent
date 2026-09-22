@@ -7,6 +7,7 @@ export const RUNTIME_ROUTES = {
   health: '/v1/health',
   greeting: '/v1/greeting',
   chat: '/v1/chat',
+  agentRuns: '/v1/agent/runs',
   localSkills: '/v1/skills/local',
   plugins: '/v1/plugins',
   pluginSearch: '/v1/plugins/search',

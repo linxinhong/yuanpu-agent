@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { capabilityApprovalSigningPayload } from '@yuanpu-agent/protocol';
+import { AGENT_CONTRACT_VERSION, capabilityApprovalSigningPayload } from '@yuanpu-agent/protocol';
 
 test('runtime CLI prints the default greeting from the Yuanpu runtime kit', () => {
   const output = execFileSync(process.execPath, ['dist/index.cjs'], { encoding: 'utf8' });
@@ -239,6 +239,56 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     body: JSON.stringify({ message: 'Hello' }),
   });
   const unconfiguredError = await unconfiguredChat.json();
+  const runtimeConfig = JSON.parse(await readFile(join(home, 'app', 'config.json'), 'utf8'));
+  const agentRequest = {
+    contractVersion: AGENT_CONTRACT_VERSION,
+    entryPoint: 'desktop',
+    identity: {
+      kind: 'local_user',
+      subjectId: 'local-user',
+      authorityId: 'local-desktop',
+      authenticatedBy: 'electron',
+    },
+    workspaceId: runtimeConfig.workingDirectory,
+    conversation: { namespace: 'desktop', conversationId: 'runtime-test' },
+    input: { type: 'text', text: 'Hello from AgentService' },
+    idempotencyKey: 'runtime-test-request',
+    delivery: { kind: 'desktop' },
+  };
+  const agentSubmissionResponse = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(agentRequest),
+  });
+  const agentSubmission = await agentSubmissionResponse.json();
+  const duplicateAgentSubmission = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(agentRequest),
+  }).then((response) => response.json());
+  const agentConflict = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ ...agentRequest, input: { type: 'text', text: 'Changed' } }),
+  });
+  let agentRun;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    agentRun = await fetch(
+      `http://${ready.host}:${ready.port}/v1/agent/runs/${agentSubmission.runId}`,
+      { headers },
+    ).then((response) => response.json());
+    if (agentRun.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const spoofedAgentSubmission = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...agentRequest,
+      idempotencyKey: 'spoofed',
+      identity: { ...agentRequest.identity, subjectId: 'other-user' },
+    }),
+  });
 
   assert.equal(unauthorized.status, 401);
   assert.equal(badToken.status, 401);
@@ -265,6 +315,14 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   });
   assert.equal(unconfiguredChat.status, 500);
   assert.match(unconfiguredError.hint, /config\.json/);
+  assert.equal(agentSubmissionResponse.status, 200);
+  assert.equal(agentSubmission.accepted, true);
+  assert.equal(duplicateAgentSubmission.runId, agentSubmission.runId);
+  assert.equal(duplicateAgentSubmission.duplicate, true);
+  assert.equal(agentConflict.status, 409);
+  assert.equal(agentRun.status, 'failed');
+  assert.match(agentRun.failure.message, /API key/);
+  assert.equal(spoofedAgentSubmission.status, 403);
   assert.deepEqual(health, {
     version: '0.1.0',
     protocolVersion: 3,
