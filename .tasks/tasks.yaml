@@ -463,7 +463,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-012
     title: "实现多会话与持久任务执行"
-    status: in_progress
+    status: done
     goal: "不同入口能提交、查询和取消独立会话中的任务，重启后保留可解释的执行状态。"
     scope:
       in: ["agent 与 persistence 实现、Pi 会话映射","现有桌面对话和 Runtime HTTP 消费者适配","现有审批绑定至 run 并恢复等待状态"]
@@ -490,10 +490,18 @@ tasks:
       owner: "sol-owner-task-012-92584-72012"
       attempts: 0
       claimed_at: "2026-09-22T08:00:13.834Z"
-      completed_at: null
+      completed_at: "2026-09-22T09:51:07.970Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-012"
       branch: "task/task-012-multi-session"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Branch task/task-012-multi-session (final a6a888d; implementation 8de9c79) was merged into main at 476f061; integrated shutdown corrections are included through final verified main 8abf297."}
+        - {type: "test", check: "multi-session durable execution", status: "passed", summary: "AgentService tests cover same-conversation serialization, cross-conversation concurrency limits, bounded durable queue, request deduplication, queued/running cancellation, identity/workspace isolation, restart recovery, result_unknown handling, approval binding and one-time approval semantics; 14 focused AgentService tests and 76 runtime-kit tests passed."}
+        - {type: "test", check: "existing Runtime consumers", status: "passed", summary: "Runtime HTTP integration, legacy chat compatibility, plugin and real MCP suites passed; shutdown wakes pending subscribers and completes executor cleanup before reporting cancellation errors."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Final main 8abf297 passed full build, Yuanpu TypeScript checks and all tests on macOS arm64 with Node 24.15.0 and pnpm 11.22.0: runtime-kit 76/76, Runtime 6/6 and Desktop 12/12."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "darwin-arm64 SEA, self-contained Python artifact, real native smoke and staged Runtime update smoke passed at ebf15f8; 8abf297 only retains the runtime hard-exit timer and then passed Runtime build/tests plus full pnpm check."}
+        - {type: "review", check: "independent Sol integration review", status: "passed", summary: "Independent spec and standards axes reviewed integrated main 8abf297; all shutdown-order, rejection handling and hard-exit findings were closed, with no blocker/high/medium finding remaining."}
+        - {type: "boundary", check: "platform and provider evidence", status: "unverified", summary: "Linux/Windows native execution, Windows ACL/process-group behavior, production signing and a real model provider remain unverified and are not claimed by TASK-012 completion."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-012.md records contracts, entry points, verification and remaining boundaries."}
       follow_up_candidates: []
   - id: TASK-013
     title: "完善 App 进程生命周期与升级恢复"
