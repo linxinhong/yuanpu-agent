@@ -63,16 +63,16 @@ assert.equal(capabilitySmoke.errorResult.isError, true);
 assert.match(capabilitySmoke.errorResult.content[0].text, /diagnostic error/i);
 assert.deepEqual(firstSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 3,
+  schemaVersion: 4,
   persistedCount: 1,
 });
 assert.deepEqual(secondSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 3,
+  schemaVersion: 4,
   persistedCount: 2,
 });
 assert.deepEqual(schedulerSmoke, {
-  schemaVersion: 3,
+  schemaVersion: 4,
   historyCount: 1,
   runStatus: 'succeeded',
   output: 'SEA scheduler persisted output',
