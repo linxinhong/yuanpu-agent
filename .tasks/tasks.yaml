@@ -633,7 +633,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-016
     title: "实现持久化定时任务与结果投递"
-    status: in_progress
+    status: done
     goal: "App 运行时定时触发 Pi，重新打开后按策略恢复，并保留每次执行与投递结果。"
     scope:
       in: ["scheduler 时间计划、时区、漏跑与并发规则","AgentService 提交及持久投递接口","Runtime 计划管理 API 和运行历史"]
@@ -660,10 +660,17 @@ tasks:
       owner: "sol-task016-owner-20260922-72012"
       attempts: 0
       claimed_at: "2026-09-22T10:21:05.679Z"
-      completed_at: null
+      completed_at: "2026-09-22T12:25:33.202Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-016"
       branch: "task/task-016-persistent-scheduler"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated scheduler implementation", status: "passed", summary: "Branch task/task-016-persistent-scheduler (final 07ef114; tested implementation 1952f17) was merged into main at fd5bf44; notification ownership and robust cleanup integration was corrected at 59f9ceb."}
+        - {type: "verification", check: "trigger, revision, timezone and recovery semantics", status: "passed", summary: "Controlled-clock and real SQLite tests cover one-shot and cron uniqueness, revision-specific trigger keys, default no-overlap behavior, bounded/coalesced misfires, restart recovery, sparse schedules and DST nonexistent/ambiguous wall times."}
+        - {type: "verification", check: "execution, delivery and shutdown semantics", status: "passed", summary: "Tests prove failures and waiting approvals are queryable, delivery retry reuses one safe key without rerunning Agent, unknown results are not resubmitted, shutdown records uncertain in-flight delivery, close races cannot start later delivery, and scheduler close failure cannot skip remaining Runtime resource cleanup."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Code revision 59f9ceb passed the full integrated check with Node 24.15.0/pnpm 11.22.0: runtime-kit 93/93, Runtime 10/10 and Desktop 20/20, plus builds and Yuanpu typechecks."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "Code revision 59f9ceb passed darwin-arm64 SEA build/smoke, schema-v3 persisted scheduler paths via the integrated native Runtime, self-contained Python artifact smoke and staged Runtime update smoke."}
+        - {type: "review", check: "independent implementation and integration review", status: "passed", summary: "The task branch passed independent review. Integrated review found the scheduler-notification ownership mismatch; revision 59f9ceb closes it with a real restart/notification/target/GET regression while retaining fixed caller authorization."}
+        - {type: "boundary", check: "external platform and production evidence", status: "unverified", summary: "Linux/Windows packaged scheduling, production signing and real model/channel delivery remain unverified and are not claimed by this task."}
       follow_up_candidates: []
   - id: TASK-017
     title: "确定首个 IM 接入契约与验证环境"
