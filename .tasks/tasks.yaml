@@ -660,7 +660,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-017
     title: "确定首个 IM 接入契约与验证环境"
-    status: in_progress
+    status: done
     goal: "明确一个首发平台的实际机器人类型、收发方式、配对规则和可验证环境。"
     scope:
       in: ["平台与机器人类型选择、官方文档核验","入站确认/离线补收/限流/附件约束与配置字段","私聊和群聊身份配对、原会话回复规则"]
@@ -685,14 +685,21 @@ tasks:
       owner: "sol-owner-task-017-72012"
       attempts: 0
       claimed_at: "2026-09-22T07:12:33.211Z"
-      completed_at: null
+      completed_at: "2026-09-22T12:22:35.184Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-017"
       branch: "task/task-017-im-contract"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated contract revision", status: "passed", summary: "Enterprise WeChat intelligent-bot WebSocket contract branch task/task-017-im-contract is integrated into main at e8a7174; sanitized authentication-spike evidence is recorded at 52a466d."}
+        - {type: "verification", check: "platform choice and official capability evidence", status: "passed", summary: "The contract selects Enterprise WeChat intelligent bot API mode over the rejected alternatives and official-source research establishes bidirectional WebSocket messaging, outbound-only network requirements, account requirements and lifecycle boundaries."}
+        - {type: "verification", check: "identity routing and delivery semantics", status: "passed", summary: "The integrated contract fixes connection/message/session identifiers, trusted sender pairing, msgid deduplication, immutable original-request reply routing, accepted/failed/unknown delivery states and no-blind-retry behavior."}
+        - {type: "command", check: "node scripts/verify-im-channel-contract.mjs", status: "passed", summary: "Integrated main passed all 14 normalized Enterprise WeChat contract scenarios under Node 24.15.0; node --check also passed."}
+        - {type: "verification", check: "one-time authenticated connectivity spike", status: "passed", summary: "Official SDK 1.0.7 on Node 24.15.0 authenticated to the real provider WSS without sending a message or logging raw content; the temporary Keychain secret was removed and the user deleted the provider-side test robot. No credential or provider identifier is included in repository evidence."}
+        - {type: "review", check: "independent Sol acceptance and security review", status: "passed", summary: "Independent review on main 52a466d found all four TASK-017 acceptance assertions covered, checker and task graph valid, authentication accurately separated from message E2E, and no real Bot ID, Secret, userid, chatid or webhook token in the reviewed repository artifacts."}
+        - {type: "boundary", check: "message-level external platform evidence", status: "unverified", summary: "Private/group message exchange, client display, provider rate-limit behavior, offline recovery and attachments remain unverified. These are implementation and E2E gates for TASK-018, which requires a newly created isolated robot and explicit test-conversation authorization."}
       follow_up_candidates: []
   - id: TASK-018
     title: "实现首个 IM 对话渠道"
-    status: pending
+    status: ready
     goal: "可信 IM 用户能通过机器人操作本机 Pi 并收到原会话回复。"
     scope:
       in: ["channels 共用路由及一个内置 adapter","配对、收发、消息去重、断线重连和取消","以持久队列实现回复发送与失败记录"]
