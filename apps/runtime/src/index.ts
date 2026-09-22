@@ -51,6 +51,7 @@ import { promisify } from 'node:util';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun } from './runtime-host.js';
+import { closeWecomChannels, startConfiguredWecomChannels } from './wecom-channel.js';
 
 declare const __APP_VERSION__: string;
 
@@ -535,6 +536,18 @@ async function serve(): Promise<void> {
     authorizeConversation: (conversation) => conversation.namespace === 'scheduler',
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
+  const wecomChannels = await startConfiguredWecomChannels({
+    appPath: home.appPath,
+    workspaceId: home.config.workingDirectory,
+    store: metadata.channels,
+    agent: agentService,
+    log: (record) => {
+      const message = `[wecom] ${record.event}`;
+      if (record.level === 'error') console.error(message);
+      else if (record.level === 'warn') console.warn(message);
+      else if (record.level === 'info') console.info(message);
+    },
+  });
   const scheduler = await PersistentScheduler.open({
     store: metadata.schedules,
     agent: agentService,
@@ -1275,6 +1288,7 @@ async function serve(): Promise<void> {
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
     cleanupPromise ??= cleanupRuntimeResources({
+      closeChannels: () => closeWecomChannels(wecomChannels),
       closeScheduler: () => scheduler.close(),
       closeNotificationRouter: () => notificationRouter.close(),
       closeAgentService: () => agentService.close(),

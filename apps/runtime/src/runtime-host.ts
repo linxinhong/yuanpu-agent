@@ -15,6 +15,7 @@ export async function getDesktopNavigableRun(
 }
 
 export interface RuntimeCleanupResources {
+  closeChannels?(): Promise<void>;
   closeScheduler(): Promise<void>;
   closeNotificationRouter(): void;
   closeAgentService(): Promise<void>;
@@ -24,6 +25,15 @@ export interface RuntimeCleanupResources {
 
 export async function cleanupRuntimeResources(resources: RuntimeCleanupResources): Promise<void> {
   const failures: unknown[] = [];
+  const channelResults = await Promise.allSettled([
+    ...(resources.closeChannels
+      ? [Promise.resolve().then(() => resources.closeChannels!())]
+      : []),
+  ]);
+  failures.push(...channelResults
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason));
+
   const [schedulerResult] = await Promise.allSettled([
     Promise.resolve().then(() => resources.closeScheduler()),
   ]);

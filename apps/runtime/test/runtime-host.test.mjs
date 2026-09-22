@@ -46,11 +46,16 @@ test('desktop navigation uses only the fixed desktop and scheduler authorization
 
 test('cleanup continues after scheduler rejection and aggregates all close failures', async () => {
   const calls = [];
+  const channelFailure = new Error('channel close failed');
   const schedulerFailure = new Error('scheduler close failed');
   const agentFailure = new Error('agent close failed');
 
   await assert.rejects(
     cleanupRuntimeResources({
+      async closeChannels() {
+        calls.push('channels');
+        throw channelFailure;
+      },
       async closeScheduler() {
         calls.push('scheduler');
         throw schedulerFailure;
@@ -71,9 +76,9 @@ test('cleanup continues after scheduler rejection and aggregates all close failu
     }),
     (error) => {
       assert.equal(error instanceof AggregateError, true);
-      assert.deepEqual(error.errors, [schedulerFailure, agentFailure]);
+      assert.deepEqual(error.errors, [channelFailure, schedulerFailure, agentFailure]);
       return true;
     },
   );
-  assert.deepEqual(calls, ['scheduler', 'notification', 'agent', 'python', 'metadata']);
+  assert.deepEqual(calls, ['channels', 'scheduler', 'notification', 'agent', 'python', 'metadata']);
 });
