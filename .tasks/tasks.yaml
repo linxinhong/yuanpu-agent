@@ -547,7 +547,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-014
     title: "本机执行与生命周期阶段验证"
-    status: ready
+    status: in_progress
     goal: "独立证明单机多入口执行基础能隔离会话、恢复状态并遵守 App 生命周期。"
     scope:
       in: ["真实 Runtime API、Pi 会话、SQLite 与子进程的组合验证","身份、审批重放、退出与升级的独立边界审查"]
@@ -573,12 +573,12 @@ tasks:
     investigation_hints: ["docs/application-architecture.md 第 5、6、10、11 节；上述实现测试及 apps/runtime/test","先跑可控模型/工具测试，再对已配置模型做脱敏对话；主张真实模型成功必须记录实际结果","pnpm check 与 pnpm build:native && pnpm smoke:native；证据写 .tasks/verification/TASK-014/results.md"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "sol-verifier-task-014-20260922-72012"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-22T09:52:21.380Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-014"
+      branch: "task/task-014-lifecycle-verification"
       evidence: []
       follow_up_candidates: []
   - id: TASK-015
