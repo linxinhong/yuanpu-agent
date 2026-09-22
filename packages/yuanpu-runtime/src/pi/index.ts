@@ -3,6 +3,7 @@ import {
   DefaultResourceLoader,
   defineTool,
   ModelRuntime,
+  SessionManager,
   SettingsManager,
   type AgentToolResult,
   type CreateAgentSessionOptions,
@@ -145,6 +146,7 @@ export function createYuanpuAgentSession(
 export interface YuanpuChatResult {
   message: string;
   tools: Array<{ name: string; status: 'completed' | 'failed' }>;
+  pendingApprovalRequestId?: string;
 }
 
 export interface YuanpuExtensionDiagnostic {
@@ -224,10 +226,13 @@ export interface CreateYuanpuChatOptions {
   apiKeyEnv: string;
   baseUrl?: string;
   api?: 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
+  piSession?: { id: string; directory: string };
 }
 
 export interface YuanpuChatSession {
-  prompt(message: string): Promise<YuanpuChatResult>;
+  readonly sessionId: string;
+  prompt(message: string, options?: { runId?: string; signal?: AbortSignal }): Promise<YuanpuChatResult>;
+  abort(): Promise<void>;
   dispose(): void;
 }
 
@@ -293,45 +298,80 @@ export async function createYuanpuChatSession(
   });
   await resourceLoader.reload();
 
+  const capabilityContext = { ...options.capabilityContext };
+  const existingSessionPath = options.piSession
+    ? SessionManager.findById(options.cwd, options.piSession.id, options.piSession.directory)
+    : undefined;
+  const sessionManager = options.piSession
+    ? existingSessionPath
+      ? SessionManager.open(existingSessionPath, options.piSession.directory, options.cwd)
+      : SessionManager.create(options.cwd, options.piSession.directory, { id: options.piSession.id })
+    : undefined;
   const { session } = await createYuanpuAgentSession({
     capabilityClient: options.capabilityClient,
-    capabilityContext: options.capabilityContext,
+    capabilityContext,
     cwd: options.cwd,
     agentDir: options.agentDir,
     model,
     modelRuntime,
     resourceLoader,
+    ...(sessionManager ? { sessionManager } : {}),
     settingsManager,
   });
 
   let queue: Promise<void> = Promise.resolve();
-  const runPrompt = async (message: string): Promise<YuanpuChatResult> => {
+  const runPrompt = async (
+    message: string,
+    options: { runId?: string; signal?: AbortSignal } = {},
+  ): Promise<YuanpuChatResult> => {
+    if (options.signal?.aborted) throw new DOMException('Agent run was cancelled.', 'AbortError');
+    capabilityContext.runId = options.runId;
     let text = '';
     const toolStates = new Map<string, 'completed' | 'failed'>();
+    let pendingApprovalRequestId: string | undefined;
     const unsubscribe = session.subscribe((event) => {
       if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
         text += event.assistantMessageEvent.delta;
       }
       if (event.type === 'tool_execution_end') {
         toolStates.set(event.toolName, event.isError ? 'failed' : 'completed');
+        const details = event.result?.details as {
+          capabilityError?: { error?: unknown; approvalRequestId?: unknown };
+        } | undefined;
+        if (
+          details?.capabilityError?.error === 'needs_approval'
+          && typeof details.capabilityError.approvalRequestId === 'string'
+        ) {
+          pendingApprovalRequestId ??= details.capabilityError.approvalRequestId;
+        }
       }
     });
+    const abort = () => {
+      void session.abort();
+    };
+    options.signal?.addEventListener('abort', abort, { once: true });
     try {
       await session.prompt(message);
       return {
         message: text.trim() || '完成。',
         tools: [...toolStates].map(([name, status]) => ({ name, status })),
+        ...(pendingApprovalRequestId ? { pendingApprovalRequestId } : {}),
       };
     } finally {
+      options.signal?.removeEventListener('abort', abort);
       unsubscribe();
     }
   };
 
   return {
-    prompt(message) {
-      const task = queue.then(() => runPrompt(message));
+    sessionId: session.sessionId,
+    prompt(message, options) {
+      const task = queue.then(() => runPrompt(message, options));
       queue = task.then(() => undefined, () => undefined);
       return task;
+    },
+    abort() {
+      return session.abort();
     },
     dispose() {
       session.dispose();

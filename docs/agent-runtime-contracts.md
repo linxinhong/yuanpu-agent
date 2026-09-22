@@ -1,8 +1,8 @@
 # Agent execution and host event contracts
 
-Status: contract baseline for TASK-011. Implementation of the multi-session service and its HTTP
-transport belongs to TASK-012. This document records the boundary that those implementations must
-follow; a type or table declaration is not evidence that a live provider exists.
+Status: contract baseline from TASK-011 with the TASK-012 multi-session provider and desktop HTTP
+transport now implemented. This document records both the boundary and the live provider; a future
+type or table declaration alone is still not evidence that a provider exists.
 
 ## Compatibility boundary
 
@@ -10,9 +10,12 @@ follow; a type or table declaration is not evidence that a live provider exists.
   `ChatResponse` are unchanged and remain the desktop compatibility path.
 - The additive execution DTOs use `AGENT_CONTRACT_VERSION = 1`; host events independently use
   `HOST_EVENT_CONTRACT_VERSION = 1`. Consumers reject unknown versions with an observable error.
-- No AgentService HTTP route or host-event transport is advertised by TASK-011. TASK-012 and
-  TASK-015 must add routes only when their providers are live and tested. A transport must carry the
-  contract version and preserve the rejection/result shapes in `@yuanpu-agent/protocol`.
+- Runtime exposes the live AgentService to its authenticated desktop host at `POST /v1/agent/runs`,
+  `GET /v1/agent/runs/:runId`, and `POST /v1/agent/runs/:runId/cancel`. The legacy `POST /v1/chat`
+  path submits to the same service and waits for its run, preserving its existing response shape.
+  IM and Scheduler transports are not advertised until their trusted adapters exist. Host-event
+  transport remains TASK-015. Every submission carries the contract version and preserves the
+  rejection/result shapes in `@yuanpu-agent/protocol`.
 - A future incompatible change increments the affected contract version. Additive optional fields
   may retain the version only when old consumers can safely ignore them. Runtime update manifests
   continue to use the existing exact desktop/Runtime protocol check until a separately tested
@@ -44,6 +47,11 @@ identity, conversation, workspace, or delivery produces `idempotency_conflict`; 
 second run.
 
 ## Run lifecycle
+
+The Runtime admits at most 100 queued runs and executes at most four sessions concurrently. Runs
+bound to the same Pi session are strictly serial; independent session bindings may use the global
+concurrency slots. Queue admission and idempotency lookup share one SQLite transaction, so a retry of
+an admitted request still resolves to its original run when the queue is full.
 
 The only run statuses are:
 
@@ -111,7 +119,7 @@ Yuanpu workflow metadata lives in `~/.yuanpu/workflows/automation.sqlite`. It is
 session store: Pi owns conversation content, while Yuanpu owns external conversation bindings, run
 metadata, deduplication, and delivery state. The Runtime is the single writer.
 
-Schema version 1 is managed by `packages/yuanpu-runtime/src/persistence/index.ts` using Node 24's
+Schema version 2 is managed by `packages/yuanpu-runtime/src/persistence/index.ts` using Node 24's
 built-in `node:sqlite` driver:
 
 | Table | Owner and purpose |
@@ -120,6 +128,7 @@ built-in `node:sqlite` driver:
 | `yp_runtime_metadata` | persistence module; small Runtime metadata/probes |
 | `yp_conversation_bindings` | AgentService; external-to-Pi session mapping only |
 | `yp_agent_runs` | AgentService; owner, non-content request/output digests, status, approval/effect checkpoints |
+| `yp_agent_run_queue_payloads` | AgentService; input retained only while safely queued and deleted on claim or cancellation |
 | `yp_delivery_attempts` | delivery adapters; delivery state independent of execution |
 | `yp_inbound_deduplication` | channel ingress; authenticated source message deduplication |
 
@@ -132,8 +141,11 @@ from referencing another owner's binding and prevent inbound deduplication from 
 owner's run. Durable `AgentRunRecord` is deliberately separate from the submission: it contains
 owner/context metadata and input/output digests, while live completion may attach optional output.
 The run table therefore does not store the complete `AgentRunRequest`, output message, or duplicate
-Pi conversation content. Any future durable task or delivery payload needs an explicit
-retention/redaction/cleanup design owned by its feature rather than being hidden in this baseline.
+Pi conversation content. TASK-012 adds one explicit exception for crash-safe admission: the queue
+payload table retains only input text while status is `queued`; claiming or cancelling the run
+deletes it in the same transaction. Once execution starts, Pi owns the persisted conversation and
+Yuanpu retains only digests and status. Future durable task or delivery payloads still need an
+explicit retention/redaction/cleanup design rather than being hidden in run metadata.
 Tests use real files, including migration over a pre-existing fixture. The native smoke executes the
 actual SEA twice against the same file and verifies a persisted counter after close/reopen; Node
 development mode alone is not accepted as driver compatibility evidence.

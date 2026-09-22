@@ -190,6 +190,11 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
     });
   }
 
+  get(requestId: string): CapabilityApprovalRecord | undefined {
+    const record = this.#records.find((candidate) => candidate.requestId === requestId);
+    return record ? { ...record } : undefined;
+  }
+
   async decide(requestId: string, decision: 'approved' | 'denied'): Promise<CapabilityApprovalRecord> {
     return this.#locked(async () => {
       this.#expireRecords();

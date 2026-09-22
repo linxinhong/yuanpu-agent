@@ -4,7 +4,6 @@ import {
   ManagedMcpCapabilitySource,
   createYuanpuMcpServer,
   createYuanpuCapabilityTools,
-  createYuanpuChatSession,
   CAPABILITY_TOOL_NAMES,
   ensureYuanpuHome,
   greeting,
@@ -15,12 +14,14 @@ import {
   CapabilityArtifactManager,
   capabilityManifestDigest,
   openYuanpuMetadataDatabase,
+  PersistentAgentService,
   validateCapabilityConfig,
   detectMcpOwnershipConflicts,
   type ArtifactTrustRoot,
-  type YuanpuChatSession,
+  type AuthenticatedAgentCaller,
 } from '@yuanpu-agent/runtime-kit';
 import {
+  AGENT_CONTRACT_VERSION,
   PROTOCOL_VERSION,
   RUNTIME_ROUTES,
   capabilityApprovalSigningPayload,
@@ -38,6 +39,8 @@ import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+
+import { RuntimeAgentExecutor } from './agent-runtime.js';
 
 declare const __APP_VERSION__: string;
 
@@ -339,25 +342,40 @@ async function serve(): Promise<void> {
     discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS,
   });
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
-  let chatPromise: Promise<YuanpuChatSession> | undefined;
-  let chatSessionId: string | undefined;
-  let activePrompts = 0;
-  const retiredChats = new Set<Promise<YuanpuChatSession>>();
-  const disposeRetiredChats = () => {
-    if (activePrompts > 0) return;
-    for (const retired of retiredChats) {
-      retiredChats.delete(retired);
-      void retired.then((chat) => chat.dispose(), () => undefined);
-    }
-  };
-  const resetChat = () => {
-    const previous = chatPromise;
-    const previousSessionId = chatSessionId;
-    chatPromise = undefined;
-    chatSessionId = undefined;
-    if (previousSessionId) void approvals.cancelSession(previousSessionId);
-    if (previous) retiredChats.add(previous);
-    disposeRetiredChats();
+  const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
+  const agentExecutor = new RuntimeAgentExecutor({
+    getCapabilityClient: () => mcp,
+    approvals,
+    sessionsPath: home.sessionsPath,
+    chat: {
+      agentDir: home.agentPath,
+      cwd: home.config.workingDirectory,
+      provider: home.config.provider,
+      model: home.config.model,
+      apiKey: process.env[home.config.apiKeyEnv],
+      apiKeyEnv: home.config.apiKeyEnv,
+      baseUrl: home.config.baseUrl,
+      api: home.config.api,
+    },
+  });
+  const agentService = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: agentExecutor,
+    approvals,
+    maximumConcurrentRuns: 4,
+    maximumQueuedRuns: 100,
+  });
+  const desktopCaller: AuthenticatedAgentCaller = {
+    entryPoint: 'desktop',
+    identity: {
+      kind: 'local_user',
+      subjectId: 'local-user',
+      authorityId: 'local-desktop',
+      authenticatedBy: 'electron',
+    },
+    authorizeWorkspace: (workspaceId) => workspaceId === home.config.workingDirectory,
+    authorizeConversation: (conversation) => conversation.namespace === 'desktop',
+    authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
   const activatePythonArtifact = async (entrypoint: string, installPath: string, version: string) => {
     const previousSource = pythonSource;
@@ -374,30 +392,8 @@ async function serve(): Promise<void> {
       approvals,
       { discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS },
     );
-    resetChat();
+    agentExecutor.reset();
     await previousSource?.close();
-  };
-  const getChat = () => {
-    if (!chatPromise) {
-      chatSessionId = randomUUID();
-      chatPromise = createYuanpuChatSession({
-      capabilityClient: mcp,
-      capabilityContext: {
-        sessionId: chatSessionId,
-        workspaceId: home.config.workingDirectory,
-        userId: 'local-user',
-      },
-      agentDir: home.agentPath,
-      cwd: home.config.workingDirectory,
-      provider: home.config.provider,
-      model: home.config.model,
-      apiKey: process.env[home.config.apiKeyEnv],
-      apiKeyEnv: home.config.apiKeyEnv,
-      baseUrl: home.config.baseUrl,
-      api: home.config.api,
-      });
-    }
-    return chatPromise;
   };
   const inspectPlugin = async (plugin: { installPath: string }) => {
     const diagnostics = await inspectYuanpuExtensions({
@@ -405,6 +401,27 @@ async function serve(): Promise<void> {
       cwd: home.config.workingDirectory,
     });
     return diagnostics.filter((diagnostic) => diagnostic.path.startsWith(plugin.installPath));
+  };
+  const waitForDesktopRun = async (runId: string) => {
+    for await (const run of agentService.subscribe(desktopCaller, runId)) {
+      if (run.status === 'succeeded') {
+        if (!run.output) throw new Error('Agent run completed without a live output.');
+        return run.output;
+      }
+      if (
+        run.status === 'failed'
+        || run.status === 'cancelled'
+        || run.status === 'interrupted'
+        || run.status === 'result_unknown'
+      ) {
+        throw new Error(run.failure?.message ?? `Agent run ended with status ${run.status}.`);
+      }
+      if (run.status === 'waiting_approval') {
+        if (run.output) return run.output;
+        throw new Error(`Agent run is waiting for approval ${run.pendingApproval?.approvalRequestId ?? ''}.`);
+      }
+    }
+    throw new Error('Agent run is not available to the desktop caller.');
   };
 
   const server = createServer(async (request, response) => {
@@ -443,14 +460,52 @@ async function serve(): Promise<void> {
           response.end(JSON.stringify({ error: 'A non-empty message is required.' }));
           return;
         }
-        activePrompts += 1;
-        try {
-          const result = await (await getChat()).prompt(body.message.trim());
-          response.end(JSON.stringify(result));
-        } finally {
-          activePrompts -= 1;
-          disposeRetiredChats();
+        const submission = await agentService.submit(desktopCaller, {
+          contractVersion: AGENT_CONTRACT_VERSION,
+          entryPoint: 'desktop',
+          identity: desktopCaller.identity,
+          workspaceId: home.config.workingDirectory,
+          conversation: { namespace: 'desktop', conversationId: 'default' },
+          input: { type: 'text', text: body.message.trim() },
+          idempotencyKey: randomUUID(),
+          delivery: { kind: 'desktop' },
+        });
+        if (!submission.accepted) throw new Error(submission.message);
+        response.end(JSON.stringify(await waitForDesktopRun(submission.runId)));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.agentRuns && request.method === 'POST') {
+        const submission = await agentService.submit(desktopCaller, await readJsonBody(request));
+        if (!submission.accepted) {
+          response.statusCode = submission.code === 'queue_full'
+            ? 429
+            : submission.code === 'forbidden' || submission.code === 'identity_mismatch'
+              ? 403
+              : submission.code === 'idempotency_conflict'
+                ? 409
+                : 400;
         }
+        response.end(JSON.stringify(submission));
+        return;
+      }
+
+      const agentRunPath = url.pathname.startsWith(`${RUNTIME_ROUTES.agentRuns}/`)
+        ? url.pathname.slice(RUNTIME_ROUTES.agentRuns.length + 1).split('/')
+        : undefined;
+      if (agentRunPath?.length === 1 && request.method === 'GET') {
+        const run = await agentService.get(desktopCaller, decodeURIComponent(agentRunPath[0]!));
+        response.statusCode = run ? 200 : 404;
+        response.end(JSON.stringify(run ?? { error: 'Agent run not found.' }));
+        return;
+      }
+      if (agentRunPath?.length === 2 && agentRunPath[1] === 'cancel' && request.method === 'POST') {
+        const receipt = await agentService.cancel(
+          desktopCaller,
+          decodeURIComponent(agentRunPath[0]!),
+        );
+        response.statusCode = receipt.result === 'not_found' ? 404 : 200;
+        response.end(JSON.stringify(receipt));
         return;
       }
 
@@ -509,19 +564,27 @@ async function serve(): Promise<void> {
           const oldest = usedDecisionNonces.values().next().value as string | undefined;
           if (oldest) usedDecisionNonces.delete(oldest);
         }
+        const execution = approvals.executionFor(body.requestId);
         try {
+          if (!execution) throw new Error('Approved capability execution is no longer available.');
           await approvals.decide(body.requestId, body.decision);
           if (body.decision === 'denied') {
+            if (execution.runId) {
+              agentService.failApproval(
+                execution.runId,
+                body.requestId,
+                'Capability approval was denied by the desktop user.',
+              );
+            }
             response.end(JSON.stringify({ requestId: body.requestId, status: 'denied' }));
             return;
           }
-          const execution = approvals.executionFor(body.requestId);
-          if (!execution) throw new Error('Approved capability execution is no longer available.');
           const result = await mcp.execute({
             name: execution.capabilityId,
             arguments: execution.arguments,
             approvalRequestId: execution.requestId,
           }, {
+            runId: execution.runId,
             sessionId: execution.sessionId,
             workspaceId: execution.workspaceId,
           });
@@ -529,8 +592,29 @@ async function serve(): Promise<void> {
             .filter((block): block is Extract<(typeof result.content)[number], { type: 'text' }> => block.type === 'text')
             .map((block) => block.text)
             .join('\n') || JSON.stringify(result.structuredContent ?? {});
+          if (execution.runId) {
+            if (result.isError) {
+              agentService.failApproval(execution.runId, body.requestId, message);
+            } else {
+              agentService.completeApproval(execution.runId, body.requestId, {
+                message,
+                tools: [{ name: execution.capabilityId, status: 'completed' }],
+              });
+            }
+          }
           response.end(JSON.stringify({ requestId: body.requestId, status: 'completed', message }));
         } catch (error) {
+          if (execution?.runId) {
+            try {
+              agentService.failApproval(
+                execution.runId,
+                body.requestId,
+                error instanceof Error ? error.message : String(error),
+              );
+            } catch {
+              // The run may already be terminal (for example, after a denied decision).
+            }
+          }
           response.statusCode = 409;
           response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
         }
@@ -646,7 +730,7 @@ async function serve(): Promise<void> {
           document = await artifactConfigDocument(input.scope);
         } else {
           document = await plugins.saveConfig(input);
-          resetChat();
+          agentExecutor.reset();
         }
         response.end(JSON.stringify(document));
         return;
@@ -663,7 +747,7 @@ async function serve(): Promise<void> {
         const document = body.name === 'builtin.python.echo'
           ? (await rm(pythonConfigFile, { force: true }), await artifactConfigDocument(scope))
           : await plugins.resetConfig(body.name, scope);
-        if (body.name !== 'builtin.python.echo') resetChat();
+        if (body.name !== 'builtin.python.echo') agentExecutor.reset();
         response.end(JSON.stringify(document));
         return;
       }
@@ -723,14 +807,14 @@ async function serve(): Promise<void> {
         if (pluginErrors.length > 0) {
           const message = pluginErrors.map((diagnostic) => diagnostic.error).join('\n');
           await plugins.markLoadError(plugin.name, message);
-          resetChat();
+          agentExecutor.reset();
           response.statusCode = 422;
           response.end(JSON.stringify({
             error: `插件已安装但加载失败，已自动停用：${message}`,
           }));
           return;
         }
-        resetChat();
+        agentExecutor.reset();
         response.end(JSON.stringify(plugin));
         return;
       }
@@ -781,7 +865,7 @@ async function serve(): Promise<void> {
           if (pluginErrors.length > 0) {
             const message = pluginErrors.map((diagnostic) => diagnostic.error).join('\n');
             await plugins.markLoadError(plugin.name, message);
-            resetChat();
+            agentExecutor.reset();
             response.statusCode = 422;
             response.end(JSON.stringify({
               error: `插件加载失败，已重新停用：${message}`,
@@ -789,7 +873,7 @@ async function serve(): Promise<void> {
             return;
           }
         }
-        resetChat();
+        agentExecutor.reset();
         response.end(JSON.stringify(plugin));
         return;
       }
@@ -802,7 +886,7 @@ async function serve(): Promise<void> {
           return;
         }
         await plugins.uninstall(body.name);
-        resetChat();
+        agentExecutor.reset();
         response.end(JSON.stringify({ ok: true }));
         return;
       }
@@ -824,8 +908,16 @@ async function serve(): Promise<void> {
       }));
     }
   });
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = () => {
+    cleanupPromise ??= agentService.close().finally(async () => {
+      metadata.close();
+      await pythonSource?.close();
+    });
+    return cleanupPromise;
+  };
   server.on('close', () => {
-    if (chatSessionId) void approvals.cancelSession(chatSessionId);
+    void cleanup();
   });
 
   server.listen(requestedPort, '127.0.0.1', () => {
@@ -846,12 +938,8 @@ async function serve(): Promise<void> {
   });
 
   const shutdown = () => {
-    resetChat();
-    activePrompts = 0;
-    disposeRetiredChats();
     server.close(() => {
-      void pythonSource?.close().finally(() => process.exit(0));
-      if (!pythonSource) process.exit(0);
+      void cleanup().finally(() => process.exit(0));
     });
   };
   process.once('SIGINT', shutdown);

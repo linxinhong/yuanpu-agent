@@ -233,7 +233,7 @@ test('restart recovery never claims an uncertain run or delivery succeeded', () 
   assert.throws(() => transitionDelivery('result_unknown', 'start'), /Invalid delivery transition/);
 });
 
-test('the legacy chat route remains unchanged while AgentService is contract-only', () => {
+test('the legacy chat route remains unchanged when the AgentService route becomes live', () => {
   assert.equal(RUNTIME_ROUTES.chat, '/v1/chat');
-  assert.equal('agentRuns' in RUNTIME_ROUTES, false);
+  assert.equal(RUNTIME_ROUTES.agentRuns, '/v1/agent/runs');
 });

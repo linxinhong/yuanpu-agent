@@ -2,7 +2,11 @@ import { chmodSync, closeSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 1;
+import { AgentRunStore } from './agent-run-store.js';
+
+export * from './agent-run-store.js';
+
+export const YUANPU_METADATA_SCHEMA_VERSION = 2;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -105,6 +109,19 @@ const migrations: readonly Migration[] = [{
         REFERENCES yp_agent_runs(run_id, entry_point, authority_id, subject_id)
     ) STRICT;
   `,
+}, {
+  version: 2,
+  sql: `
+    ALTER TABLE yp_agent_runs ADD COLUMN failure_message TEXT;
+    ALTER TABLE yp_agent_runs ADD COLUMN failure_retryable INTEGER
+      CHECK (failure_retryable IN (0, 1));
+
+    CREATE TABLE yp_agent_run_queue_payloads (
+      run_id TEXT PRIMARY KEY REFERENCES yp_agent_runs(run_id),
+      input_text TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    ) STRICT;
+  `,
 }];
 
 function applyMigrations(database: DatabaseSync): number {
@@ -143,9 +160,11 @@ function applyMigrations(database: DatabaseSync): number {
 export class YuanpuMetadataDatabase {
   readonly driver = YUANPU_SQLITE_DRIVER;
   readonly schemaVersion: number;
+  readonly agentRuns: AgentRunStore;
 
   constructor(private readonly database: DatabaseSync) {
     this.schemaVersion = applyMigrations(database);
+    this.agentRuns = new AgentRunStore(database);
   }
 
   getMetadata(key: string): string | undefined {
