@@ -29,6 +29,8 @@ node scripts/verification/jev-evidence-review.mjs \
 
 在 Node 24.15.0 上，字段拒绝、精确检查、密钥隔离、无密钥、超时、429、无重试、错误响应和低置信度回退的离线测试通过。dry-run 和离线 fixture 运行成功。
 
+独立 Sol 只读评审补充发现并已修复：`/workspace/...` 等通用绝对路径拒绝、负耗时或超样本漏检数不能满足采用门槛、acceptance/evidence ID 必须唯一，以及测试需放入相邻 `test/` 目录。评审提出的“未授权实现”不适用：用户在建卡后明确要求 Sol 子代理领卡处理，构成本次实施与提交授权。
+
 一次有界真实 API 调用只发送上述 24 个虚构样例：实际模型 `jev-1.13.0`，端到端 1452 ms，输入 5699 tokens、输出 1199 tokens，按当日官方输入单价估算费用 USD 0.00023936。模型没有把任何 contradicted/insufficient 样例错判为 supported，固定留出集关键反例的错误 supported 为 0。它将 7 个标注为 insufficient 的范围不足样例判为 contradicted，说明三分类边界仍需调校；这不影响“关键反例不得标为 supported”的本次安全门槛，但不能据此宣称整体准确率合格。
 
 真人对相同样本的基线耗时、辅助审阅耗时和人工漏检数尚未取得，均保持 `unverified`。因此当前采用建议为 `do_not_adopt`，不能声称已经提速或未增加人工漏检。完整逐例结果和混淆矩阵见 `live-synthetic.json`；离线结果见 `offline-fixture.json`。
