@@ -542,3 +542,87 @@ test('shutdown marks an in-flight delivery unknown and restart retries only with
   await agent.close();
   metadata.close();
 });
+
+test('close racing an awaited run lookup cannot start a delivery afterwards', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-close-race-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  let now = new Date('2026-09-22T00:00:30.000Z');
+  const metadata = openYuanpuMetadataDatabase(path);
+  const agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: {
+      async execute(input) {
+        return { kind: 'completed', output: { message: input.input, tools: [] } };
+      },
+    },
+    now: () => now,
+  });
+  let scheduler = await PersistentScheduler.open({
+    store: metadata.schedules,
+    agent,
+    caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true,
+    delivery: {
+      supports: () => true,
+      supportsIdempotency: () => true,
+      async deliver() { throw new Error('initial failure'); },
+    },
+    now: () => now,
+    scanIntervalMs: 60_000,
+  });
+  const schedule = scheduler.create(scheduleInput({
+    timing: { kind: 'once', at: '2026-09-22T00:01:00.000Z' },
+    delivery: { kind: 'channel', routeId: 'race-route' },
+  }));
+  now = new Date('2026-09-22T00:01:00.000Z');
+  await scheduler.tick();
+  await eventually(() => scheduler.history(schedule.scheduleId)[0]?.deliveryStatus === 'failed');
+  await scheduler.close();
+  await agent.close();
+
+  let retryEnabled = false;
+  let getCalls = 0;
+  let lookupBlocked = false;
+  let releaseLookup;
+  const lookupBarrier = new Promise((resolve) => { releaseLookup = resolve; });
+  const persistedAgent = {
+    async submit() { throw new Error('no new submission expected'); },
+    async get(_caller, runId) {
+      getCalls += 1;
+      if (retryEnabled && getCalls === 2) {
+        lookupBlocked = true;
+        await lookupBarrier;
+      }
+      return metadata.agentRuns.get(runId);
+    },
+    async cancel() { throw new Error('no cancellation expected'); },
+    async *subscribe() {},
+  };
+  let deliveredAfterClose = false;
+  scheduler = await PersistentScheduler.open({
+    store: metadata.schedules,
+    agent: persistedAgent,
+    caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true,
+    delivery: {
+      supports: () => true,
+      supportsIdempotency: () => retryEnabled,
+      async deliver() { deliveredAfterClose = true; },
+    },
+    now: () => now,
+    scanIntervalMs: 60_000,
+  });
+  getCalls = 0;
+  retryEnabled = true;
+  const tick = scheduler.tick();
+  await eventually(() => lookupBlocked);
+  const closing = scheduler.close();
+  releaseLookup();
+  await Promise.all([tick, closing]);
+  assert.equal(deliveredAfterClose, false);
+  assert.equal(scheduler.history(schedule.scheduleId)[0].deliveryStatus, 'failed');
+  metadata.close();
+});

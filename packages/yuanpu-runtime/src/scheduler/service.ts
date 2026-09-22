@@ -400,6 +400,7 @@ export class PersistentScheduler {
   async #reconcileTrigger(trigger: PersistedScheduleTrigger): Promise<void> {
     if (!trigger.runId) return;
     const run = await this.#agent.get(this.#caller, trigger.runId);
+    if (this.#closed) return;
     if (!run) return;
     if (run.status === 'succeeded') {
       if (!run.output) {
@@ -428,12 +429,14 @@ export class PersistentScheduler {
 
   async #retryDeliveries(): Promise<void> {
     for (const delivery of this.#store.listDeliveriesForRetry()) {
+      if (this.#closed) return;
       const retry = delivery.status !== 'pending';
       if (delivery.attempts >= this.#maximumDeliveryAttempts) continue;
       if (retry && !this.#delivery?.supportsIdempotency(delivery.target)) continue;
       const trigger = this.#store.listSubmitted().find((item) => item.runId === delivery.runId);
       if (!trigger) continue;
       const run = await this.#agent.get(this.#caller, delivery.runId);
+      if (this.#closed) return;
       if (!run?.output) continue;
       const claimed = this.#store.claimDelivery(delivery.deliveryId, this.#now().toISOString());
       if (!claimed) continue;
