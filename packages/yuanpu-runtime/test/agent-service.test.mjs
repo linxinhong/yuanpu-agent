@@ -611,6 +611,45 @@ test('shutdown records active work as result unknown, preserves queued work, and
   database.close();
 });
 
+test('shutdown finishes abort and executor cleanup before reporting approval cancellation errors', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  let executorClosed = false;
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    approvals: {
+      async cancelRun() {
+        throw new Error('approval persistence failed');
+      },
+    },
+    executor: {
+      async execute(input) {
+        return {
+          kind: 'waiting_approval',
+          approval: {
+            runId: input.run.runId,
+            approvalRequestId: 'approval-close-failure',
+            sessionId: input.piSessionId,
+            workspaceId: input.run.context.workspaceId,
+            expiresAt: futureExpiry(),
+          },
+          output: { message: 'Approval required', tools: [] },
+        };
+      },
+      async close() {
+        executorClosed = true;
+      },
+    },
+  });
+  const submission = await service.submit(caller(), request({ idempotencyKey: 'close-failure' }));
+  await waitUntil(async () => (await service.get(caller(), submission.runId)).status === 'waiting_approval');
+
+  await assert.rejects(service.close(), /did not complete cleanly/);
+
+  assert.equal(executorClosed, true);
+  assert.equal((await service.get(caller(), submission.runId)).status, 'result_unknown');
+  database.close();
+});
+
 test('orders approval execution against cancellation and records uncertain side effects', async () => {
   const database = openYuanpuMetadataDatabase(':memory:');
   const service = await PersistentAgentService.open({

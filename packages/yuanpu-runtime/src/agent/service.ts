@@ -375,24 +375,45 @@ export class PersistentAgentService implements AgentService {
 
   async close(): Promise<void> {
     this.#closed = true;
+    const closeErrors: unknown[] = [];
     for (const wake of [...this.#subscriptionWaiters]) wake();
     for (const wake of [...this.#slotWaiters]) wake();
     this.#slotWaiters.clear();
     for (const runId of [...this.#waitingBindings.keys()]) {
       if (this.#approvalRuns.has(runId)) continue;
-      const interrupted = this.#store.interrupt(runId, this.#now().toISOString());
-      await this.#approvals?.cancelRun(runId);
-      this.#releaseApprovalRun(runId);
-      this.#emit(interrupted);
+      let interrupted: AgentRunRecord | undefined;
+      try {
+        interrupted = this.#store.interrupt(runId, this.#now().toISOString());
+      } catch (error) {
+        closeErrors.push(error);
+      }
+      try {
+        await this.#approvals?.cancelRun(runId);
+      } catch (error) {
+        closeErrors.push(error);
+      } finally {
+        this.#releaseApprovalRun(runId);
+      }
+      if (interrupted) this.#emit(interrupted);
     }
     for (const controller of this.#abortControllers.values()) {
       controller.abort(new Error('Agent service is shutting down.'));
     }
-    await Promise.allSettled([
+    const settlements = await Promise.allSettled([
       ...this.#activeWorkers,
       ...[...this.#approvalSettlements.values()].map((settlement) => settlement.promise),
     ]);
-    await this.#executor.close?.();
+    for (const settlement of settlements) {
+      if (settlement.status === 'rejected') closeErrors.push(settlement.reason);
+    }
+    try {
+      await this.#executor.close?.();
+    } catch (error) {
+      closeErrors.push(error);
+    }
+    if (closeErrors.length > 0) {
+      throw new AggregateError(closeErrors, 'Agent service shutdown did not complete cleanly.');
+    }
   }
 
   #emit(run: AgentRunRecord): void {

@@ -990,14 +990,23 @@ async function serve(): Promise<void> {
   });
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
-    cleanupPromise ??= agentService.close().finally(async () => {
+    cleanupPromise ??= (async () => {
+      const results = await Promise.allSettled([
+        agentService.close(),
+        ...(pythonSource ? [pythonSource.close()] : []),
+      ]);
       metadata.close();
-      await pythonSource?.close();
-    });
+      const failures = results
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => result.reason);
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'Runtime cleanup did not complete cleanly.');
+      }
+    })();
     return cleanupPromise;
   };
   server.on('close', () => {
-    void cleanup();
+    void cleanup().catch((error) => console.error(error));
   });
 
   let parentMonitor: ParentProcessMonitor | undefined;
@@ -1009,6 +1018,7 @@ async function serve(): Promise<void> {
     forcedExit.unref();
     shutdownPromise = (async () => {
       parentMonitor?.dispose();
+      const managedCleanup = cleanup();
       let drained = false;
       const closeServer = new Promise<void>((resolveClose) => {
         try {
@@ -1031,7 +1041,7 @@ async function serve(): Promise<void> {
         const timeout = setTimeout(resolveTimeout, 2_000);
         timeout.unref();
       });
-      await Promise.race([cleanup(), cleanupTimeout]);
+      await Promise.race([managedCleanup, cleanupTimeout]);
     })().finally(() => {
       clearTimeout(forcedExit);
       process.exit(0);
