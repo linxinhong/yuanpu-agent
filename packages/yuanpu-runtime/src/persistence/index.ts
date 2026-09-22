@@ -31,7 +31,8 @@ const migrations: readonly Migration[] = [{
       workspace_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE (entry_point, authority_id, subject_id, namespace, conversation_id, thread_id)
+      UNIQUE (entry_point, authority_id, subject_id, namespace, conversation_id, thread_id),
+      UNIQUE (binding_id, entry_point, authority_id, subject_id)
     ) STRICT;
 
     CREATE TABLE yp_agent_runs (
@@ -43,7 +44,7 @@ const migrations: readonly Migration[] = [{
       request_fingerprint TEXT NOT NULL,
       input_digest TEXT NOT NULL,
       request_metadata_json TEXT NOT NULL,
-      binding_id TEXT REFERENCES yp_conversation_bindings(binding_id),
+      binding_id TEXT,
       status TEXT NOT NULL CHECK (status IN (
         'queued', 'running', 'waiting_approval', 'succeeded', 'failed',
         'cancelled', 'interrupted', 'result_unknown'
@@ -59,6 +60,9 @@ const migrations: readonly Migration[] = [{
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE (entry_point, authority_id, subject_id, idempotency_key),
+      UNIQUE (run_id, entry_point, authority_id, subject_id),
+      FOREIGN KEY (binding_id, entry_point, authority_id, subject_id)
+        REFERENCES yp_conversation_bindings(binding_id, entry_point, authority_id, subject_id),
       CHECK (
         status <> 'waiting_approval'
         OR (
@@ -96,7 +100,9 @@ const migrations: readonly Migration[] = [{
       external_message_id TEXT NOT NULL,
       run_id TEXT REFERENCES yp_agent_runs(run_id),
       received_at TEXT NOT NULL,
-      PRIMARY KEY (entry_point, authority_id, subject_id, external_message_id)
+      PRIMARY KEY (entry_point, authority_id, subject_id, external_message_id),
+      FOREIGN KEY (run_id, entry_point, authority_id, subject_id)
+        REFERENCES yp_agent_runs(run_id, entry_point, authority_id, subject_id)
     ) STRICT;
   `,
 }];

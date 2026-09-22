@@ -82,6 +82,10 @@ Entering `waiting_approval` and persisting its run/request/session/workspace/exp
 transaction; the schema rejects a waiting run without that binding. Capability approvals also carry
 the optional `runId`, and replay from another run fails the existing binding comparison. Cancellation,
 denial, expiry, and restart must invalidate the matching approval rather than a caller-supplied id.
+The approval JSON store and run SQLite file cannot share one transaction: create the approval first,
+then commit the run binding. A crash between them leaves an orphan approval, never a waiting run;
+approval-store startup cancels pending/approved orphans, and normal run cancellation calls
+`cancelRun`. This recovery rule is required until approvals move into the same database.
 
 ## Delivery and host events
 
@@ -123,18 +127,22 @@ Migrations run in `BEGIN IMMEDIATE` transactions, are forward-only and additive,
 newer than the running Runtime. Rollback of a Runtime binary therefore does not imply database
 rollback. An incompatible/destructive migration requires a separate backup and recovery design.
 Bindings, runs, deduplication, and idempotency include both authenticated authority and subject; a
-shared channel connection does not collapse different senders. The run table does not store the
-complete `AgentRunRequest`, output message, or duplicate Pi conversation content; it stores routing
-metadata plus digests/codes needed for idempotency and recovery. Any future durable task or delivery
-payload needs an explicit retention/redaction/cleanup design owned by its feature rather than being
-hidden in this baseline.
+shared channel connection does not collapse different senders. Composite foreign keys prevent a run
+from referencing another owner's binding and prevent inbound deduplication from pointing at another
+owner's run. Durable `AgentRunRecord` is deliberately separate from the submission: it contains
+owner/context metadata and input/output digests, while live completion may attach optional output.
+The run table therefore does not store the complete `AgentRunRequest`, output message, or duplicate
+Pi conversation content. Any future durable task or delivery payload needs an explicit
+retention/redaction/cleanup design owned by its feature rather than being hidden in this baseline.
 Tests use real files, including migration over a pre-existing fixture. The native smoke executes the
 actual SEA twice against the same file and verifies a persisted counter after close/reopen; Node
 development mode alone is not accepted as driver compatibility evidence.
 
-On POSIX, the workflow directory is set to `0700`, the database is set to `0600`, and symbolic-link
-database targets are rejected. Windows uses the user's existing profile ACL; its packaged SEA and ACL
-behavior remains explicitly unverified until the cross-platform acceptance card runs.
+On POSIX, the workflow directory is set to `0700`, the database is set to `0600`, and a final database
+path already observed as a symbolic link is rejected. This is local-path hardening, not a race-proof
+`openat` sandbox; the Runtime still supplies its owned fixed path. Windows uses the user's existing
+profile ACL; its packaged SEA and ACL behavior remains explicitly unverified until the cross-platform
+acceptance card runs.
 
 ## Deliberately unresolved product boundaries
 

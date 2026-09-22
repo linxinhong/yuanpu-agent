@@ -139,8 +139,17 @@ test('stored run access rejects another authenticated subject on the same author
   assert.equal(validated.ok, true);
   const run = {
     runId: 'run-1',
-    request: validated.value,
+    owner: {
+      entryPoint: validated.value.entryPoint,
+      identity: validated.value.identity,
+    },
+    context: {
+      workspaceId: validated.value.workspaceId,
+      conversation: validated.value.conversation,
+      delivery: validated.value.delivery,
+    },
     requestFingerprint: 'a'.repeat(64),
+    inputDigest: 'b'.repeat(64),
     status: 'queued',
     externalEffectState: 'none',
     createdAt: '2026-09-22T00:00:00.000Z',

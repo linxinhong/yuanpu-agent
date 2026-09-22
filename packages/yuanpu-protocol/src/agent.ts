@@ -64,14 +64,25 @@ export interface AgentRunOutput {
 
 export interface AgentRunRecord {
   runId: string;
-  request: AgentRunRequest;
+  owner: {
+    entryPoint: AgentEntryPoint;
+    identity: AgentHostIdentity;
+  };
+  context: {
+    workspaceId: string;
+    conversation: AgentConversationRef;
+    delivery: AgentDeliveryTarget;
+  };
   requestFingerprint: string;
+  inputDigest: string;
   status: AgentRunStatus;
   /** Persisted before external dispatch; recovery must not infer this value from memory. */
   externalEffectState: 'none' | 'possible';
   createdAt: string;
   updatedAt: string;
   pendingApproval?: AgentApprovalBinding;
+  outputDigest?: string;
+  /** Optional only on the live completion response; durable records need not retain content. */
   output?: AgentRunOutput;
   failure?: { code: string; message: string; retryable: boolean };
 }

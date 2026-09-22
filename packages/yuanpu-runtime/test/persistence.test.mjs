@@ -67,6 +67,7 @@ test('schema isolates subjects and requires durable approval/effect checkpoints'
   const path = join(root, 'automation.sqlite');
   openYuanpuMetadataDatabase(path).close();
   const database = new DatabaseSync(path);
+  database.exec('PRAGMA foreign_keys = ON');
   const insert = database.prepare(`
     INSERT INTO yp_agent_runs(
       run_id, entry_point, authority_id, subject_id, idempotency_key,
@@ -77,6 +78,26 @@ test('schema isolates subjects and requires durable approval/effect checkpoints'
   const now = '2026-09-22T00:00:00.000Z';
   insert.run('run-a', 'user-a', 'a'.repeat(64), 'b'.repeat(64), 'queued', 'none', now, now);
   insert.run('run-b', 'user-b', 'c'.repeat(64), 'd'.repeat(64), 'queued', 'none', now, now);
+  database.prepare(`
+    INSERT INTO yp_conversation_bindings(
+      binding_id, entry_point, authority_id, subject_id, namespace,
+      conversation_id, pi_session_id, workspace_id, created_at, updated_at
+    ) VALUES ('binding-a', 'im', 'shared-connection', 'user-a', 'channel',
+      'conversation', 'pi-session', '/workspace', ?, ?)
+  `).run(now, now);
+  assert.throws(() => database.prepare(`
+    INSERT INTO yp_agent_runs(
+      run_id, entry_point, authority_id, subject_id, idempotency_key,
+      request_fingerprint, input_digest, request_metadata_json, binding_id,
+      status, external_effect_state, created_at, updated_at
+    ) VALUES ('run-cross-binding', 'im', 'shared-connection', 'user-b', 'message-2',
+      ?, ?, '{}', 'binding-a', 'queued', 'none', ?, ?)
+  `).run('3'.repeat(64), '4'.repeat(64), now, now), /FOREIGN KEY constraint failed/);
+  assert.throws(() => database.prepare(`
+    INSERT INTO yp_inbound_deduplication(
+      entry_point, authority_id, subject_id, external_message_id, run_id, received_at
+    ) VALUES ('im', 'shared-connection', 'user-b', 'external-message', 'run-a', ?)
+  `).run(now), /FOREIGN KEY constraint failed/);
   assert.throws(
     () => insert.run('run-wait', 'user-c', 'e'.repeat(64), 'f'.repeat(64), 'waiting_approval', 'none', now, now),
     /CHECK constraint failed/,

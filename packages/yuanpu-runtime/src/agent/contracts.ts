@@ -304,15 +304,14 @@ export function canCallerAccessAgentRun(
   caller: AuthenticatedAgentCaller,
   run: AgentRunRecord,
 ): boolean {
-  const request = run.request;
-  return caller.entryPoint === request.entryPoint
-    && caller.identity.kind === request.identity.kind
-    && caller.identity.subjectId === request.identity.subjectId
-    && caller.identity.authorityId === request.identity.authorityId
-    && caller.identity.authenticatedBy === request.identity.authenticatedBy
-    && caller.authorizeWorkspace(request.workspaceId)
-    && caller.authorizeConversation(request.conversation)
-    && caller.authorizeDelivery(request.delivery);
+  return caller.entryPoint === run.owner.entryPoint
+    && caller.identity.kind === run.owner.identity.kind
+    && caller.identity.subjectId === run.owner.identity.subjectId
+    && caller.identity.authorityId === run.owner.identity.authorityId
+    && caller.identity.authenticatedBy === run.owner.identity.authenticatedBy
+    && caller.authorizeWorkspace(run.context.workspaceId)
+    && caller.authorizeConversation(run.context.conversation)
+    && caller.authorizeDelivery(run.context.delivery);
 }
 
 export function resolveIdempotentSubmission(
