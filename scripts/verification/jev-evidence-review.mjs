@@ -34,7 +34,7 @@ const SECRET_PATTERNS = [
 ];
 const PATH_PATTERNS = [
   /\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*/,
-  /[A-Za-z]:\\[^\s]+/,
+  /\\[A-Za-z0-9._-]+(?:\\[A-Za-z0-9._-]+)*/,
 ];
 
 function assert(condition, message) {

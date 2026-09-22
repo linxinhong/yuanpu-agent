@@ -30,6 +30,7 @@
 - ZG 不可用；scoped `rg` 覆盖 scripts、Node test 惯例与 TASK-014/019/021/022，官方文档通过实时 HTTPS 读取。
 - 独立 Sol 评审发现通用绝对路径、非法人工指标、重复 evidence ID 与测试目录问题；`0597550` 已修复并复跑 focused test 和 `pnpm check`。卡内旧的“本次仅优化任务卡”限制已由用户随后明确要求 Sol 领卡实施所覆盖。
 - 最终复核补充的 URI、反引号、赋值语法、单段 Unix 路径与 Windows 路径绕过已封堵；focused 11/11 与 `pnpm check` 再次通过。
+- UNC 与 Windows 相对反斜杠路径也已封堵。首次全量复测遇到未改模块的 Python MCP discovery 暂态失败；相同 runtime 包立即复跑通过，随后完整 `pnpm check` 通过。
 
 ## 未完成与下一步
 

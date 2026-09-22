@@ -36,6 +36,8 @@ test('rejects extra fields, secrets, local paths, long text, and unknown events'
     (item) => { item.summary = 'path=/workspace/private/original.log'; },
     (item) => { item.summary = '/secret'; },
     (item) => { item.summary = 'Evidence stored at C:\\workspace\\private.log'; },
+    (item) => { item.summary = 'Evidence stored at \\\\server\\share\\private.log'; },
+    (item) => { item.summary = 'Evidence stored at .\\private\\secret.log'; },
     (item) => { item.summary = 'x'.repeat(1_001); },
     (item) => { item.events = ['shell.execute']; },
   ];
