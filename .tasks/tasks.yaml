@@ -2,7 +2,7 @@ version: 1
 project:
   name: "YuanpuAgent"
 feature:
-  title: "Python 能力包与统一能力入口"
+  title: "App 生命周期内的多入口 Pi、定时任务与系统通知"
   status: in_progress
 tasks:
   - id: TASK-001
@@ -421,3 +421,419 @@ tasks:
         - {type: "memory", check: "verification record", status: "passed", summary: "TASK-010 results and memory document the deep module interface, commands, fault matrix and remaining trust boundary."}
       follow_up_candidates:
         - "为 Runtime update manifest 增加独立发布者签名与客户端固定信任根验证，不能仅依赖同源 SHA-256。"
+  - id: TASK-011
+    title: "固定多入口执行与宿主事件契约"
+    status: ready
+    goal: "建立桌面、IM、定时任务共用的执行、身份、事件与存储契约，并保持当前对话兼容。"
+    scope:
+      in: ["AgentService 请求/响应、run 状态、会话标识与幂等规则","yuanpu-protocol 宿主事件、通知回执、取消及协议兼容范围","SQLite 表所有权、迁移与 SEA 驱动可行性验证"]
+      out: ["平台 SDK 与管理页面","默认启用完全访问"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","共享协议由本卡建立，后续更改须先同步消费者；实现默认不放宽现有权限"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "旧 chat 接口仍可调用；统一契约区分宿主身份、会话归属与模型输入，非法输入有可观察拒绝结果"
+      - type: assertion
+        expect: "固定执行状态转换、重复提交、排队取消、审批等待、重启中断及投递未知语义；用契约测试验证"
+      - type: assertion
+        expect: "对 SQLite 驱动做真实 SEA 最小持久化试验；不能仅用 Node 开发模式证明兼容"
+      - type: assertion
+        expect: "设计记录完整访问范围与窗口关闭行为的待定边界；未确认前沿用现有审批及窗口行为"
+      - type: command
+        run: "pnpm check"
+    dependencies: []
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["packages/yuanpu-protocol/src/index.ts、packages/yuanpu-runtime/src/pi/index.ts、apps/runtime/src/index.ts；新增 agent/contracts 与 persistence 路径是计划入口","先检查全局 chatPromise、Pi SessionManager 公开接口和现有 approval 绑定；数据库只保存 Yuanpu 元数据","最小契约测试 → pnpm check → pnpm build:native && pnpm smoke:native；迁移需真实文件 fixture"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-012
+    title: "实现多会话与持久任务执行"
+    status: pending
+    goal: "不同入口能提交、查询和取消独立会话中的任务，重启后保留可解释的执行状态。"
+    scope:
+      in: ["agent 与 persistence 实现、Pi 会话映射","现有桌面对话和 Runtime HTTP 消费者适配","现有审批绑定至 run 并恢复等待状态"]
+      out: ["IM SDK、调度器和新管理页面"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "同会话串行、跨会话限流、队列有上限；不同身份与工作区不共享错误上下文"
+      - type: assertion
+        expect: "重复请求返回同一 run；排队取消不执行；运行取消记录结果且不声称副作用撤销"
+      - type: assertion
+        expect: "重启恢复映射及未开始任务；执行结果未知的任务不自动整段重跑；一次性授权不重放"
+      - type: assertion
+        expect: "已有桌面对话、插件启停和 MCP 调用继续工作；审批完成结果归入原 run"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-011"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["packages/yuanpu-runtime/src/agent、persistence、pi 和 capabilities/approval.ts；apps/runtime/src/index.ts getChat/resetChat/chat 路由","先落实 TASK-011 状态机；Pi 对话由公开 API 持久化，Yuanpu 不复制对话存储","新增行为测试归入 packages/yuanpu-runtime/test 与 apps/runtime/test；事务竞争、取消与崩溃恢复测试后运行 pnpm check"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-013
+    title: "完善 App 进程生命周期与升级恢复"
+    status: pending
+    goal: "Runtime 与受管能力进程随 App 启停，并在异常退出和升级失败时可控恢复。"
+    scope:
+      in: ["Electron RuntimeManager 启停、单实例、父进程异常退出处理","受控重启与下一次 App 启动激活","启动健康检查和旧版本恢复"]
+      out: ["系统服务、开机守护、App 退出后执行","默认托盘交互改动"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","窗口关闭默认沿用现有行为，跨平台差异记录；退出 App 必须停止全部运行"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "重复启动只产生一个受管 Runtime；正常退出停止接收新任务并有界清理所有子进程"
+      - type: assertion
+        expect: "强制结束 Electron 后 Runtime/MCP 后代退出；Runtime 崩溃有限重启，不产生重复执行实例"
+      - type: assertion
+        expect: "App 运行中不切换二进制；下次启动激活，失败保留旧版本及用户数据"
+      - type: assertion
+        expect: "协议不兼容给出明确提示；数据库迁移与回滚路径有可重复验证"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-011"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["apps/desktop/src/{main,runtime-manager,runtime-updater}.ts、apps/runtime/src/index.ts shutdown、capabilities/mcp-source.ts","TASK-011 提供 drain/cancel 契约；避免单独为生命周期另写一套任务队列","复用 apps/desktop/test/runtime-updater.test.mjs；进程故障注入 → pnpm check → pnpm build:native && pnpm smoke:native；各操作系统必须分别验证"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-014
+    title: "本机执行与生命周期阶段验证"
+    status: pending
+    goal: "独立证明单机多入口执行基础能隔离会话、恢复状态并遵守 App 生命周期。"
+    scope:
+      in: ["真实 Runtime API、Pi 会话、SQLite 与子进程的组合验证","身份、审批重放、退出与升级的独立边界审查"]
+      out: ["新产品功能实现","IM 平台和桌面页面验收"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","由非本阶段主要实现者验证；使用隔离用户目录和可控外部副作用 fixture"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "验证两个身份/会话并发、重复入队、取消、等待审批后退出再启动，无串话和重复副作用"
+      - type: assertion
+        expect: "验证强制结束父进程、Runtime 崩溃及 staged 更新失败；记录运行状态、数据库事实和进程退出证据"
+      - type: assertion
+        expect: "独立审查宿主身份可否被模型伪造、审批是否错误复用、升级回退能否读取原数据"
+      - type: assertion
+        expect: "证据包含 revision、环境、fixture/真实模式、命令与 pass/fail/unverified；缺失平台环境不得记为通过"
+      - type: assertion
+        expect: "逐条建立验收项与原始证据的映射，由独立验证者确认结论；TASK-022 工具可用且试点评估通过时辅助筛查构建冒充业务通过、旧 revision 和缺平台证据，否则记录人工核验结果，不阻塞本卡"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-012","TASK-013"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["docs/application-architecture.md 第 5、6、10、11 节；上述实现测试及 apps/runtime/test","先跑可控模型/工具测试，再对已配置模型做脱敏对话；主张真实模型成功必须记录实际结果","pnpm check 与 pnpm build:native && pnpm smoke:native；证据写 .tasks/verification/TASK-014/results.md"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-015
+    title: "实现 Electron 系统通知闭环"
+    status: pending
+    goal: "Pi 与系统任务能请求原生通知，用户点击后定位对应会话或任务。"
+    scope:
+      in: ["Runtime 通知路由与认证宿主事件连接","Electron 原生通知及处理回执","notify_user 通过现有两个 MCP 元工具注册"]
+      out: ["Python 弹窗重写","全新通知中心页面"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "Pi 搜索后调用 notify_user，Electron 收到请求并返回真实提交结果；系统事件无需模型也能提醒"
+      - type: assertion
+        expect: "事件重连/重复投递去重；不支持通知、权限不足、用户关闭提醒均有明确状态"
+      - type: assertion
+        expect: "通知点击定位真实会话/run；伪造目标不能导航或执行任意命令"
+      - type: assertion
+        expect: "回执不将 submitted 解释为用户已看到；App 退出后不再产生通知"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-014"]
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["新增 packages/yuanpu-runtime/src/notifications；apps/desktop/src/main.ts、runtime-manager.ts、preload.ts；现有 main.tsx 对话页面最小导航适配","先核对 Electron 官方接口与各平台行为；复用 TASK-011 事件 DTO，Runtime 不导入 Electron","通知适配 fixture/事件断线测试 → pnpm check → 打包应用原生通知与点击实测；系统设置导致未展示需单独记录"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-016
+    title: "实现持久化定时任务与结果投递"
+    status: pending
+    goal: "App 运行时定时触发 Pi，重新打开后按策略恢复，并保留每次执行与投递结果。"
+    scope:
+      in: ["scheduler 时间计划、时区、漏跑与并发规则","AgentService 提交及持久投递接口","Runtime 计划管理 API 和运行历史"]
+      out: ["IM 平台实现","计划管理页面"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "单次和周期计划到点仅入队一次；计划修订不会错误复用旧触发键"
+      - type: assertion
+        expect: "验证 App 关闭、重启、唤醒、时钟变化及夏令时；补跑有上限且默认不重叠"
+      - type: assertion
+        expect: "模型完成后发送失败只重试投递；结果未知不盲目重试；失败与等待授权可查询"
+      - type: assertion
+        expect: "用户可启停计划并查看下次触发时间和历史；App 退出期间无执行，下一次启动按迟到策略处理"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-014"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["新增 scheduler，复用 persistence 与 agent；apps/runtime/src/index.ts 只装配和注册路由","契约由 TASK-011 固定；结果目标采用可注入 delivery 接口，不提前依赖某个平台 SDK","可控时钟行为测试与真实 SQLite 重启测试 → pnpm check → SEA 持久任务冒烟；存储格式变化需兼容验证"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-017
+    title: "确定首个 IM 接入契约与验证环境"
+    status: ready
+    goal: "明确一个首发平台的实际机器人类型、收发方式、配对规则和可验证环境。"
+    scope:
+      in: ["平台与机器人类型选择、官方文档核验","入站确认/离线补收/限流/附件约束与配置字段","私聊和群聊身份配对、原会话回复规则"]
+      out: ["同时实现四个平台","未经确认选择个人微信非官方接入或建设公网 Gateway"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "记录首发平台与用户选择、账号权限及测试会话；尚无选择时提出具体选项，不伪造已决策状态"
+      - type: assertion
+        expect: "用官方文档证明所选方式可收消息并回复；明确是否需要公网入口、账号资质和长连接支持"
+      - type: assertion
+        expect: "明确 connection/message/session 标识、去重与发送未知结果策略；凭据仅引用"
+      - type: assertion
+        expect: "列出真实端到端所需环境，缺凭据时可用 fixture 推进的范围与不能验证的结果"
+    dependencies: []
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["docs/application-architecture.md 第 7 节及 packages/yuanpu-protocol；现阶段尚无平台适配器","平台/API 事实必须查询最新官方文档；信息和选择记录到现有架构文档的渠道决策小节","本卡以可执行接入契约与环境清单验收，不以空目录或 fixture 宣称接通"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-018
+    title: "实现首个 IM 对话渠道"
+    status: pending
+    goal: "可信 IM 用户能通过机器人操作本机 Pi 并收到原会话回复。"
+    scope:
+      in: ["channels 共用路由及一个内置 adapter","配对、收发、消息去重、断线重连和取消","以持久队列实现回复发送与失败记录"]
+      out: ["其他平台、云端 Agent、连接器市场加载机制"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","只使用 TASK-017 已确认接入方式；外发测试限定明确的测试账号/会话，不向真实业务群试发"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "已配对私聊发消息后得到对应 Pi 会话结果；未配对身份及不允许群成员被拒绝"
+      - type: assertion
+        expect: "两个会话不串内容；重复平台事件只产生一次 run；确认接收不等待模型完成"
+      - type: assertion
+        expect: "断线恢复和发送失败不重新执行 Agent；发送结果未知明确记录"
+      - type: assertion
+        expect: "App 退出后连接关闭；重新打开恢复配置与会话映射；离线补收按已核验的平台能力实现"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-014","TASK-017"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["packages/yuanpu-runtime/src/channels/adapters 为新增入口；复用 agent、persistence；apps/runtime 负责装配","收到消息须使用平台认证上下文，不能信任正文自报 sender；记忆/工作区按配对策略选择","协议 fixture/重放/错误身份测试 → pnpm check → 真实测试机器人双会话收发；依赖 SEA 打包检查"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-019
+    title: "通知渠道与调度阶段验证"
+    status: pending
+    goal: "独立证明 IM 发起、定时触发、通知和回复投递组合可用，再支撑管理页面。"
+    scope:
+      in: ["真实 API/数据库的通知、渠道、调度组合测试","真实首发 IM 与 Electron 通知验证"]
+      out: ["修复实现代替验收","管理页面视觉设计"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","非主要实现者执行；真实 IM 需授权测试会话；证据脱敏；不得以模拟通知替代系统展示证据"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "IM 提交与定时任务并发时会话、身份、回复目标正确；重复消息/触发无重复执行"
+      - type: assertion
+        expect: "定时任务结束既可请求系统提醒又可向绑定 IM 投递，单一出口失败不重跑模型"
+      - type: assertion
+        expect: "执行中关闭 App，再打开后可查中断/等待授权/投递状态；没有独立后台活动"
+      - type: assertion
+        expect: "独立检查远程身份不能改变本机权限策略；未验证系统或外部平台逐项标记"
+      - type: assertion
+        expect: "以事件序列和数据库事实区分执行失败、投递失败、投递未知及通知 submitted；身份映射、执行次数和合法状态转换由代码断言。TASK-022 通过评估后可辅助核验脱敏摘要，疑似串话或重复执行必须回查本地原始证据；工具不可用时人工完成"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-015","TASK-016","TASK-018"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节","先本机 API/数据库故障注入，再真实 Electron/IM；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-020
+    title: "实现连接定时任务与提醒管理界面"
+    status: pending
+    goal: "用户能在现有 Electron 界面管理连接和计划，并追踪执行与提醒结果。"
+    scope:
+      in: ["沿用现有壳的连接列表/配置、定时任务列表/编辑及运行详情","会话来源和取消入口、提醒偏好与明确权限状态","对接已验证的 Runtime API 和 preload"]
+      out: ["未经决策启用完全访问或默认托盘","重做技能市场与全应用视觉风格"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","使用现有 main.tsx/styles.css 风格；新增页面按 UI Delivery 在写 UI 前呈现现有壳参考图和设计，不能把规划提案标已批准"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "用户配置测试连接后看到真实连接状态，失败保留输入且可重试；凭据不明文回显"
+      - type: assertion
+        expect: "用户创建计划、检查时区/下次时间、启停并刷新后状态保持；详情可定位 run 和会话"
+      - type: assertion
+        expect: "用户在会话中取消任务，观察真实终态；通知点击跳转与任务列表返回路径一致"
+      - type: assertion
+        expect: "按 docs/application-architecture.md 的界面提案先呈现可审阅设计，再实现；覆盖空、加载、失败、等待授权状态"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-019"]
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["apps/app/src/main.tsx、styles.css、apps/desktop/src/preload.ts 与 yuanpu-protocol；未发现 .tasks/ui.yaml，沿用现有 UI 作为默认","UI 提案见 docs/application-architecture.md 第 13 节；后续视觉证据保存在 .tasks/ui/TASK-020/","最小接口行为验证 → pnpm check → 真实 Electron 操作核心旅程；不能只截图或只用静态假数据"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-021
+    title: "App 多入口与升级完整业务验收"
+    status: pending
+    goal: "证明用户从配置到 IM/定时任务执行、通知导航及升级恢复的完整体验。"
+    scope:
+      in: ["桌面端完整用户旅程和打包应用","App 生命周期、SEA 升级与持久数据兼容的跨平台回归"]
+      out: ["生产发布与签名缺口自动豁免","在验证卡内新增业务实现"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","非本轮主要实现者验收；只用授权测试会话；发布前必须补齐目标平台证据"]
+    forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "完成配置连接 → IM 对话 → 定时任务 → 系统提醒 → 点击查看结果的真实旅程"
+      - type: assertion
+        expect: "计划等待、任务执行、消息待投递三种状态分别退出并重新启动，结果符合恢复策略"
+      - type: assertion
+        expect: "真实 SEA 暂存后下次启动激活，失败回退不破坏任务/会话数据；协议不兼容有明确提示"
+      - type: assertion
+        expect: "macOS/Windows/Linux 分别记录可执行证据和未验证项；继承历史生产签名/制品信任缺口，不宣称已解决"
+      - type: assertion
+        expect: "为每条用户旅程主张关联当前 revision、平台、真实/fixture 模式及证据位置；逐项复核局部通过被扩大为整体通过、模拟通知冒充展示、submitted 冒充已读和历史签名缺口遗漏。TASK-022 可辅助筛查，最终结论及任务状态仍由独立验证者依据原始证据确认"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-020"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["阶段验证记录、apps/desktop/test、apps/runtime/scripts/native 与打包配置","pnpm check → pnpm build:native && pnpm smoke:native → pnpm package:desktop → 当前 revision 平台旅程","证据保存 .tasks/verification/TASK-021/results.md；回归失败提独立修复，不修改历史验收结论"]
+    escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-022
+    title: "试点 Jev 辅助验收证据核验"
+    status: in_progress
+    goal: "用小规模对照评估验证 Jev 是否减少证据审阅耗时和遗漏，并交付可选的只读开发工具。"
+    scope:
+      in: ["独立开发脚本、最小证据输入格式与本地精确检查","Jev Choice 语义核验、人工复核报告与人工标注对照集","数据最小化、离线测试、耗时/成本/误判评估"]
+      out: ["产品 Runtime/IM/通知执行链路集成","自动审批、自动重试业务动作、自动修改任务状态","源码/原始日志/聊天记录/数据库上传","替代独立业务验收"]
+    constraints: ["本次仅优化任务卡，不授权实现、提交或推送","作为独立可选工具推进，不成为 TASK-014/019/021 的硬依赖","默认 dry-run；首次真实评估仅用人工编写的虚构样例；真实项目摘要须另行明确授权发送至 TypeSafe","密钥仅由调用进程从配置读取，不写报告、argv 或请求正文；默认不缓存完整请求/响应"]
+    forbidden: ["将 supported 或高置信度当作业务 PASS 或执行许可","用模型判断替代身份、次数、状态转换和 revision 的精确检查","未经评估把工具接入必经 CI 或扩大数据输入范围"]
+    acceptance:
+      - type: assertion
+        expect: "本地按验收项关联证据 ID、revision、平台、fixture/真实模式和命令结果；缺失/不匹配明确报告。先执行精确检查，再对语义关系输出 supported/contradicted/insufficient 与置信度；supported 只代表所给摘要支持主张，不证明原始事实真实"
+      - type: assertion
+        expect: "出站仅允许审核过的验收短句、虚构/经授权脱敏摘要、枚举事件和替换 ID；原始文件路径及证据映射保留本地。字段白名单、长度限制和本地秘密扫描有拒绝测试，扫描不作为允许任意自由文本上传的依据"
+      - type: assertion
+        expect: "至少 24 个虚构人工标注样例覆盖三类关系，包含构建冒充验收、旧 revision、缺平台、fixture 冒充真实、submitted 冒充已读、投递未知、串话、重复执行及摘要内提示注入；调参集与固定留出集分离，业务结论始终人工复核"
+      - type: assertion
+        expect: "记录实际模型版本、问题模板版本、样本数、逐例预测/标注、混淆矩阵、错误 supported 数、人工复核耗时、端到端延迟和 token/实际可得费用；对照同等样本人工核验，报告是否提速及是否增加遗漏，不预先承诺准确率"
+      - type: assertion
+        expect: "留出集中的关键反例不得被标为 supported，辅助审阅不得比人工基线增加漏检且须观察到审阅耗时下降，才建议在阶段验收中试用；小样本结果不外推安全保证。未达标记录不采用的结论，评估交付可完成，不强制推广"
+      - type: assertion
+        expect: "无密钥、超时、限流、返回格式错误及低置信度均返回人工核验待办；请求有超时和调用预算，无无限重试。离线 fixture 与真实 API 结果分开记录，缺真实调用证据不得宣称效果已验证"
+      - type: command
+        run: "pnpm check"
+    dependencies: []
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["docs/application-architecture.md 第 14 节；.tasks/tasks.yaml 中 TASK-014/019/021 的验收条目；历史 memory 只在本地用于设计虚构反例","计划新增 scripts/verification/ 下独立工具与相邻 test；实施前核对仓库脚本惯例，不改 yuanpu-protocol 或产品依赖","实现时使用 typesafe-ai 技能核对官方 API/Choice/citation_check 文档；不直接照搬 cookbook 缓存或 Playground 分享机制","先跑字段拒绝、精确检查与 API 故障的离线行为测试，再做有界虚构样例评估；结果写 .tasks/verification/TASK-022/results.md，报告标明人工最终裁决与采用建议"]
+    escalation_conditions: ["需要真实业务文本或新增第三方处理商时明确数据和接收方，未获授权只推进虚构评估","缺密钥或真实 API 不可用时完成离线部分并标记效果 unverified，不影响其他任务人工验收"]
+    result:
+      owner: "sol-owner-task-022"
+      attempts: 0
+      claimed_at: "2026-09-22T06:56:20.251Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-022"
+      branch: "task/task-022-jev-evidence-review"
+      evidence: []
+      follow_up_candidates: []
