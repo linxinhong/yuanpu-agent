@@ -497,7 +497,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-013
     title: "完善 App 进程生命周期与升级恢复"
-    status: ready
+    status: in_progress
     goal: "Runtime 与受管能力进程随 App 启停，并在异常退出和升级失败时可控恢复。"
     scope:
       in: ["Electron RuntimeManager 启停、单实例、父进程异常退出处理","受控重启与下一次 App 启动激活","启动健康检查和旧版本恢复"]
@@ -521,12 +521,12 @@ tasks:
     investigation_hints: ["apps/desktop/src/{main,runtime-manager,runtime-updater}.ts、apps/runtime/src/index.ts shutdown、capabilities/mcp-source.ts","TASK-011 提供 drain/cancel 契约；避免单独为生命周期另写一套任务队列","复用 apps/desktop/test/runtime-updater.test.mjs；进程故障注入 → pnpm check → pnpm build:native && pnpm smoke:native；各操作系统必须分别验证"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "sol-owner-task-013-94721-72012"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-22T08:00:44.345Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-013"
+      branch: "task/task-013-app-lifecycle"
       evidence: []
       follow_up_candidates: []
   - id: TASK-014
