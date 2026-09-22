@@ -592,7 +592,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-015
     title: "实现 Electron 系统通知闭环"
-    status: in_progress
+    status: done
     goal: "Pi 与系统任务能请求原生通知，用户点击后定位对应会话或任务。"
     scope:
       in: ["Runtime 通知路由与认证宿主事件连接","Electron 原生通知及处理回执","notify_user 通过现有两个 MCP 元工具注册"]
@@ -619,10 +619,17 @@ tasks:
       owner: "sol-task015-owner-20260922-72012"
       attempts: 0
       claimed_at: "2026-09-22T10:20:57.459Z"
-      completed_at: null
+      completed_at: "2026-09-22T12:25:27.919Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-015"
       branch: "task/task-015-electron-notifications"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated notification implementation", status: "passed", summary: "Branch task/task-015-electron-notifications (final 65a631a) was merged into main at 11d220d; cross-card scheduler navigation and cleanup integration was corrected at 59f9ceb."}
+        - {type: "verification", check: "notification request, receipt and lifecycle behavior", status: "passed", summary: "Tests cover notify_user through the existing MCP meta-tools, model-free system events, authenticated SSE replay/receipt deduplication, explicit disabled/unsupported/denied/native-failure states, submitted versus user-visible semantics, bounded notification retention and no submission after App stop."}
+        - {type: "verification", check: "safe click navigation for desktop and scheduler runs", status: "passed", summary: "Integrated Runtime tests exercise a real scheduler restart to terminal notification, canonical target validation and authenticated GET of the scheduler-owned run; forged targets remain rejected and the fixed host lookup does not bypass AgentService owner authorization."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Code revision 59f9ceb passed the full integrated check with Node 24.15.0/pnpm 11.22.0: runtime-kit 93/93, Runtime 10/10 and Desktop 20/20, plus builds and Yuanpu typechecks."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "Code revision 59f9ceb passed darwin-arm64 SEA build/smoke, self-contained Python artifact smoke and staged Runtime update smoke."}
+        - {type: "review", check: "independent implementation and integration review", status: "passed", summary: "The task branch received an independent zero-finding review. A later integrated review identified scheduler-owned notification navigation and cleanup short-circuit defects; both were fixed with focused regression tests before completion."}
+        - {type: "boundary", check: "external platform notification evidence", status: "unverified", summary: "A real signed packaged Electron notification click and Linux/Windows native notification behavior remain unverified; no claim is made beyond the exercised macOS fixture/native boundary."}
       follow_up_candidates: []
   - id: TASK-016
     title: "实现持久化定时任务与结果投递"
