@@ -52,7 +52,7 @@ export interface AgentRunRequest {
   workspaceId: string;
   conversation: AgentConversationRef;
   input: AgentModelInput;
-  /** Unique within entryPoint + identity.authorityId. */
+  /** Unique within entryPoint + identity.authorityId + identity.subjectId. */
   idempotencyKey: string;
   delivery: AgentDeliveryTarget;
 }
@@ -67,16 +67,28 @@ export interface AgentRunRecord {
   request: AgentRunRequest;
   requestFingerprint: string;
   status: AgentRunStatus;
+  /** Persisted before external dispatch; recovery must not infer this value from memory. */
+  externalEffectState: 'none' | 'possible';
   createdAt: string;
   updatedAt: string;
+  pendingApproval?: AgentApprovalBinding;
   output?: AgentRunOutput;
   failure?: { code: string; message: string; retryable: boolean };
+}
+
+export interface AgentApprovalBinding {
+  runId: string;
+  approvalRequestId: string;
+  sessionId: string;
+  workspaceId: string;
+  expiresAt: string;
 }
 
 export type AgentContractErrorCode =
   | 'invalid_request'
   | 'unsupported_contract_version'
   | 'identity_mismatch'
+  | 'forbidden'
   | 'idempotency_conflict'
   | 'invalid_transition'
   | 'run_not_found';
@@ -119,4 +131,3 @@ export interface AgentDeliveryRecord {
   attempts: number;
   updatedAt: string;
 }
-

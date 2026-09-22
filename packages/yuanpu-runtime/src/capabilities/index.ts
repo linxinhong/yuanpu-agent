@@ -342,6 +342,7 @@ export class CapabilityRegistry implements CapabilityToolClient {
       }
       const authorization = await this.#authorizer.authorize({
         approvalRequestId: input.approvalRequestId,
+        runId: context.runId,
         sessionId: context.sessionId,
         workspaceId: context.workspaceId,
         sourceInstanceId: capability.sourceInstanceId,

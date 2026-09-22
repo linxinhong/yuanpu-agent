@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { AGENT_CONTRACT_VERSION, RUNTIME_ROUTES } from '@yuanpu-agent/protocol';
 import {
+  canCallerAccessAgentRun,
   cancellationForRun,
   recoverAgentRunAfterRestart,
   recoverDeliveryAfterRestart,
@@ -31,14 +32,38 @@ function request(overrides = {}) {
   };
 }
 
+function caller(overrides = {}) {
+  return {
+    entryPoint: 'desktop',
+    identity: {
+      kind: 'local_user',
+      subjectId: 'local-user',
+      authorityId: 'desktop-instance',
+      authenticatedBy: 'electron',
+    },
+    authorizeWorkspace: (workspaceId) => workspaceId === '/workspace',
+    authorizeConversation: (conversation) => conversation.namespace === 'desktop',
+    authorizeDelivery: (delivery) => delivery.kind === 'desktop',
+    ...overrides,
+  };
+}
+
 test('host identity, conversation ownership, and model input remain distinct', () => {
-  const validation = validateAgentRunRequest(request());
+  const validation = validateAgentRunRequest(caller(), request());
   assert.equal(validation.ok, true);
   assert.equal(validation.value.identity.subjectId, 'local-user');
   assert.equal(validation.value.conversation.conversationId, 'conversation-1');
   assert.equal(validation.value.input.text, 'Summarize the notes.');
 
-  const spoofed = validateAgentRunRequest(request({
+  const spoofed = validateAgentRunRequest(caller({
+    entryPoint: 'im',
+    identity: {
+      kind: 'channel_user',
+      subjectId: 'authenticated-user',
+      authorityId: 'channel-connection',
+      authenticatedBy: 'channel_adapter',
+    },
+  }), request({
     entryPoint: 'im',
     identity: {
       kind: 'local_user',
@@ -56,45 +81,110 @@ test('host identity, conversation ownership, and model input remain distinct', (
       field: 'identity',
     },
   });
+  const forgedSubject = validateAgentRunRequest(caller(), request({
+    identity: { ...request().identity, subjectId: 'other-local-user' },
+  }));
+  assert.equal(forgedSubject.ok, false);
+  assert.equal(forgedSubject.error.code, 'identity_mismatch');
+  assert.equal(forgedSubject.error.message, 'identity does not match the authenticated caller.');
 });
 
 test('invalid requests have observable stable rejection codes', () => {
-  const unsupported = validateAgentRunRequest(request({ contractVersion: 999 }));
+  const unsupported = validateAgentRunRequest(caller(), request({ contractVersion: 999 }));
   assert.equal(unsupported.ok, false);
   assert.equal(unsupported.error.code, 'unsupported_contract_version');
 
-  const emptyInput = validateAgentRunRequest(request({ input: { type: 'text', text: ' ' } }));
+  const emptyInput = validateAgentRunRequest(caller(), request({ input: { type: 'text', text: ' ' } }));
   assert.equal(emptyInput.ok, false);
   assert.equal(emptyInput.error.code, 'invalid_request');
   assert.equal(emptyInput.error.field, 'input.text');
 
-  const missingRoute = validateAgentRunRequest(request({ delivery: { kind: 'channel' } }));
+  const missingRoute = validateAgentRunRequest(caller(), request({ delivery: { kind: 'channel' } }));
   assert.equal(missingRoute.ok, false);
   assert.equal(missingRoute.error.field, 'delivery.routeId');
 });
 
+test('trusted caller policy owns workspace, conversation binding, and delivery route', () => {
+  const policyCaller = caller({
+    authorizeWorkspace: (workspaceId) => workspaceId === '/allowed',
+    authorizeConversation: (conversation) => conversation.sessionBindingId === 'owned-binding',
+    authorizeDelivery: (delivery) => delivery.kind === 'channel' && delivery.routeId === 'owned-route',
+  });
+  const base = request({
+    workspaceId: '/allowed',
+    conversation: {
+      namespace: 'desktop', conversationId: 'conversation-1', sessionBindingId: 'owned-binding',
+    },
+    delivery: { kind: 'channel', routeId: 'owned-route' },
+  });
+  assert.equal(validateAgentRunRequest(policyCaller, base).ok, true);
+
+  const wrongWorkspace = validateAgentRunRequest(policyCaller, { ...base, workspaceId: '/other' });
+  assert.equal(wrongWorkspace.error.code, 'forbidden');
+  assert.equal(wrongWorkspace.error.field, 'workspaceId');
+  const wrongBinding = validateAgentRunRequest(policyCaller, {
+    ...base,
+    conversation: { ...base.conversation, sessionBindingId: 'other-binding' },
+  });
+  assert.equal(wrongBinding.error.field, 'conversation');
+  const wrongRoute = validateAgentRunRequest(policyCaller, {
+    ...base,
+    delivery: { kind: 'channel', routeId: 'other-route' },
+  });
+  assert.equal(wrongRoute.error.field, 'delivery');
+});
+
+test('stored run access rejects another authenticated subject on the same authority', () => {
+  const validated = validateAgentRunRequest(caller(), request());
+  assert.equal(validated.ok, true);
+  const run = {
+    runId: 'run-1',
+    request: validated.value,
+    requestFingerprint: 'a'.repeat(64),
+    status: 'queued',
+    externalEffectState: 'none',
+    createdAt: '2026-09-22T00:00:00.000Z',
+    updatedAt: '2026-09-22T00:00:00.000Z',
+  };
+  assert.equal(canCallerAccessAgentRun(caller(), run), true);
+  assert.equal(canCallerAccessAgentRun(caller({
+    identity: { ...caller().identity, subjectId: 'other-user' },
+  }), run), false);
+});
+
 test('duplicate submissions replay only an identical request', () => {
-  const first = resolveIdempotentSubmission(request());
+  const first = resolveIdempotentSubmission(caller(), request());
   assert.equal(first.kind, 'new');
-  const replay = resolveIdempotentSubmission(request(), {
+  const replay = resolveIdempotentSubmission(caller(), request(), {
     runId: 'run-1',
     status: 'running',
     requestFingerprint: first.requestFingerprint,
+    owner: { entryPoint: 'desktop', authorityId: 'desktop-instance', subjectId: 'local-user' },
   });
   assert.deepEqual(replay, {
     kind: 'replay',
     result: { accepted: true, runId: 'run-1', status: 'running', duplicate: true },
   });
 
-  const conflict = resolveIdempotentSubmission(request({
+  const conflict = resolveIdempotentSubmission(caller(), request({
     input: { type: 'text', text: 'Different request, same key.' },
   }), {
     runId: 'run-1',
     status: 'running',
     requestFingerprint: first.requestFingerprint,
+    owner: { entryPoint: 'desktop', authorityId: 'desktop-instance', subjectId: 'local-user' },
   });
   assert.equal(conflict.kind, 'rejected');
   assert.equal(conflict.result.code, 'idempotency_conflict');
+
+  const wrongOwner = resolveIdempotentSubmission(caller(), request(), {
+    runId: 'run-other',
+    status: 'queued',
+    requestFingerprint: first.requestFingerprint,
+    owner: { entryPoint: 'desktop', authorityId: 'desktop-instance', subjectId: 'other-user' },
+  });
+  assert.equal(wrongOwner.kind, 'rejected');
+  assert.equal(wrongOwner.result.code, 'identity_mismatch');
 });
 
 test('run transitions cover queueing, approval, completion, and invalid terminal changes', () => {
@@ -121,20 +211,20 @@ test('queued cancellation is final while active cancellation requires worker obs
 });
 
 test('restart recovery never claims an uncertain run or delivery succeeded', () => {
-  assert.equal(recoverAgentRunAfterRestart('queued', false), 'queued');
-  assert.equal(recoverAgentRunAfterRestart('running', false), 'interrupted');
-  assert.equal(recoverAgentRunAfterRestart('running', true), 'result_unknown');
-  assert.equal(recoverAgentRunAfterRestart('waiting_approval', false), 'interrupted');
-  assert.equal(recoverAgentRunAfterRestart('succeeded', true), 'succeeded');
+  assert.equal(recoverAgentRunAfterRestart('queued', 'none'), 'queued');
+  assert.equal(recoverAgentRunAfterRestart('running', 'none'), 'interrupted');
+  assert.equal(recoverAgentRunAfterRestart('running', 'possible'), 'result_unknown');
+  assert.equal(recoverAgentRunAfterRestart('waiting_approval', 'none'), 'interrupted');
+  assert.equal(recoverAgentRunAfterRestart('succeeded', 'possible'), 'succeeded');
 
   assert.equal(transitionDelivery('pending', 'start'), 'delivering');
   assert.equal(recoverDeliveryAfterRestart('delivering'), 'result_unknown');
+  assert.equal(transitionDelivery('result_unknown', 'retry_idempotent'), 'delivering');
   assert.equal(transitionDelivery('delivering', 'confirm'), 'delivered');
-  assert.throws(() => transitionDelivery('result_unknown', 'confirm'), /Invalid delivery transition/);
+  assert.throws(() => transitionDelivery('result_unknown', 'start'), /Invalid delivery transition/);
 });
 
 test('the legacy chat route remains unchanged while AgentService is contract-only', () => {
   assert.equal(RUNTIME_ROUTES.chat, '/v1/chat');
   assert.equal('agentRuns' in RUNTIME_ROUTES, false);
 });
-

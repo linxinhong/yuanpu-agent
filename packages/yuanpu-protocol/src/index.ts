@@ -54,6 +54,7 @@ export interface RuntimeUpdateState {
 
 export interface CapabilityApprovalSummary {
   requestId: string;
+  runId?: string;
   sessionId: string;
   workspaceId: string;
   sourceInstanceId: string;

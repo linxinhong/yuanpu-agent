@@ -4,6 +4,8 @@ import {
   AGENT_CONTRACT_VERSION,
   type AgentContractErrorCode,
   type AgentContractRejection,
+  type AgentConversationRef,
+  type AgentDeliveryTarget,
   type AgentDeliveryStatus,
   type AgentEntryPoint,
   type AgentHostIdentity,
@@ -15,10 +17,19 @@ import {
 } from '@yuanpu-agent/protocol';
 
 export interface AgentService {
-  submit(input: unknown): Promise<AgentRunSubmissionResult>;
-  get(runId: string): Promise<AgentRunRecord | undefined>;
-  cancel(runId: string): Promise<AgentRunCancellationReceipt>;
-  subscribe(runId: string): AsyncIterable<AgentRunRecord>;
+  submit(caller: AuthenticatedAgentCaller, input: unknown): Promise<AgentRunSubmissionResult>;
+  get(caller: AuthenticatedAgentCaller, runId: string): Promise<AgentRunRecord | undefined>;
+  cancel(caller: AuthenticatedAgentCaller, runId: string): Promise<AgentRunCancellationReceipt>;
+  subscribe(caller: AuthenticatedAgentCaller, runId: string): AsyncIterable<AgentRunRecord>;
+}
+
+/** Constructed by a trusted transport/adapter, never deserialized from Agent model input. */
+export interface AuthenticatedAgentCaller {
+  entryPoint: AgentEntryPoint;
+  identity: AgentHostIdentity;
+  authorizeWorkspace(workspaceId: string): boolean;
+  authorizeConversation(conversation: AgentConversationRef): boolean;
+  authorizeDelivery(delivery: AgentDeliveryTarget): boolean;
 }
 
 export type AgentRunEvent =
@@ -31,7 +42,12 @@ export type AgentRunEvent =
   | 'interrupt'
   | 'mark_result_unknown';
 
-export type AgentDeliveryEvent = 'start' | 'confirm' | 'fail' | 'mark_result_unknown';
+export type AgentDeliveryEvent =
+  | 'start'
+  | 'confirm'
+  | 'fail'
+  | 'mark_result_unknown'
+  | 'retry_idempotent';
 
 export interface AgentRequestValidationSuccess {
   ok: true;
@@ -49,6 +65,11 @@ export interface ExistingIdempotentRun {
   runId: string;
   status: AgentRunStatus;
   requestFingerprint: string;
+  owner: {
+    entryPoint: AgentEntryPoint;
+    authorityId: string;
+    subjectId: string;
+  };
 }
 
 export type IdempotencyResolution =
@@ -99,8 +120,8 @@ const deliveryTransitions: Record<
   pending: { start: 'delivering', fail: 'failed' },
   delivering: { confirm: 'delivered', fail: 'failed', mark_result_unknown: 'result_unknown' },
   delivered: {},
-  failed: { start: 'delivering' },
-  result_unknown: {},
+  failed: { retry_idempotent: 'delivering' },
+  result_unknown: { retry_idempotent: 'delivering' },
 };
 
 function rejection(
@@ -161,7 +182,10 @@ function readIdentity(
   return { kind: rule.kind, subjectId, authorityId, authenticatedBy: rule.authenticatedBy };
 }
 
-export function validateAgentRunRequest(input: unknown): AgentRequestValidation {
+export function validateAgentRunRequest(
+  caller: AuthenticatedAgentCaller,
+  input: unknown,
+): AgentRequestValidation {
   if (!isRecord(input)) {
     return { ok: false, error: rejection('invalid_request', 'Agent run request must be an object.') };
   }
@@ -177,10 +201,30 @@ export function validateAgentRunRequest(input: unknown): AgentRequestValidation 
   }
   const entryPoint = readEntryPoint(input.entryPoint);
   if (typeof entryPoint !== 'string') return { ok: false, error: entryPoint };
+  if (entryPoint !== caller.entryPoint) {
+    return {
+      ok: false,
+      error: rejection('identity_mismatch', 'entryPoint does not match the authenticated caller.', 'entryPoint'),
+    };
+  }
   const identity = readIdentity(input.identity, entryPoint);
   if ('accepted' in identity) return { ok: false, error: identity };
+  if (
+    identity.kind !== caller.identity.kind
+    || identity.subjectId !== caller.identity.subjectId
+    || identity.authorityId !== caller.identity.authorityId
+    || identity.authenticatedBy !== caller.identity.authenticatedBy
+  ) {
+    return {
+      ok: false,
+      error: rejection('identity_mismatch', 'identity does not match the authenticated caller.', 'identity'),
+    };
+  }
   const workspaceId = requiredString(input.workspaceId, 'workspaceId');
   if (isRejection(workspaceId)) return { ok: false, error: workspaceId };
+  if (!caller.authorizeWorkspace(workspaceId)) {
+    return { ok: false, error: rejection('forbidden', 'Caller cannot use this workspace.', 'workspaceId') };
+  }
   const idempotencyKey = requiredString(input.idempotencyKey, 'idempotencyKey', 200);
   if (isRejection(idempotencyKey)) return { ok: false, error: idempotencyKey };
 
@@ -220,6 +264,23 @@ export function validateAgentRunRequest(input: unknown): AgentRequestValidation 
     return { ok: false, error: rejection('invalid_request', 'Channel delivery requires routeId.', 'delivery.routeId') };
   }
 
+  const conversation: AgentConversationRef = {
+    namespace,
+    conversationId,
+    ...(typeof threadId === 'string' ? { threadId } : {}),
+    ...(typeof sessionBindingId === 'string' ? { sessionBindingId } : {}),
+  };
+  if (!caller.authorizeConversation(conversation)) {
+    return { ok: false, error: rejection('forbidden', 'Caller cannot use this conversation.', 'conversation') };
+  }
+  const delivery: AgentDeliveryTarget = {
+    kind: input.delivery.kind,
+    ...(typeof routeId === 'string' ? { routeId } : {}),
+  };
+  if (!caller.authorizeDelivery(delivery)) {
+    return { ok: false, error: rejection('forbidden', 'Caller cannot use this delivery route.', 'delivery') };
+  }
+
   return {
     ok: true,
     value: {
@@ -227,18 +288,10 @@ export function validateAgentRunRequest(input: unknown): AgentRequestValidation 
       entryPoint,
       identity,
       workspaceId,
-      conversation: {
-        namespace,
-        conversationId,
-        ...(typeof threadId === 'string' ? { threadId } : {}),
-        ...(typeof sessionBindingId === 'string' ? { sessionBindingId } : {}),
-      },
+      conversation,
       input: { type: 'text', text },
       idempotencyKey,
-      delivery: {
-        kind: input.delivery.kind,
-        ...(typeof routeId === 'string' ? { routeId } : {}),
-      },
+      delivery,
     },
   };
 }
@@ -247,14 +300,40 @@ export function fingerprintAgentRunRequest(request: AgentRunRequest): string {
   return createHash('sha256').update(JSON.stringify(request)).digest('hex');
 }
 
+export function canCallerAccessAgentRun(
+  caller: AuthenticatedAgentCaller,
+  run: AgentRunRecord,
+): boolean {
+  const request = run.request;
+  return caller.entryPoint === request.entryPoint
+    && caller.identity.kind === request.identity.kind
+    && caller.identity.subjectId === request.identity.subjectId
+    && caller.identity.authorityId === request.identity.authorityId
+    && caller.identity.authenticatedBy === request.identity.authenticatedBy
+    && caller.authorizeWorkspace(request.workspaceId)
+    && caller.authorizeConversation(request.conversation)
+    && caller.authorizeDelivery(request.delivery);
+}
+
 export function resolveIdempotentSubmission(
+  caller: AuthenticatedAgentCaller,
   input: unknown,
   existing?: ExistingIdempotentRun,
 ): IdempotencyResolution {
-  const validation = validateAgentRunRequest(input);
+  const validation = validateAgentRunRequest(caller, input);
   if (!validation.ok) return { kind: 'rejected', result: validation.error };
   const requestFingerprint = fingerprintAgentRunRequest(validation.value);
   if (!existing) return { kind: 'new', request: validation.value, requestFingerprint };
+  if (
+    existing.owner.entryPoint !== validation.value.entryPoint
+    || existing.owner.authorityId !== validation.value.identity.authorityId
+    || existing.owner.subjectId !== validation.value.identity.subjectId
+  ) {
+    return {
+      kind: 'rejected',
+      result: rejection('identity_mismatch', 'Existing idempotent run belongs to another caller.'),
+    };
+  }
   if (existing.requestFingerprint !== requestFingerprint) {
     return {
       kind: 'rejected',
@@ -289,10 +368,10 @@ export function cancellationForRun(
 
 export function recoverAgentRunAfterRestart(
   status: AgentRunStatus,
-  externalEffectsMayHaveOccurred: boolean,
+  persistedExternalEffectState: AgentRunRecord['externalEffectState'],
 ): AgentRunStatus {
   if (status === 'queued' || terminalStatuses.has(status)) return status;
-  return externalEffectsMayHaveOccurred ? 'result_unknown' : 'interrupted';
+  return persistedExternalEffectState === 'possible' ? 'result_unknown' : 'interrupted';
 }
 
 export function transitionDelivery(
@@ -307,4 +386,3 @@ export function transitionDelivery(
 export function recoverDeliveryAfterRestart(status: AgentDeliveryStatus): AgentDeliveryStatus {
   return status === 'delivering' ? 'result_unknown' : status;
 }
-

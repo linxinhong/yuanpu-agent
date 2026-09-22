@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -131,6 +131,7 @@ export async function ensureYuanpuHome(root = join(homedir(), '.yuanpu')): Promi
     mkdir(sessionsPath, { recursive: true }),
     mkdir(workflowsPath, { recursive: true }),
   ]);
+  if (process.platform !== 'win32') await chmod(workflowsPath, 0o700);
   await rewriteMigratedPackagePaths(agentPath, packagesPath, legacyPackagesPath);
 
   let config: YuanpuConfig;

@@ -23,6 +23,7 @@ export interface ApprovalStoreOptions {
 
 export interface PendingCapabilityExecution {
   requestId: string;
+  runId?: string;
   sessionId: string;
   workspaceId: string;
   capabilityId: string;
@@ -42,7 +43,8 @@ export function digestCapabilityArguments(value: Record<string, JsonValue>): str
 }
 
 function sameBinding(record: CapabilityApprovalRecord, input: CapabilityAuthorizationInput): boolean {
-  return record.sessionId === input.sessionId
+  return record.runId === input.runId
+    && record.sessionId === input.sessionId
     && record.workspaceId === input.workspaceId
     && record.sourceInstanceId === input.sourceInstanceId
     && record.packageVersion === input.packageVersion
@@ -132,6 +134,7 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
         const now = this.#now();
         const record: CapabilityApprovalRecord = {
           requestId: this.#createId(),
+          ...(input.runId ? { runId: input.runId } : {}),
           sessionId: input.sessionId,
           workspaceId: input.workspaceId,
           sourceInstanceId: input.sourceInstanceId,
@@ -145,6 +148,7 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
         this.#records.push(record);
         this.#pendingExecutions.set(record.requestId, {
           requestId: record.requestId,
+          ...(input.runId ? { runId: input.runId } : {}),
           sessionId: input.sessionId,
           workspaceId: input.workspaceId,
           capabilityId: input.capabilityId,
@@ -223,6 +227,23 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
       if (changed) await this.#persist();
       for (const [requestId, execution] of this.#pendingExecutions) {
         if (execution.sessionId === sessionId) this.#pendingExecutions.delete(requestId);
+      }
+    });
+  }
+
+  async cancelRun(runId: string): Promise<void> {
+    await this.#locked(async () => {
+      let changed = false;
+      this.#records = this.#records.map((record) => {
+        if (record.runId === runId && (record.status === 'pending' || record.status === 'approved')) {
+          changed = true;
+          return { ...record, status: 'cancelled' };
+        }
+        return record;
+      });
+      if (changed) await this.#persist();
+      for (const [requestId, execution] of this.#pendingExecutions) {
+        if (execution.runId === runId) this.#pendingExecutions.delete(requestId);
       }
     });
   }

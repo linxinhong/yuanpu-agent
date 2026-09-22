@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -23,6 +23,7 @@ const migrations: readonly Migration[] = [{
       binding_id TEXT PRIMARY KEY,
       entry_point TEXT NOT NULL CHECK (entry_point IN ('desktop', 'im', 'scheduler')),
       authority_id TEXT NOT NULL,
+      subject_id TEXT NOT NULL,
       namespace TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
       thread_id TEXT NOT NULL DEFAULT '',
@@ -30,26 +31,44 @@ const migrations: readonly Migration[] = [{
       workspace_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE (entry_point, authority_id, namespace, conversation_id, thread_id)
+      UNIQUE (entry_point, authority_id, subject_id, namespace, conversation_id, thread_id)
     ) STRICT;
 
     CREATE TABLE yp_agent_runs (
       run_id TEXT PRIMARY KEY,
       entry_point TEXT NOT NULL CHECK (entry_point IN ('desktop', 'im', 'scheduler')),
       authority_id TEXT NOT NULL,
+      subject_id TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,
       request_fingerprint TEXT NOT NULL,
-      request_json TEXT NOT NULL,
+      input_digest TEXT NOT NULL,
+      request_metadata_json TEXT NOT NULL,
       binding_id TEXT REFERENCES yp_conversation_bindings(binding_id),
       status TEXT NOT NULL CHECK (status IN (
         'queued', 'running', 'waiting_approval', 'succeeded', 'failed',
         'cancelled', 'interrupted', 'result_unknown'
       )),
-      output_json TEXT,
-      failure_json TEXT,
+      external_effect_state TEXT NOT NULL DEFAULT 'none'
+        CHECK (external_effect_state IN ('none', 'possible')),
+      approval_request_id TEXT,
+      approval_session_id TEXT,
+      approval_workspace_id TEXT,
+      approval_expires_at TEXT,
+      output_digest TEXT,
+      failure_code TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE (entry_point, authority_id, idempotency_key)
+      UNIQUE (entry_point, authority_id, subject_id, idempotency_key),
+      CHECK (
+        status <> 'waiting_approval'
+        OR (
+          approval_request_id IS NOT NULL
+          AND approval_session_id IS NOT NULL
+          AND approval_workspace_id IS NOT NULL
+          AND approval_expires_at IS NOT NULL
+        )
+      ),
+      CHECK (status <> 'result_unknown' OR external_effect_state = 'possible')
     ) STRICT;
 
     CREATE INDEX yp_agent_runs_status_created
@@ -73,10 +92,11 @@ const migrations: readonly Migration[] = [{
     CREATE TABLE yp_inbound_deduplication (
       entry_point TEXT NOT NULL,
       authority_id TEXT NOT NULL,
+      subject_id TEXT NOT NULL,
       external_message_id TEXT NOT NULL,
       run_id TEXT REFERENCES yp_agent_runs(run_id),
       received_at TEXT NOT NULL,
-      PRIMARY KEY (entry_point, authority_id, external_message_id)
+      PRIMARY KEY (entry_point, authority_id, subject_id, external_message_id)
     ) STRICT;
   `,
 }];
@@ -156,7 +176,18 @@ export class YuanpuMetadataDatabase {
 }
 
 export function openYuanpuMetadataDatabase(path: string): YuanpuMetadataDatabase {
-  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+  if (path !== ':memory:') {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    try {
+      if (lstatSync(path).isSymbolicLink()) {
+        throw new Error('Refusing to open a symbolic link as the Yuanpu metadata database.');
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    closeSync(openSync(path, 'a', 0o600));
+    if (process.platform !== 'win32') chmodSync(path, 0o600);
+  }
   const database = new DatabaseSync(path);
   try {
     database.exec('PRAGMA foreign_keys = ON');

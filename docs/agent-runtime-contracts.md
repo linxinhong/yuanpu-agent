@@ -29,11 +29,15 @@ follow; a type or table declaration is not evidence that a live provider exists.
 3. `input` is model input. It is untrusted content and never supplies identity, authority, workspace,
    approval, or delivery routing facts.
 
-The validation code rejects an entry-point/identity-authenticator mismatch. Workspace access and
-available tools remain policy decisions made after validation; accepting a DTO does not authorize
-filesystem, network, credential, notification, or background access.
+The Runtime service receives an `AuthenticatedAgentCaller` separately from the untrusted request.
+Electron, a channel adapter, or Scheduler constructs that caller; model/message content cannot.
+Validation requires exact entry-point and identity equality, then calls host-owned policies for the
+workspace, conversation/binding, and delivery route. `submit`, `get`, `cancel`, and `subscribe` all
+require the caller context; implementations must compare it with the stored run owner before
+returning data or acting. Accepting a DTO does not authorize filesystem, network, credential,
+notification, or background access.
 
-An idempotency key is unique within `(entryPoint, identity.authorityId)`. The stored request
+An idempotency key is unique within `(entryPoint, identity.authorityId, identity.subjectId)`. The stored request
 fingerprint covers the normalized complete request. Repeating the same key and fingerprint returns
 the original `runId` and current status with `duplicate: true`. Reusing a key for changed input,
 identity, conversation, workspace, or delivery produces `idempotency_conflict`; it never starts a
@@ -65,17 +69,28 @@ run returns `cancellation_requested`; it becomes `cancelled` only after the work
 signal and stops. Cancellation does not undo tool or remote side effects that already occurred.
 Unknown run ids and already-terminal runs have distinct receipts.
 
-After Runtime restart, safely persisted queued work may remain queued. Active work is never claimed
-as successful: it becomes `interrupted` when no external effect could have happened, otherwise
-`result_unknown`. Approval-waiting runs are interrupted and must revalidate execution context and
-authorization before any newly submitted continuation. Consumed one-time approvals are not replayed.
+Before any external dispatch, AgentService must atomically persist
+`externalEffectState = possible`; recovery reads this persisted checkpoint rather than an in-memory
+guess. After Runtime restart, safely persisted queued work may remain queued. Active work is never
+claimed as successful: it becomes `interrupted` while its persisted checkpoint is `none`, otherwise
+`result_unknown`. A run that reached approval after earlier effects can therefore also be unknown.
+Approval-waiting runs with no earlier effect are interrupted and must revalidate execution context
+and authorization before any newly submitted continuation. Consumed one-time approvals are not
+replayed.
+
+Entering `waiting_approval` and persisting its run/request/session/workspace/expiry binding are one
+transaction; the schema rejects a waiting run without that binding. Capability approvals also carry
+the optional `runId`, and replay from another run fails the existing binding comparison. Cancellation,
+denial, expiry, and restart must invalidate the matching approval rather than a caller-supplied id.
 
 ## Delivery and host events
 
 Agent completion and result delivery are separate facts. Delivery moves from `pending` to
 `delivering`, then to `delivered` or `failed`. A restart while `delivering` produces
 `result_unknown`; downstream retry requires the stored delivery idempotency key and adapter-specific
-support. Agent success alone must not be presented as successful channel delivery.
+support. A confirmed idempotent retry updates the same delivery record, keeps the same key, increments
+attempts, and may move `result_unknown` or `failed` back to `delivering`; an ordinary `start` cannot.
+Agent success alone must not be presented as successful channel delivery.
 
 Host events are versioned envelopes with stable `eventId`, per-process `sequence`, and timestamp.
 Hosts deduplicate by `eventId`; reconnect may replay events. The initial event union is run-state
@@ -100,16 +115,26 @@ built-in `node:sqlite` driver:
 | `yp_schema_migrations` | persistence module; ordered applied versions |
 | `yp_runtime_metadata` | persistence module; small Runtime metadata/probes |
 | `yp_conversation_bindings` | AgentService; external-to-Pi session mapping only |
-| `yp_agent_runs` | AgentService; normalized request fingerprint, status, output/failure |
+| `yp_agent_runs` | AgentService; owner, non-content request/output digests, status, approval/effect checkpoints |
 | `yp_delivery_attempts` | delivery adapters; delivery state independent of execution |
 | `yp_inbound_deduplication` | channel ingress; authenticated source message deduplication |
 
 Migrations run in `BEGIN IMMEDIATE` transactions, are forward-only and additive, and refuse a schema
 newer than the running Runtime. Rollback of a Runtime binary therefore does not imply database
 rollback. An incompatible/destructive migration requires a separate backup and recovery design.
+Bindings, runs, deduplication, and idempotency include both authenticated authority and subject; a
+shared channel connection does not collapse different senders. The run table does not store the
+complete `AgentRunRequest`, output message, or duplicate Pi conversation content; it stores routing
+metadata plus digests/codes needed for idempotency and recovery. Any future durable task or delivery
+payload needs an explicit retention/redaction/cleanup design owned by its feature rather than being
+hidden in this baseline.
 Tests use real files, including migration over a pre-existing fixture. The native smoke executes the
 actual SEA twice against the same file and verifies a persisted counter after close/reopen; Node
 development mode alone is not accepted as driver compatibility evidence.
+
+On POSIX, the workflow directory is set to `0700`, the database is set to `0600`, and symbolic-link
+database targets are rejected. Windows uses the user's existing profile ACL; its packaged SEA and ACL
+behavior remains explicitly unverified until the cross-platform acceptance card runs.
 
 ## Deliberately unresolved product boundaries
 
@@ -121,4 +146,3 @@ development mode alone is not accepted as driver compatibility evidence.
   quit must stop Runtime and managed child processes; process-lifecycle hardening is TASK-013.
 - The first IM platform and its verified identity environment remain a TASK-017 decision. Generic
   `im` contracts do not claim any platform SDK or live message support.
-

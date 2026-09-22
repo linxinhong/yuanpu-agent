@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -27,6 +27,10 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
   assert.equal(reopened.getMetadata('fixture'), 'first');
   assert.equal(reopened.incrementMetadataCounter('open-count'), 2);
   reopened.close();
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(join(root, 'nested'))).mode & 0o777, 0o700);
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+  }
 
   const inspection = new DatabaseSync(path, { readOnly: true });
   const tables = inspection.prepare(`
@@ -46,7 +50,52 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     inspection.prepare('SELECT MAX(version) AS version FROM yp_schema_migrations').get().version,
     YUANPU_METADATA_SCHEMA_VERSION,
   );
+  const runColumns = inspection.prepare('PRAGMA table_info(yp_agent_runs)').all()
+    .map((row) => row.name);
+  assert.equal(runColumns.includes('request_json'), false);
+  assert.equal(runColumns.includes('request_metadata_json'), true);
+  assert.equal(runColumns.includes('input_digest'), true);
+  assert.equal(runColumns.includes('subject_id'), true);
+  assert.equal(runColumns.includes('external_effect_state'), true);
+  assert.equal(runColumns.includes('approval_request_id'), true);
   inspection.close();
+});
+
+test('schema isolates subjects and requires durable approval/effect checkpoints', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-constraints-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  openYuanpuMetadataDatabase(path).close();
+  const database = new DatabaseSync(path);
+  const insert = database.prepare(`
+    INSERT INTO yp_agent_runs(
+      run_id, entry_point, authority_id, subject_id, idempotency_key,
+      request_fingerprint, input_digest, request_metadata_json, status,
+      external_effect_state, created_at, updated_at
+    ) VALUES (?, 'im', 'shared-connection', ?, 'message-1', ?, ?, '{}', ?, ?, ?, ?)
+  `);
+  const now = '2026-09-22T00:00:00.000Z';
+  insert.run('run-a', 'user-a', 'a'.repeat(64), 'b'.repeat(64), 'queued', 'none', now, now);
+  insert.run('run-b', 'user-b', 'c'.repeat(64), 'd'.repeat(64), 'queued', 'none', now, now);
+  assert.throws(
+    () => insert.run('run-wait', 'user-c', 'e'.repeat(64), 'f'.repeat(64), 'waiting_approval', 'none', now, now),
+    /CHECK constraint failed/,
+  );
+  assert.throws(
+    () => insert.run('run-unknown', 'user-c', '1'.repeat(64), '2'.repeat(64), 'result_unknown', 'none', now, now),
+    /CHECK constraint failed/,
+  );
+  database.close();
+});
+
+test('refuses a symbolic-link database target', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-link-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const target = join(root, 'target.sqlite');
+  new DatabaseSync(target).close();
+  const link = join(root, 'automation.sqlite');
+  await symlink(target, link);
+  assert.throws(() => openYuanpuMetadataDatabase(link), /symbolic link/);
 });
 
 test('migration preserves a pre-existing real file fixture', async (context) => {
@@ -83,4 +132,3 @@ test('refuses a database created by a newer Yuanpu schema', async (context) => {
     /schema 99 is newer than supported 1/,
   );
 });
-
