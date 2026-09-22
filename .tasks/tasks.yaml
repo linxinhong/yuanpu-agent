@@ -547,7 +547,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-014
     title: "本机执行与生命周期阶段验证"
-    status: in_progress
+    status: done
     goal: "独立证明单机多入口执行基础能隔离会话、恢复状态并遵守 App 生命周期。"
     scope:
       in: ["真实 Runtime API、Pi 会话、SQLite 与子进程的组合验证","身份、审批重放、退出与升级的独立边界审查"]
@@ -576,14 +576,23 @@ tasks:
       owner: "sol-verifier-task-014-20260922-72012"
       attempts: 0
       claimed_at: "2026-09-22T09:52:21.380Z"
-      completed_at: null
+      completed_at: "2026-09-22T10:19:44.394Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-014"
       branch: "task/task-014-lifecycle-verification"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated verification revision", status: "passed", summary: "Independent verification branch task/task-014-lifecycle-verification (tests 97a5c12; handoff f206a00) was merged into main at bcea39c; subsequent f0061fa only simplified the task registry."}
+        - {type: "verification", check: "identity, session and idempotency scenarios", status: "passed", summary: "Real Runtime HTTP, Pi sessions and SQLite plus controlled local provider fixtures proved two concurrent isolated conversations, duplicate admission with one execution, cross-owner denial, separate Pi JSONL transcripts and no queued payload residue."}
+        - {type: "verification", check: "cancellation and approval recovery scenarios", status: "passed", summary: "Real-file SQLite scenarios proved queued cancellation has no controlled effect, running cancellation preserves possible-side-effect semantics, waiting approval becomes result_unknown on shutdown, restart performs zero executions and old or rebound approval cannot be replayed."}
+        - {type: "verification", check: "process, crash and update lifecycle", status: "passed", summary: "macOS fixtures proved normal shutdown, parent SIGKILL cleanup of Runtime/MCP descendants, bounded non-overlapping Runtime restarts, incompatible protocol rejection, next-start staged activation and rollback preserving prior SQLite user data."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Integrated main passed build, typecheck and all tests with Node 24.15.0/pnpm 11.22.0: runtime-kit 80/80, Runtime 7/7 and Desktop 12/12."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "Integrated product tree passed darwin-arm64 SEA build, self-contained Python artifact smoke, native SEA smoke and staged Runtime update smoke."}
+        - {type: "review", check: "independent business verification", status: "passed", summary: "A non-implementer Sol verifier independently derived LC-01 through LC-13, mapped each acceptance claim to raw observations and reported no product blocker for LC-01 through LC-12 in the stated macOS/fixture boundary."}
+        - {type: "boundary", check: "external platform and production evidence", status: "unverified", summary: "Linux/Windows native lifecycle, Windows ACL/taskkill behavior, real model provider, production signing and live Electron UI quit journey remain UNVERIFIED and are not claimed by this stage."}
+        - {type: "memory", check: "verification handoff", status: "passed", summary: "Integrated .tasks/verification/TASK-014/results.md and .tasks/memory/TASK-014.md record scenarios, commands, environment, observations, harness corrections and limits."}
       follow_up_candidates: []
   - id: TASK-015
     title: "实现 Electron 系统通知闭环"
-    status: pending
+    status: ready
     goal: "Pi 与系统任务能请求原生通知，用户点击后定位对应会话或任务。"
     scope:
       in: ["Runtime 通知路由与认证宿主事件连接","Electron 原生通知及处理回执","notify_user 通过现有两个 MCP 元工具注册"]
@@ -617,7 +626,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-016
     title: "实现持久化定时任务与结果投递"
-    status: pending
+    status: ready
     goal: "App 运行时定时触发 Pi，重新打开后按策略恢复，并保留每次执行与投递结果。"
     scope:
       in: ["scheduler 时间计划、时区、漏跑与并发规则","AgentService 提交及持久投递接口","Runtime 计划管理 API 和运行历史"]
