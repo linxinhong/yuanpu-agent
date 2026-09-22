@@ -69,6 +69,10 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function futureExpiry(offsetMs = 60_000) {
+  return new Date(Date.now() + offsetMs).toISOString();
+}
+
 test('serializes one conversation while running independent conversations concurrently', async () => {
   const database = openYuanpuMetadataDatabase(':memory:');
   const gates = new Map();
@@ -333,7 +337,7 @@ test('binds approval completion to the original run', async () => {
             approvalRequestId: 'approval-1',
             sessionId: input.piSessionId,
             workspaceId: input.run.context.workspaceId,
-            expiresAt: '2026-09-22T01:00:00.000Z',
+            expiresAt: futureExpiry(),
           },
           output: { message: 'Approval required', tools: [] },
         };
@@ -384,7 +388,7 @@ test('holds a conversation binding while waiting and counts approved execution a
               approvalRequestId: 'approval-held',
               sessionId: input.piSessionId,
               workspaceId: input.run.context.workspaceId,
-              expiresAt: '2026-09-22T01:00:00.000Z',
+              expiresAt: futureExpiry(),
             },
             output: { message: 'Approval required', tools: [] },
           };
@@ -445,7 +449,7 @@ test('grants a single approval execution owner under concurrent decisions', asyn
             approvalRequestId: 'approval-owner',
             sessionId: input.piSessionId,
             workspaceId: input.run.context.workspaceId,
-            expiresAt: '2026-09-22T01:00:00.000Z',
+            expiresAt: futureExpiry(),
           },
           output: { message: 'Approval required', tools: [] },
         };
@@ -477,6 +481,102 @@ test('grants a single approval execution owner under concurrent decisions', asyn
     { message: 'winner', tools: [] },
   );
   assert.equal((await service.get(caller(), submission.runId)).status, 'succeeded');
+  await service.close();
+  database.close();
+});
+
+test('denial reserves and finishes an approval without waiting for an execution slot', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const blockerGate = deferred();
+  const blockerStarted = deferred();
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    maximumConcurrentRuns: 1,
+    executor: {
+      async execute(input) {
+        if (input.run.context.conversation.conversationId === 'conversation-1') {
+          return {
+            kind: 'waiting_approval',
+            approval: {
+              runId: input.run.runId,
+              approvalRequestId: 'approval-denied',
+              sessionId: input.piSessionId,
+              workspaceId: input.run.context.workspaceId,
+              expiresAt: futureExpiry(),
+            },
+            output: { message: 'Approval required', tools: [] },
+          };
+        }
+        blockerStarted.resolve();
+        await blockerGate.promise;
+        return { kind: 'completed', output: { message: 'blocker done', tools: [] } };
+      },
+    },
+  });
+  const waiting = await service.submit(caller(), request({ idempotencyKey: 'denied-waiting' }));
+  await waitUntil(async () => (await service.get(caller(), waiting.runId)).status === 'waiting_approval');
+  await service.submit(caller(), request({
+    idempotencyKey: 'denied-blocker', conversationId: 'conversation-2',
+  }));
+  await blockerStarted.promise;
+
+  const signal = await service.beginApproval(waiting.runId, 'approval-denied', {
+    executeCapability: false,
+  });
+  const denied = service.failApproval(
+    waiting.runId,
+    'approval-denied',
+    signal,
+    'Capability approval was denied by the desktop user.',
+  );
+  assert.equal(denied.status, 'failed');
+  assert.match(denied.failure.message, /denied/);
+  blockerGate.resolve();
+  await service.waitForIdle();
+  await service.close();
+  database.close();
+});
+
+test('expires waiting approval and releases its conversation binding', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const starts = [];
+  const approvalCancellations = [];
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    approvals: { async cancelRun(runId) { approvalCancellations.push(runId); } },
+    executor: {
+      async execute(input) {
+        starts.push(input.run.runId);
+        if (input.input === 'needs approval') {
+          return {
+            kind: 'waiting_approval',
+            approval: {
+              runId: input.run.runId,
+              approvalRequestId: 'approval-expiring',
+              sessionId: input.piSessionId,
+              workspaceId: input.run.context.workspaceId,
+              expiresAt: futureExpiry(30),
+            },
+            output: { message: 'Approval required', tools: [] },
+          };
+        }
+        return { kind: 'completed', output: { message: input.input, tools: [] } };
+      },
+    },
+  });
+  const expiring = await service.submit(caller(), request({
+    idempotencyKey: 'expiring', text: 'needs approval',
+  }));
+  await waitUntil(async () => (await service.get(caller(), expiring.runId)).status === 'waiting_approval');
+  const next = await service.submit(caller(), request({
+    idempotencyKey: 'after-expiry', text: 'after expiry',
+  }));
+  await waitUntil(async () => (await service.get(caller(), expiring.runId)).status === 'failed');
+  await waitUntil(async () => (await service.get(caller(), next.runId)).status === 'succeeded');
+  const expired = await service.get(caller(), expiring.runId);
+  assert.equal(expired.failure.code, 'approval_expired');
+  assert.deepEqual(approvalCancellations, [expiring.runId]);
+  assert.deepEqual(starts, [expiring.runId, next.runId]);
   await service.close();
   database.close();
 });
@@ -525,7 +625,7 @@ test('orders approval execution against cancellation and records uncertain side 
             approvalRequestId: 'approval-race',
             sessionId: input.piSessionId,
             workspaceId: input.run.context.workspaceId,
-            expiresAt: '2026-09-22T01:00:00.000Z',
+            expiresAt: futureExpiry(),
           },
           output: { message: 'Approval required', tools: [] },
         };

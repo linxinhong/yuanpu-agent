@@ -569,7 +569,9 @@ async function serve(): Promise<void> {
         try {
           if (!execution) throw new Error('Approved capability execution is no longer available.');
           if (execution.runId) {
-            approvalSignal = await agentService.beginApproval(execution.runId, body.requestId);
+            approvalSignal = await agentService.beginApproval(execution.runId, body.requestId, {
+              executeCapability: body.decision === 'approved',
+            });
           }
           await approvals.decide(body.requestId, body.decision);
           if (body.decision === 'denied') {

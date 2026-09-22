@@ -80,7 +80,9 @@ export class PersistentAgentService implements AgentService {
   readonly #waitingBindings = new Map<string, string>();
   readonly #abortControllers = new Map<string, AbortController>();
   readonly #approvalRuns = new Set<string>();
+  readonly #approvalExecutions = new Set<string>();
   readonly #approvalSettlements = new Map<string, { promise: Promise<void>; resolve(): void }>();
+  readonly #approvalExpiryTimers = new Map<string, NodeJS.Timeout>();
   readonly #slotWaiters = new Set<() => void>();
   readonly #subscriptionWaiters = new Set<() => void>();
   readonly #liveOutputs = new Map<string, AgentRunOutput>();
@@ -323,7 +325,11 @@ export class PersistentAgentService implements AgentService {
     return failed;
   }
 
-  async beginApproval(runId: string, approvalRequestId: string): Promise<AbortSignal> {
+  async beginApproval(
+    runId: string,
+    approvalRequestId: string,
+    options: { executeCapability?: boolean } = {},
+  ): Promise<AbortSignal> {
     const pending = this.#store.get(runId);
     if (
       !pending
@@ -332,7 +338,12 @@ export class PersistentAgentService implements AgentService {
     ) {
       throw new Error('Approval does not belong to a waiting Agent run.');
     }
-    while (!this.#closed && this.#activeExecutionCount() >= this.#maximumConcurrentRuns) {
+    const executeCapability = options.executeCapability ?? true;
+    while (
+      executeCapability
+      && !this.#closed
+      && this.#activeExecutionCount() >= this.#maximumConcurrentRuns
+    ) {
       await new Promise<void>((resolve) => this.#slotWaiters.add(resolve));
     }
     if (this.#closed) throw new Error('Agent service is shutting down.');
@@ -344,6 +355,7 @@ export class PersistentAgentService implements AgentService {
     const controller = new AbortController();
     this.#abortControllers.set(runId, controller);
     this.#approvalRuns.add(runId);
+    if (executeCapability) this.#approvalExecutions.add(runId);
     let settle!: () => void;
     const promise = new Promise<void>((resolve) => { settle = resolve; });
     this.#approvalSettlements.set(runId, { promise, resolve: settle });
@@ -450,6 +462,7 @@ export class PersistentAgentService implements AgentService {
           claimed.run.runId,
           claimed.run.context.conversation.sessionBindingId!,
         );
+        this.#scheduleApprovalExpiry(result.approval);
         this.#rememberOutput(claimed.run.runId, result.output);
         this.#emit({ ...waiting, output: result.output });
         return;
@@ -507,7 +520,7 @@ export class PersistentAgentService implements AgentService {
   }
 
   #activeExecutionCount(): number {
-    return this.#activeWorkers.size + this.#approvalRuns.size;
+    return this.#activeWorkers.size + this.#approvalExecutions.size;
   }
 
   #notifySlotWaiters(): void {
@@ -524,6 +537,10 @@ export class PersistentAgentService implements AgentService {
   #releaseApprovalRun(runId: string): void {
     this.#abortControllers.delete(runId);
     this.#approvalRuns.delete(runId);
+    this.#approvalExecutions.delete(runId);
+    const expiryTimer = this.#approvalExpiryTimers.get(runId);
+    if (expiryTimer) clearTimeout(expiryTimer);
+    this.#approvalExpiryTimers.delete(runId);
     const settlement = this.#approvalSettlements.get(runId);
     this.#approvalSettlements.delete(runId);
     settlement?.resolve();
@@ -532,5 +549,48 @@ export class PersistentAgentService implements AgentService {
     if (bindingId) this.#activeBindings.delete(bindingId);
     this.#notifySlotWaiters();
     this.#scheduleDispatch();
+  }
+
+  #scheduleApprovalExpiry(binding: AgentApprovalBinding): void {
+    const existing = this.#approvalExpiryTimers.get(binding.runId);
+    if (existing) clearTimeout(existing);
+    const expiresAt = Date.parse(binding.expiresAt);
+    const delay = Number.isFinite(expiresAt)
+      ? Math.max(0, Math.min(2_147_483_647, expiresAt - this.#now().getTime()))
+      : 0;
+    const timer = setTimeout(() => {
+      void this.#expireApproval(binding.runId, binding.approvalRequestId);
+    }, delay);
+    timer.unref();
+    this.#approvalExpiryTimers.set(binding.runId, timer);
+  }
+
+  async #expireApproval(runId: string, approvalRequestId: string): Promise<void> {
+    const run = this.#store.get(runId);
+    if (
+      this.#closed
+      || !run
+      || run.status !== 'waiting_approval'
+      || run.pendingApproval?.approvalRequestId !== approvalRequestId
+    ) {
+      return;
+    }
+    const expired = this.#store.finish({
+      runId,
+      status: 'failed',
+      now: this.#now().toISOString(),
+      failure: {
+        code: 'approval_expired',
+        message: 'Capability approval expired before a decision was received.',
+        retryable: true,
+      },
+    });
+    this.#releaseApprovalRun(runId);
+    this.#emit(expired);
+    try {
+      await this.#approvals?.cancelRun(runId);
+    } catch {
+      // The durable run is already terminal; a stale approval cannot resume it.
+    }
   }
 }

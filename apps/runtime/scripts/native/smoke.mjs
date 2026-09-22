@@ -57,12 +57,12 @@ assert.equal(capabilitySmoke.errorResult.isError, true);
 assert.match(capabilitySmoke.errorResult.content[0].text, /diagnostic error/i);
 assert.deepEqual(firstSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 1,
+  schemaVersion: 2,
   persistedCount: 1,
 });
 assert.deepEqual(secondSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 1,
+  schemaVersion: 2,
   persistedCount: 2,
 });
 console.log(`Smoke test passed for ${target}`);
