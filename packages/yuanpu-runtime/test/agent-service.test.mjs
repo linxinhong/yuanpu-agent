@@ -317,6 +317,9 @@ test('binds approval completion to the original run', async () => {
     () => service.completeApproval(submission.runId, 'approval-other', { message: 'no', tools: [] }),
     /does not belong/,
   );
+  const approvalSignal = service.beginApproval(submission.runId, 'approval-1');
+  assert.equal(approvalSignal.aborted, false);
+  assert.equal((await service.get(caller(), submission.runId)).status, 'running');
   const completed = service.completeApproval(
     submission.runId,
     'approval-1',
@@ -324,6 +327,44 @@ test('binds approval completion to the original run', async () => {
   );
   assert.equal(completed.status, 'succeeded');
   assert.equal(completed.output.message, 'approved result');
+  await service.close();
+  database.close();
+});
+
+test('orders approval execution against cancellation and records uncertain side effects', async () => {
+  const database = openYuanpuMetadataDatabase(':memory:');
+  const service = await PersistentAgentService.open({
+    store: database.agentRuns,
+    approvals: { async cancelRun() {} },
+    executor: {
+      async execute(input) {
+        return {
+          kind: 'waiting_approval',
+          approval: {
+            runId: input.run.runId,
+            approvalRequestId: 'approval-race',
+            sessionId: input.piSessionId,
+            workspaceId: input.run.context.workspaceId,
+            expiresAt: '2026-09-22T01:00:00.000Z',
+          },
+          output: { message: 'Approval required', tools: [] },
+        };
+      },
+    },
+  });
+  const submission = await service.submit(caller(), request());
+  await waitUntil(async () => (await service.get(caller(), submission.runId)).status === 'waiting_approval');
+  const signal = service.beginApproval(submission.runId, 'approval-race');
+  const receipt = await service.cancel(caller(), submission.runId);
+  assert.equal(receipt.result, 'cancellation_requested');
+  assert.equal(signal.aborted, true);
+  const cancelled = service.failApproval(
+    submission.runId,
+    'approval-race',
+    'Capability call observed cancellation.',
+  );
+  assert.equal(cancelled.status, 'cancelled');
+  assert.match(cancelled.failure.message, /side effects were not reversed/);
   await service.close();
   database.close();
 });

@@ -315,6 +315,15 @@ export class AgentRunStore {
     return this.get(binding.runId)!;
   }
 
+  resumeAfterApproval(runId: string, approvalRequestId: string, now: string): AgentRunRecord {
+    const result = this.database.prepare(`
+      UPDATE yp_agent_runs SET status = 'running', updated_at = ?
+      WHERE run_id = ? AND status = 'waiting_approval' AND approval_request_id = ?
+    `).run(now, runId, approvalRequestId);
+    if (result.changes !== 1) throw new Error('Approval does not belong to a waiting Agent run.');
+    return this.get(runId)!;
+  }
+
   finish(input: {
     runId: string;
     status: Extract<AgentRunStatus, 'succeeded' | 'failed' | 'cancelled'>;

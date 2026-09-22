@@ -565,8 +565,12 @@ async function serve(): Promise<void> {
           if (oldest) usedDecisionNonces.delete(oldest);
         }
         const execution = approvals.executionFor(body.requestId);
+        let approvalSignal: AbortSignal | undefined;
         try {
           if (!execution) throw new Error('Approved capability execution is no longer available.');
+          if (body.decision === 'approved' && execution.runId) {
+            approvalSignal = agentService.beginApproval(execution.runId, body.requestId);
+          }
           await approvals.decide(body.requestId, body.decision);
           if (body.decision === 'denied') {
             if (execution.runId) {
@@ -587,6 +591,7 @@ async function serve(): Promise<void> {
             runId: execution.runId,
             sessionId: execution.sessionId,
             workspaceId: execution.workspaceId,
+            signal: approvalSignal,
           });
           const message = result.content
             .filter((block): block is Extract<(typeof result.content)[number], { type: 'text' }> => block.type === 'text')

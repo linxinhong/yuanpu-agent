@@ -188,8 +188,8 @@ export class PersistentAgentService implements AgentService {
     const controller = this.#abortControllers.get(runId);
     if (controller) {
       controller.abort(new Error('Agent run cancelled by its owner.'));
-    } else if (run.status === 'waiting_approval') {
       await this.#approvals?.cancelRun(runId);
+    } else if (run.status === 'waiting_approval') {
       const cancelled = this.#store.finish({
         runId,
         status: 'cancelled',
@@ -201,6 +201,7 @@ export class PersistentAgentService implements AgentService {
         },
       });
       this.#emit(cancelled);
+      await this.#approvals?.cancelRun(runId);
     }
     return { runId, result: 'cancellation_requested', status: run.status };
   }
@@ -244,10 +245,14 @@ export class PersistentAgentService implements AgentService {
     approvalRequestId: string,
     output: AgentRunOutput,
   ): AgentRunRecord {
+    if (this.#abortControllers.get(runId)?.signal.aborted) {
+      this.failApproval(runId, approvalRequestId, 'Approved capability execution was cancelled.');
+      throw new Error('Approved capability execution was cancelled.');
+    }
     const run = this.#store.get(runId);
     if (
       !run
-      || run.status !== 'waiting_approval'
+      || (run.status !== 'waiting_approval' && run.status !== 'running')
       || run.pendingApproval?.approvalRequestId !== approvalRequestId
     ) {
       throw new Error('Approval does not belong to a waiting Agent run.');
@@ -259,6 +264,7 @@ export class PersistentAgentService implements AgentService {
       outputDigest: digest(JSON.stringify(output)),
     });
     const live = { ...completed, output };
+    this.#abortControllers.delete(runId);
     this.#rememberOutput(runId, output);
     this.#emit(live);
     return live;
@@ -268,19 +274,39 @@ export class PersistentAgentService implements AgentService {
     const run = this.#store.get(runId);
     if (
       !run
-      || run.status !== 'waiting_approval'
+      || (run.status !== 'waiting_approval' && run.status !== 'running')
       || run.pendingApproval?.approvalRequestId !== approvalRequestId
     ) {
       throw new Error('Approval does not belong to a waiting Agent run.');
     }
+    const cancelled = this.#abortControllers.get(runId)?.signal.aborted === true;
     const failed = this.#store.finish({
       runId,
-      status: 'failed',
+      status: cancelled ? 'cancelled' : 'failed',
       now: this.#now().toISOString(),
-      failure: { code: 'approval_failed', message, retryable: false },
+      failure: {
+        code: cancelled ? 'cancelled' : 'approval_failed',
+        message: cancelled
+          ? 'Cancelled during approved capability execution; prior side effects were not reversed.'
+          : message,
+        retryable: false,
+      },
     });
+    this.#abortControllers.delete(runId);
     this.#emit(failed);
     return failed;
+  }
+
+  beginApproval(runId: string, approvalRequestId: string): AbortSignal {
+    const run = this.#store.resumeAfterApproval(
+      runId,
+      approvalRequestId,
+      this.#now().toISOString(),
+    );
+    const controller = new AbortController();
+    this.#abortControllers.set(runId, controller);
+    this.#emit(run);
+    return controller.signal;
   }
 
   async waitForIdle(): Promise<void> {
