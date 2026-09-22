@@ -391,3 +391,88 @@ test('delivery retries reuse one key while unknown Agent results are never resub
   await agent.close();
   metadata.close();
 });
+
+test('shutdown marks an in-flight delivery unknown and restart retries only with the same safe key', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-delivery-shutdown-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  let now = new Date('2026-09-22T00:00:30.000Z');
+  let metadata = openYuanpuMetadataDatabase(path);
+  let agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: {
+      async execute(input) {
+        return { kind: 'completed', output: { message: input.input, tools: [] } };
+      },
+    },
+    now: () => now,
+  });
+  let deliveryStarted = false;
+  let firstKey;
+  let scheduler = await PersistentScheduler.open({
+    store: metadata.schedules,
+    agent,
+    caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true,
+    delivery: {
+      supports: () => true,
+      supportsIdempotency: () => true,
+      deliver(input) {
+        deliveryStarted = true;
+        firstKey = input.idempotencyKey;
+        return new Promise((_resolve, reject) => {
+          input.signal.addEventListener('abort', () => reject(input.signal.reason), { once: true });
+        });
+      },
+    },
+    now: () => now,
+    scanIntervalMs: 60_000,
+  });
+  const schedule = scheduler.create(scheduleInput({
+    timing: { kind: 'once', at: '2026-09-22T00:01:00.000Z' },
+    delivery: { kind: 'channel', routeId: 'shutdown-route' },
+  }));
+  now = new Date('2026-09-22T00:01:00.000Z');
+  const deliveryTick = scheduler.tick();
+  await eventually(() => deliveryStarted);
+  await scheduler.close();
+  await deliveryTick;
+  assert.equal(scheduler.history(schedule.scheduleId)[0].deliveryStatus, 'result_unknown');
+  await agent.close();
+  metadata.close();
+
+  let retriedKey;
+  metadata = openYuanpuMetadataDatabase(path);
+  agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: {
+      async execute() {
+        throw new Error('completed Agent run must not execute again');
+      },
+    },
+    now: () => now,
+  });
+  scheduler = await PersistentScheduler.open({
+    store: metadata.schedules,
+    agent,
+    caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true,
+    delivery: {
+      supports: () => true,
+      supportsIdempotency: () => true,
+      async deliver(input) {
+        retriedKey = input.idempotencyKey;
+      },
+    },
+    now: () => now,
+    scanIntervalMs: 60_000,
+  });
+  await eventually(() => scheduler.history(schedule.scheduleId)[0]?.deliveryStatus === 'delivered');
+  assert.equal(retriedKey, firstKey);
+  assert.equal(scheduler.history(schedule.scheduleId)[0].deliveryAttempts, 2);
+  await scheduler.close();
+  await agent.close();
+  metadata.close();
+});

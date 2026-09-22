@@ -25,6 +25,7 @@ export interface ScheduledDeliveryAdapter {
     idempotencyKey: string;
     target: AgentDeliveryTarget;
     output: AgentRunOutput;
+    signal: AbortSignal;
   }): Promise<void>;
 }
 
@@ -141,6 +142,7 @@ export class PersistentScheduler {
   readonly #scanIntervalMs: number;
   readonly #maximumDeliveryAttempts: number;
   readonly #watchers = new Map<string, Promise<void>>();
+  readonly #deliveryControllers = new Map<string, AbortController>();
   #timer?: NodeJS.Timeout;
   #tickPromise?: Promise<void>;
   #closed = false;
@@ -276,6 +278,9 @@ export class PersistentScheduler {
     this.#closed = true;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = undefined;
+    for (const controller of this.#deliveryControllers.values()) {
+      controller.abort(new Error('Scheduler is shutting down.'));
+    }
     await this.#tickPromise;
   }
 
@@ -421,6 +426,8 @@ export class PersistentScheduler {
       if (!run?.output) continue;
       const claimed = this.#store.claimDelivery(delivery.deliveryId, this.#now().toISOString());
       if (!claimed) continue;
+      const controller = new AbortController();
+      this.#deliveryControllers.set(claimed.deliveryId, controller);
       try {
         if (!this.#delivery?.supports(claimed.target)) throw new Error('No delivery adapter accepts this target.');
         await this.#delivery.deliver({
@@ -428,15 +435,22 @@ export class PersistentScheduler {
           idempotencyKey: claimed.idempotencyKey,
           target: claimed.target,
           output: run.output,
+          signal: controller.signal,
         });
         this.#store.finishDelivery(claimed.deliveryId, 'delivered', this.#now().toISOString());
       } catch (error) {
-        this.#store.finishDelivery(
-          claimed.deliveryId,
-          'failed',
-          this.#now().toISOString(),
-          error instanceof Error ? error.message : String(error),
-        );
+        if (controller.signal.aborted) {
+          this.#store.markDeliveryUnknown(claimed.deliveryId, this.#now().toISOString());
+        } else {
+          this.#store.finishDelivery(
+            claimed.deliveryId,
+            'failed',
+            this.#now().toISOString(),
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      } finally {
+        this.#deliveryControllers.delete(claimed.deliveryId);
       }
     }
   }
