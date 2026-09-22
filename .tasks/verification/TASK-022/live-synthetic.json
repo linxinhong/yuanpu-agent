@@ -1,0 +1,490 @@
+{
+  "schemaVersion": 1,
+  "templateVersion": "task-022.v1",
+  "mode": "live",
+  "model": "jev-1.13.0",
+  "sampleCount": 24,
+  "splitCounts": {
+    "tuning": 12,
+    "holdout": 12
+  },
+  "confidenceThreshold": 0.8,
+  "predictions": [
+    {
+      "id": "tuning-supported-real",
+      "split": "tuning",
+      "label": "supported",
+      "prediction": "supported",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0.01,
+        "supported": 0.99,
+        "contradicted": 0
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": false,
+      "needsHumanReview": false
+    },
+    {
+      "id": "tuning-supported-fixture",
+      "split": "tuning",
+      "label": "supported",
+      "prediction": "supported",
+      "confidence": 0.98,
+      "probabilities": {
+        "insufficient": 0.01,
+        "supported": 0.99,
+        "contradicted": 0
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": false,
+      "needsHumanReview": false
+    },
+    {
+      "id": "tuning-build-only",
+      "split": "tuning",
+      "label": "insufficient",
+      "prediction": "contradicted",
+      "confidence": 0.98,
+      "probabilities": {
+        "insufficient": 0.01,
+        "supported": 0,
+        "contradicted": 0.99
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "tuning-command-failed",
+      "split": "tuning",
+      "label": "contradicted",
+      "prediction": "contradicted",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0.01,
+        "supported": 0,
+        "contradicted": 0.99
+      },
+      "exact": {
+        "status": "failed",
+        "failures": [
+          "command_failed"
+        ]
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "tuning-submitted-only",
+      "split": "tuning",
+      "label": "insufficient",
+      "prediction": "contradicted",
+      "confidence": 0.65,
+      "probabilities": {
+        "insufficient": 0.23,
+        "supported": 0,
+        "contradicted": 0.77
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "tuning-notification-read",
+      "split": "tuning",
+      "label": "supported",
+      "prediction": "supported",
+      "confidence": 1,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 1,
+        "contradicted": 0
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": false,
+      "needsHumanReview": false
+    },
+    {
+      "id": "tuning-delivery-unknown",
+      "split": "tuning",
+      "label": "insufficient",
+      "prediction": "insufficient",
+      "confidence": 0.4,
+      "probabilities": {
+        "insufficient": 0.59,
+        "supported": 0.01,
+        "contradicted": 0.4
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "tuning-cross-session",
+      "split": "tuning",
+      "label": "contradicted",
+      "prediction": "contradicted",
+      "confidence": 0.97,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0.02,
+        "contradicted": 0.98
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": false
+    },
+    {
+      "id": "tuning-no-duplicate",
+      "split": "tuning",
+      "label": "supported",
+      "prediction": "supported",
+      "confidence": 0.97,
+      "probabilities": {
+        "insufficient": 0.02,
+        "supported": 0.98,
+        "contradicted": 0
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": false,
+      "needsHumanReview": false
+    },
+    {
+      "id": "tuning-duplicate",
+      "split": "tuning",
+      "label": "contradicted",
+      "prediction": "contradicted",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0,
+        "contradicted": 1
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": false
+    },
+    {
+      "id": "tuning-injection",
+      "split": "tuning",
+      "label": "insufficient",
+      "prediction": "insufficient",
+      "confidence": 0.34,
+      "probabilities": {
+        "insufficient": 0.56,
+        "supported": 0,
+        "contradicted": 0.44
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "tuning-explicit-opposite",
+      "split": "tuning",
+      "label": "contradicted",
+      "prediction": "contradicted",
+      "confidence": 1,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0,
+        "contradicted": 1
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": false
+    },
+    {
+      "id": "holdout-stale-revision",
+      "split": "holdout",
+      "label": "insufficient",
+      "prediction": "contradicted",
+      "confidence": 0.98,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0.01,
+        "contradicted": 0.99
+      },
+      "exact": {
+        "status": "failed",
+        "failures": [
+          "revision_mismatch"
+        ]
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "holdout-missing-platform",
+      "split": "holdout",
+      "label": "insufficient",
+      "prediction": "contradicted",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0,
+        "contradicted": 1
+      },
+      "exact": {
+        "status": "failed",
+        "failures": [
+          "platform_missing"
+        ]
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "holdout-fixture-as-real",
+      "split": "holdout",
+      "label": "insufficient",
+      "prediction": "contradicted",
+      "confidence": 1,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0,
+        "contradicted": 1
+      },
+      "exact": {
+        "status": "failed",
+        "failures": [
+          "mode_mismatch"
+        ]
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "holdout-supported-real",
+      "split": "holdout",
+      "label": "supported",
+      "prediction": "supported",
+      "confidence": 0.96,
+      "probabilities": {
+        "insufficient": 0.02,
+        "supported": 0.98,
+        "contradicted": 0
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": false,
+      "needsHumanReview": false
+    },
+    {
+      "id": "holdout-build-as-acceptance",
+      "split": "holdout",
+      "label": "insufficient",
+      "prediction": "contradicted",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0,
+        "contradicted": 1
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "holdout-submitted-not-read",
+      "split": "holdout",
+      "label": "insufficient",
+      "prediction": "contradicted",
+      "confidence": 0.35,
+      "probabilities": {
+        "insufficient": 0.43,
+        "supported": 0,
+        "contradicted": 0.57
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "holdout-delivery-contradiction",
+      "split": "holdout",
+      "label": "contradicted",
+      "prediction": "contradicted",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0.01,
+        "supported": 0,
+        "contradicted": 0.99
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": false
+    },
+    {
+      "id": "holdout-session-isolated",
+      "split": "holdout",
+      "label": "supported",
+      "prediction": "supported",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 1,
+        "contradicted": 0
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": false,
+      "needsHumanReview": false
+    },
+    {
+      "id": "holdout-session-crossed",
+      "split": "holdout",
+      "label": "contradicted",
+      "prediction": "contradicted",
+      "confidence": 0.98,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0.01,
+        "contradicted": 0.99
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": false
+    },
+    {
+      "id": "holdout-duplicate-run",
+      "split": "holdout",
+      "label": "contradicted",
+      "prediction": "contradicted",
+      "confidence": 0.99,
+      "probabilities": {
+        "insufficient": 0,
+        "supported": 0.01,
+        "contradicted": 0.99
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": false
+    },
+    {
+      "id": "holdout-injection",
+      "split": "holdout",
+      "label": "insufficient",
+      "prediction": "insufficient",
+      "confidence": 0.43,
+      "probabilities": {
+        "insufficient": 0.62,
+        "supported": 0,
+        "contradicted": 0.38
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": true,
+      "needsHumanReview": true
+    },
+    {
+      "id": "holdout-supported-command",
+      "split": "holdout",
+      "label": "supported",
+      "prediction": "supported",
+      "confidence": 0.9,
+      "probabilities": {
+        "insufficient": 0.01,
+        "supported": 0.94,
+        "contradicted": 0.05
+      },
+      "exact": {
+        "status": "passed",
+        "failures": []
+      },
+      "criticalCounterexample": false,
+      "needsHumanReview": false
+    }
+  ],
+  "confusionMatrix": {
+    "supported": {
+      "supported": 7,
+      "contradicted": 0,
+      "insufficient": 0
+    },
+    "contradicted": {
+      "supported": 0,
+      "contradicted": 7,
+      "insufficient": 0
+    },
+    "insufficient": {
+      "supported": 0,
+      "contradicted": 7,
+      "insufficient": 3
+    }
+  },
+  "falseSupported": 0,
+  "holdoutCriticalFalseSupported": 0,
+  "latencyMs": 1452,
+  "usage": {
+    "input_tokens": 5699,
+    "output_tokens": 1199
+  },
+  "estimatedInputCostUsd": 0.00023936,
+  "humanComparison": {
+    "humanBaselineMs": null,
+    "assistedReviewMs": null,
+    "humanFalseSupported": null,
+    "complete": false
+  },
+  "recommendation": "do_not_adopt",
+  "recommendationReasons": [
+    "human_timing_or_miss_baseline_unverified"
+  ],
+  "notice": "Predictions only describe whether the supplied synthetic summary supports a claim. They do not prove the underlying facts or authorize task status changes."
+}
