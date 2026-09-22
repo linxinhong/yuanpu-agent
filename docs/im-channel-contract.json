@@ -1,52 +1,96 @@
 {
-  "contractVersion": 1,
+  "contractVersion": 2,
   "decision": {
-    "status": "awaiting-user-selection",
-    "selectedCandidateId": null,
-    "userDecisionRef": null,
+    "status": "selected",
+    "selectedCandidateId": "wecom-intelligent-bot-ws",
+    "userDecisionRef": "decision:conversation-2026-09-22-enterprise-wechat",
+    "environmentStatus": "awaiting-account-permission-credentials-and-test-conversations",
     "accountPermissionRef": null,
-    "testConversationRefs": []
+    "credentialBindingRef": null,
+    "testConversationRefs": [],
+    "e2eStatus": "unverified"
   },
   "candidateIds": [
-    "feishu-self-built-app-bot-ws",
     "wecom-intelligent-bot-ws",
-    "dingtalk-internal-app-bot-stream",
-    "wechat-service-account-webhook"
+    "wecom-group-robot-webhook",
+    "wecom-self-built-app-callback",
+    "wecom-wechat-customer-service-callback-pull"
   ],
   "architectureChangeCandidateIds": [
-    "wechat-service-account-webhook"
+    "wecom-self-built-app-callback",
+    "wecom-wechat-customer-service-callback-pull"
   ],
+  "selectedIntegration": {
+    "provider": "wecom",
+    "productName": "企业微信智能机器人",
+    "mode": "api-websocket-long-connection",
+    "officialPackage": {
+      "name": "@wecom/aibot-node-sdk",
+      "observedLatestVersion": "1.0.7",
+      "repositoryManifestVersion": "1.0.6",
+      "sourceRevision": "80615b987ef69c6028ad764924609247c0725955",
+      "license": "MIT",
+      "nodeEngineDeclaration": "absent",
+      "node24Compatibility": "unverified",
+      "installPolicy": "exact-version-and-integrity-after-node24-spike",
+      "sourceUrl": "https://github.com/WecomTeam/aibot-node-sdk"
+    },
+    "adapterStrategy": "yuanpu-owned-wrapper-around-official-sdk"
+  },
   "connection": {
     "connectionIdFormat": "imc_<uuid>",
     "lifecycleOwner": "desktop-app-runtime",
+    "transport": "websocket",
+    "officialEndpoint": "wss://openws.work.weixin.qq.com",
     "backgroundAfterAppExit": false,
+    "disconnectOnAppExit": true,
     "publicInboundEndpoint": false,
-    "outboundInternetRequired": true
+    "outboundInternetRequired": true,
+    "reconnectOwnedBySdkWhileAppRuns": true,
+    "singleActiveConnectionRisk": "new-connection-may-disconnect-old-connection"
+  },
+  "credentials": {
+    "providerAccountField": "botId",
+    "providerAccountRef": "connection-metadata:wecom-bot-id",
+    "secretRefs": [
+      "keychain:yuanpu/im/<connectionId>/bot-secret"
+    ],
+    "secretValuesAllowedInConfig": false,
+    "secretValuesAllowedInLogs": false,
+    "secretLifetime": "process-memory-only-after-secret-store-resolution"
   },
   "inbound": {
-    "requiredFields": [
-      "provider",
-      "connectionId",
-      "providerDeliveryId",
-      "providerMessageId",
-      "trustedSenderId",
-      "conversationId",
-      "messageType",
-      "receivedAt"
+    "providerCommand": "aibot_msg_callback",
+    "providerAckMode": "no-separate-inbound-ack-in-official-sdk",
+    "persistBeforeAgentDispatch": true,
+    "executeAsynchronouslyAfterPersistence": true,
+    "requiredProviderFields": [
+      "headers.req_id",
+      "body.msgid",
+      "body.aibotid",
+      "body.chattype",
+      "body.from.userid",
+      "body.msgtype"
     ],
+    "fieldMapping": {
+      "providerRequestId": "headers.req_id",
+      "providerMessageId": "body.msgid",
+      "providerBotId": "body.aibotid",
+      "trustedSenderId": "body.from.userid",
+      "conversationType": "body.chattype",
+      "conversationId": "body.chatid when group; body.from.userid when single",
+      "messageType": "body.msgtype",
+      "providerResponseUrl": "body.response_url"
+    },
+    "providerBotIdMustMatchConnection": true,
     "dedupeKeyFields": [
-      "provider",
-      "connectionId",
-      "providerDeliveryId"
-    ],
-    "messageUniquenessFields": [
       "provider",
       "connectionId",
       "providerMessageId"
     ],
-    "persistBeforeAck": true,
-    "executeAsynchronouslyAfterAck": true,
-    "offlineRecovery": "unverified"
+    "providerMessageIdSemantics": "msgid-is-callback-unique-id-used-for-deduplication",
+    "offlineRecovery": "unverified",
+    "providerReplayGuarantee": "not-documented-in-selected-official-sdk"
   },
   "identity": {
     "pairingKeyFields": [
@@ -54,28 +98,40 @@
       "trustedSenderId"
     ],
     "trustMessageBodyIdentity": false,
+    "directMessagePolicy": "paired-only",
+    "groupPolicy": "allowlist-paired-sender-and-provider-at-mention",
     "groupRequiresPairedSender": true,
     "groupRequiresAllowlistedConversation": true,
-    "groupRequiresBotMention": true
+    "groupTriggerSemantics": "provider-emits-group-callback-only-when-bot-is-mentioned",
+    "groupEnabledBeforeRealTriggerTest": false
   },
   "session": {
+    "peerIdMapping": "chatid when group; from.userid when single",
+    "threadSupport": "not-present-in-official-protocol",
     "keyFields": [
       "provider",
+      "providerAccountRef",
       "connectionId",
-      "conversationId",
-      "threadIdOrRoot"
+      "conversationType",
+      "peerId"
     ],
+    "authorizationCheckedPerSender": true,
+    "crossAccountReuse": false,
     "crossConnectionReuse": false,
-    "crossConversationReuse": false
+    "crossPeerReuse": false
   },
   "replyRoute": {
+    "providerCommand": "aibot_respond_msg",
     "fields": [
       "provider",
+      "providerAccountRef",
       "connectionId",
-      "conversationId",
-      "threadId",
-      "providerMessageId"
+      "providerRequestId",
+      "providerMessageId",
+      "conversationType",
+      "conversationId"
     ],
+    "providerRequestIdSource": "original-callback-headers.req_id",
     "immutableAfterInbound": true,
     "modelMayOverride": false,
     "fallbackToDifferentConversation": false
@@ -83,28 +139,85 @@
   "outbound": {
     "states": [
       "pending",
-      "delivered",
+      "accepted",
       "failed",
       "unknown"
     ],
     "persistBeforeSend": true,
-    "successRequiresProviderMessageId": true,
+    "replyUsesOriginalRequestId": true,
+    "activeSendTarget": "userid-for-single-or-chatid-for-group",
+    "activeSendRequiresChatType": true,
+    "activeSendRequiresPriorUserMessageInConversation": true,
+    "successSignal": "ack-frame-errcode-equals-zero",
+    "providerMessageIdRequiredForSuccess": false,
+    "explicitFailureSignal": "ack-frame-errcode-nonzero-with-errmsg",
+    "sdkReplyAckTimeoutMs": 5000,
+    "sdkTimeoutIsProviderSla": false,
     "timeoutAfterPossibleWrite": "unknown",
+    "disconnectAfterPossibleWrite": "unknown",
     "blindRetryUnknown": false,
+    "providerIdempotencyKey": "not-documented",
+    "providerDeliveryLookup": "not-documented",
     "rerunAgentOnDeliveryFailure": false
   },
   "attachments": {
+    "providerInboundTypes": [
+      "text",
+      "image",
+      "mixed",
+      "voice",
+      "file",
+      "video"
+    ],
+    "groupInboundTypes": [
+      "text",
+      "mixed"
+    ],
+    "singleOnlyInboundTypes": [
+      "image",
+      "voice",
+      "file",
+      "video"
+    ],
     "initiallyAcceptedTypes": [
       "text"
     ],
-    "unsupportedTypes": [
+    "unsupportedUntilImplemented": [
       "image",
+      "mixed",
+      "voice",
       "file",
-      "audio",
-      "video",
-      "rich-text"
+      "video"
     ],
-    "autoFetchRemoteResources": false
+    "autoFetchRemoteResources": false,
+    "encryptedDownloadMetadata": [
+      "url",
+      "aeskey"
+    ],
+    "downloadAndDecryption": "future-explicit-implementation-only"
+  },
+  "logging": {
+    "officialDefaultLoggerAllowed": false,
+    "requiredLogger": "yuanpu-redacting-logger",
+    "debugRawFramesAllowed": false,
+    "allowedFields": [
+      "hashed-stable-id",
+      "message-type",
+      "content-length",
+      "connection-state",
+      "errcode"
+    ],
+    "forbiddenFields": [
+      "botId",
+      "secret",
+      "userid",
+      "chatid",
+      "message-content",
+      "attachment-url",
+      "aeskey",
+      "response_url",
+      "raw-frame"
+    ]
   },
   "configurationFields": {
     "required": [
@@ -118,48 +231,80 @@
       "groupAllowlist",
       "acceptedMessageTypes"
     ],
+    "provider": "wecom",
     "directMessagePolicy": "paired-only",
-    "groupPolicy": "allowlist-and-mention",
-    "secretValuesAllowed": false,
-    "sdkOptionsPassthrough": false
+    "groupPolicy": "allowlist-paired-sender-and-provider-at-mention",
+    "acceptedMessageTypes": [
+      "text"
+    ],
+    "sdkOptionsPassthrough": false,
+    "customWsUrlAllowed": false
   },
-  "candidateCredentialRefs": {
-    "feishu-self-built-app-bot-ws": [
-      "env:YUANPU_FEISHU_APP_ID",
-      "keychain:yuanpu/im/<connectionId>/app-secret"
+  "providerLimits": {
+    "verifiedAt": "2026-09-22",
+    "officialSourceUrls": [
+      "https://github.com/WecomTeam/aibot-node-sdk",
+      "https://github.com/WecomTeam/aibot-node-sdk/blob/main/README.md",
+      "https://github.com/WecomTeam/aibot-node-sdk/blob/main/package.json",
+      "https://developer.work.weixin.qq.com/document/path/101463"
     ],
-    "wecom-intelligent-bot-ws": [
-      "env:YUANPU_WECOM_BOT_ID",
-      "keychain:yuanpu/im/<connectionId>/bot-secret"
-    ],
-    "dingtalk-internal-app-bot-stream": [
-      "env:YUANPU_DINGTALK_CLIENT_ID",
-      "keychain:yuanpu/im/<connectionId>/client-secret"
-    ],
-    "wechat-service-account-webhook": [
-      "env:YUANPU_WECHAT_APP_ID",
-      "keychain:yuanpu/im/<connectionId>/app-secret",
-      "keychain:yuanpu/im/<connectionId>/callback-token",
-      "keychain:yuanpu/im/<connectionId>/encoding-aes-key"
-    ]
+    "replyAndActiveSendPerConversationPerMinute": 30,
+    "replyAndActiveSendPerConversationPerHour": 1000,
+    "normalReplyWindowHours": 24,
+    "heartbeatRecommendedSeconds": 30,
+    "subscriptionRateLimit": "present-but-numeric-limit-not-documented",
+    "offlineReplay": "unverified",
+    "sdkReconnectBackoff": "exponential-1s-to-30s-while-process-runs",
+    "sdkUploadChunkBytes": 524288,
+    "sdkUploadMaxChunks": 100,
+    "sdkUploadApproxMaxBytes": 52428800,
+    "sdkUploadLimitsAreProviderGuarantee": false,
+    "uploadSessionLifetimeMinutes": 30,
+    "uploadedMediaLifetimeDays": 3,
+    "uploadPerBotPerMinute": 30,
+    "uploadPerBotPerHour": 1000,
+    "inboundMediaUrlLifetimeMinutes": 5
   },
-  "providerLimits": null,
+  "verificationEnvironment": {
+    "status": "unavailable",
+    "required": [
+      "wecom-enterprise-with-intelligent-bot-create-permission",
+      "api-mode-bot-configured-for-websocket-long-connection",
+      "bot-id-bound-as-connection-metadata",
+      "bot-secret-bound-through-secret-store-reference",
+      "two-test-members",
+      "one-direct-test-conversation",
+      "one-isolated-group-test-conversation",
+      "node24-desktop-with-outbound-wss-access"
+    ],
+    "missing": [
+      "account-permission-evidence",
+      "bot-id-reference",
+      "bot-secret-reference",
+      "authorized-test-conversation-references",
+      "real-e2e-results"
+    ],
+    "publicInboundPortRequired": false
+  },
   "fixtureScope": {
     "scenarioFile": "docs/fixtures/im-contract/scenarios.json",
     "proves": [
-      "normalization-shape",
+      "wecom-normalization-shape",
       "identity-policy",
-      "session-isolation",
-      "dedupe-policy",
-      "reply-route-policy",
-      "send-unknown-policy"
+      "account-channel-peer-isolation",
+      "msgid-deduplication-policy",
+      "original-req-id-reply-policy",
+      "send-unknown-policy",
+      "logging-redaction-policy"
     ],
     "doesNotProve": [
       "provider-authentication",
       "provider-delivery",
       "provider-rate-limits",
+      "real-group-at-mention-delivery",
       "offline-recovery",
       "real-attachment-transfer",
+      "node24-sdk-compatibility",
       "end-to-end-display"
     ]
   }

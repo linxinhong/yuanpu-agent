@@ -1,46 +1,63 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
+  "provider": "wecom",
   "payloadKind": "normalized-only",
   "scenarios": [
     {
-      "id": "dm-allowed-text",
-      "expect": ["accepted", "one-agent-run", "reply-route-from-inbound"]
+      "id": "wecom-single-allowed-text",
+      "expect": ["accepted", "one-agent-run", "peer-from-userid", "reply-with-original-req-id"]
     },
     {
-      "id": "group-allowed-mention",
-      "expect": ["accepted", "paired-sender-checked", "same-thread-reply"]
+      "id": "wecom-group-policy-after-e2e-enable",
+      "expect": ["activation-e2e-gated", "accepted-after-enable", "provider-at-mention-trusted", "allowlist-checked", "paired-sender-checked", "peer-from-chatid"]
     },
     {
-      "id": "unauthorized-sender",
-      "expect": ["rejected-before-agent-run", "no-identity-from-message-body"]
+      "id": "wecom-unauthorized-sender",
+      "expect": ["rejected-before-agent-run", "no-identity-from-text-or-display-name"]
     },
     {
-      "id": "duplicate-provider-delivery",
-      "expect": ["acknowledged", "existing-run-returned", "no-second-agent-run"]
-    },
-    {
-      "id": "same-message-different-connection",
-      "expect": ["distinct-dedupe-keys", "distinct-sessions"]
-    },
-    {
-      "id": "thread-reply-route",
-      "expect": ["immutable-route", "same-conversation", "same-thread"]
-    },
-    {
-      "id": "send-timeout-after-write",
-      "expect": ["outbound-unknown", "no-blind-retry", "no-agent-rerun"]
-    },
-    {
-      "id": "restart-with-persisted-dedupe",
+      "id": "wecom-duplicate-msgid",
       "expect": ["existing-run-returned", "no-second-agent-run"]
     },
     {
-      "id": "unsupported-attachment",
-      "expect": ["visible-unsupported-result", "no-remote-fetch", "no-agent-run"]
+      "id": "wecom-same-msgid-different-connection",
+      "expect": ["distinct-dedupe-keys", "distinct-sessions"]
     },
     {
-      "id": "offline-gap-unverified",
+      "id": "wecom-same-user-different-bot-account",
+      "expect": ["distinct-account-channel-peer-keys", "no-cross-account-session"]
+    },
+    {
+      "id": "wecom-reply-route",
+      "expect": ["immutable-route", "same-connection", "original-callback-req-id"]
+    },
+    {
+      "id": "wecom-ack-errcode-failure",
+      "expect": ["outbound-failed", "errmsg-visible-after-redaction", "no-agent-rerun"]
+    },
+    {
+      "id": "wecom-ack-timeout-after-write",
+      "expect": ["outbound-unknown", "no-blind-retry", "no-agent-rerun"]
+    },
+    {
+      "id": "wecom-restart-with-persisted-msgid",
+      "expect": ["existing-run-returned", "no-second-agent-run"]
+    },
+    {
+      "id": "wecom-unsupported-attachment",
+      "expect": ["visible-unsupported-result", "no-url-fetch", "no-aeskey-log", "no-agent-run"]
+    },
+    {
+      "id": "wecom-redacting-logger",
+      "expect": ["no-raw-frame", "no-message-content", "no-attachment-url", "no-aeskey", "no-response-url"]
+    },
+    {
+      "id": "wecom-offline-gap-unverified",
       "expect": ["no-offline-recovery-claim", "requires-real-provider-test"]
+    },
+    {
+      "id": "wecom-app-exit",
+      "expect": ["sdk-disconnect-called", "no-background-process", "pending-send-classified-unknown"]
     }
   ]
 }
