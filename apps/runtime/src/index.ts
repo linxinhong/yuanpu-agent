@@ -39,6 +39,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
+
 declare const __APP_VERSION__: string;
 
 const args = process.argv.slice(2);
@@ -49,6 +51,7 @@ const execFileAsync = promisify(execFile);
 interface RuntimeBootstrap {
   token: string;
   approvalPublicKey: string;
+  parentPid: number;
 }
 
 async function readBootstrap(): Promise<RuntimeBootstrap> {
@@ -65,10 +68,16 @@ async function readBootstrap(): Promise<RuntimeBootstrap> {
     || value.token.length < 32
     || typeof value.approvalPublicKey !== 'string'
     || !value.approvalPublicKey
+    || !Number.isSafeInteger(value.parentPid)
+    || Number(value.parentPid) <= 1
   ) {
     throw new Error('Runtime bootstrap credentials are invalid');
   }
-  return { token: value.token, approvalPublicKey: value.approvalPublicKey };
+  return {
+    token: value.token,
+    approvalPublicKey: value.approvalPublicKey,
+    parentPid: Number(value.parentPid),
+  };
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -224,7 +233,7 @@ function readConfigInput(value: unknown): PluginConfigInput {
 async function serve(): Promise<void> {
   const portIndex = args.indexOf('--port');
   const requestedPort = portIndex >= 0 ? Number(args[portIndex + 1]) : 0;
-  const { token, approvalPublicKey } = await readBootstrap();
+  const { token, approvalPublicKey, parentPid } = await readBootstrap();
   const approvalVerificationKey = createPublicKey({
     key: Buffer.from(approvalPublicKey, 'base64'),
     format: 'der',
@@ -828,6 +837,43 @@ async function serve(): Promise<void> {
     if (chatSessionId) void approvals.cancelSession(chatSessionId);
   });
 
+  let parentMonitor: ParentProcessMonitor | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = () => {
+    if (shutdownPromise) return;
+    shutdownPromise = (async () => {
+      parentMonitor?.dispose();
+      const sessions = new Set(retiredChats);
+      if (chatPromise) sessions.add(chatPromise);
+      const currentSessionId = chatSessionId;
+      chatPromise = undefined;
+      chatSessionId = undefined;
+      retiredChats.clear();
+      if (currentSessionId) await approvals.cancelSession(currentSessionId).catch(() => undefined);
+
+      let drained = false;
+      const closeServer = new Promise<void>((resolveClose) => {
+        try {
+          server.close(() => {
+            drained = true;
+            resolveClose();
+          });
+        } catch {
+          drained = true;
+          resolveClose();
+        }
+      });
+      const drainTimeout = new Promise<void>((resolveTimeout) => {
+        const timeout = setTimeout(resolveTimeout, 5_000);
+        timeout.unref();
+      });
+      await Promise.race([closeServer, drainTimeout]);
+      if (!drained) server.closeAllConnections();
+      await Promise.allSettled([...sessions].map(async (session) => (await session).dispose()));
+      await pythonSource?.close().catch(() => undefined);
+    })().finally(() => process.exit(0));
+  };
+
   server.listen(requestedPort, '127.0.0.1', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Runtime did not bind a TCP port');
@@ -844,16 +890,7 @@ async function serve(): Promise<void> {
       }),
     );
   });
-
-  const shutdown = () => {
-    resetChat();
-    activePrompts = 0;
-    disposeRetiredChats();
-    server.close(() => {
-      void pythonSource?.close().finally(() => process.exit(0));
-      if (!pythonSource) process.exit(0);
-    });
-  };
+  parentMonitor = installParentProcessMonitor(parentPid, shutdown);
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 }

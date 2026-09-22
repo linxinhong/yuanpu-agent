@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 import { RuntimeManager } from './runtime-manager.js';
@@ -9,6 +9,8 @@ import { isTrustedRendererUrl, packagedRendererUrl } from './renderer-security.j
 let runtime: RuntimeManager;
 let mainWindow: BrowserWindow | undefined;
 let trustedRendererEntry = '';
+let quitInProgress = false;
+let quitAllowed = false;
 
 function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
   if (
@@ -63,7 +65,17 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(async () => {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
+if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   runtime = new RuntimeManager(
     app.getAppPath(),
     process.resourcesPath,
@@ -114,9 +126,23 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error('Yuanpu Runtime startup failed:', message);
+  dialog.showErrorBox('Yuanpu Runtime 无法启动', message);
+  app.quit();
 });
 
-app.on('before-quit', () => runtime?.stop());
+app.on('before-quit', (event) => {
+  if (quitAllowed) return;
+  event.preventDefault();
+  if (quitInProgress) return;
+  quitInProgress = true;
+  void Promise.resolve(runtime?.stop()).finally(() => {
+    quitAllowed = true;
+    app.quit();
+  });
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });

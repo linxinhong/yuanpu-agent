@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
@@ -183,4 +184,52 @@ test('discards staged executables whose version or metadata is invalid', async (
     JSON.parse(await readFile(join(root, 'current.json'), 'utf8')),
     { version: '0.1.0', executable: '/old/runtime' },
   );
+});
+
+test('rolls back an unconfirmed activation on the next App start without touching user data', async (context) => {
+  const root = await temporaryRuntimeRoot(context);
+  const updater = new RuntimeUpdater({ runtimeRoot: root, desktopVersion: '0.1.0' });
+  const stagingRoot = join(root, '.staging');
+  const stagedName = process.platform === 'win32' ? 'runtime.exe' : 'runtime';
+  const executable = await readFile(process.execPath);
+  const sha256 = createHash('sha256').update(executable).digest('hex');
+  const userDatabase = join(root, 'user-data', 'automation.sqlite');
+  await mkdir(join(root, 'user-data'), { recursive: true });
+  const database = new DatabaseSync(userDatabase);
+  database.exec('CREATE TABLE user_fixture(value TEXT NOT NULL) STRICT');
+  database.prepare('INSERT INTO user_fixture(value) VALUES (?)').run('persistent-user-data');
+  database.close();
+  await mkdir(stagingRoot, { recursive: true });
+  await writeFile(join(stagingRoot, stagedName), executable);
+  await writeFile(join(stagingRoot, 'staged.json'), JSON.stringify({
+    version: executableVersion,
+    filename: stagedName,
+    sha256,
+  }));
+
+  const activation = await updater.prepareActivation('/bundled/runtime');
+  assert.equal(activation.pending, true);
+  assert.equal(activation.version, executableVersion);
+  assert.deepEqual(
+    JSON.parse(await readFile(join(root, 'current.json'), 'utf8')),
+    { version: executableVersion, executable: activation.executable },
+  );
+
+  const afterCrash = await new RuntimeUpdater({
+    runtimeRoot: root,
+    desktopVersion: '0.1.0',
+  }).prepareActivation('/bundled/runtime');
+  assert.deepEqual(afterCrash, {
+    executable: '/old/runtime',
+    version: '0.1.0',
+    pending: false,
+  });
+  assert.deepEqual(
+    JSON.parse(await readFile(join(root, 'current.json'), 'utf8')),
+    { version: '0.1.0', executable: '/old/runtime' },
+  );
+  const reopened = new DatabaseSync(userDatabase, { readOnly: true });
+  assert.equal(reopened.prepare('SELECT value FROM user_fixture').get().value, 'persistent-user-data');
+  reopened.close();
+  await assert.rejects(stat(join(root, 'activation-pending.json')), { code: 'ENOENT' });
 });
