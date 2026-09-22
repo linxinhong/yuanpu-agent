@@ -423,7 +423,7 @@ tasks:
         - "为 Runtime update manifest 增加独立发布者签名与客户端固定信任根验证，不能仅依赖同源 SHA-256。"
   - id: TASK-011
     title: "固定多入口执行与宿主事件契约"
-    status: in_progress
+    status: done
     goal: "建立桌面、IM、定时任务共用的执行、身份、事件与存储契约，并保持当前对话兼容。"
     scope:
       in: ["AgentService 请求/响应、run 状态、会话标识与幂等规则","yuanpu-protocol 宿主事件、通知回执、取消及协议兼容范围","SQLite 表所有权、迁移与 SEA 驱动可行性验证"]
@@ -450,14 +450,20 @@ tasks:
       owner: "sol-owner-task-011-72012"
       attempts: 0
       claimed_at: "2026-09-22T07:08:16.434Z"
-      completed_at: null
+      completed_at: "2026-09-22T07:58:51.893Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/sol-task-011"
       branch: "task/task-011-agent-contracts"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Branch task/task-011-agent-contracts at 00891d7 was merged into main at 3db44bc3d3dc2f3b7e453e05372fca03d3af8ffa; reviewed implementation revision c2fb4a970b2bd8ff216fc7a496e3751228cbbc58 is included."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Integrated main passed full build, Yuanpu typecheck, and tests under Node 24.15.0 and pnpm 11.22.0."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "Integrated main built and smoked the darwin-arm64 Node SEA, self-contained Python artifact, persisted SQLite reopen path, and staged Runtime update."}
+        - {type: "review", check: "independent Sol contract and security review", status: "passed", summary: "Independent review confirmed closure of trusted caller, subject isolation, approval binding, external-effect checkpoint, delivery unknown, data minimization, and local permission findings; final verdict had no blocker."}
+        - {type: "boundary", check: "cross-platform evidence", status: "unverified", summary: "Linux and Windows SEA execution plus Windows ACL behavior remain unverified and are not claimed by TASK-011 completion."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-011.md records the contract decisions, tests, review closure, and remaining platform boundaries."}
       follow_up_candidates: []
   - id: TASK-012
     title: "实现多会话与持久任务执行"
-    status: pending
+    status: ready
     goal: "不同入口能提交、查询和取消独立会话中的任务，重启后保留可解释的执行状态。"
     scope:
       in: ["agent 与 persistence 实现、Pi 会话映射","现有桌面对话和 Runtime HTTP 消费者适配","现有审批绑定至 run 并恢复等待状态"]
@@ -491,7 +497,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-013
     title: "完善 App 进程生命周期与升级恢复"
-    status: pending
+    status: ready
     goal: "Runtime 与受管能力进程随 App 启停，并在异常退出和升级失败时可控恢复。"
     scope:
       in: ["Electron RuntimeManager 启停、单实例、父进程异常退出处理","受控重启与下一次 App 启动激活","启动健康检查和旧版本恢复"]
@@ -842,4 +848,108 @@ tasks:
         - {type: "review", check: "independent Sol security and standards review", status: "passed", summary: "Independent review closed Unix, URI, UNC and Windows path exfiltration gaps, invalid human-metric acceptance, duplicate evidence ids, and test placement; final verdict PASS with no blocker."}
         - {type: "evaluation", check: "synthetic Jev pilot", status: "passed", summary: "One bounded jev-1.13.0 call used only 24 synthetic cases; no critical counterexample was incorrectly supported. Human timing and false-support baselines remain unverified, so the recorded recommendation is do_not_adopt."}
         - {type: "memory", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-022.md and .tasks/verification/TASK-022/results.md record inputs, commands, review fixes, measured model behavior, and the unverified adoption boundary."}
+      follow_up_candidates: []
+  - id: TASK-023
+    title: "确定微信 ClawBot 适配架构与安全边界"
+    status: pending
+    goal: "在企业微信首发链路完成后，证明腾讯微信 ClawBot 能否在不引入独立常驻网关的前提下安全接入 Yuanpu，并固定可执行适配契约。"
+    scope:
+      in: ["腾讯官方 openclaw-weixin 与 iLink 协议/实现核验","二维码授权、凭据、长轮询、会话与本地缓存边界","Yuanpu 自有 adapter、复用代码或受管 OpenClaw Gateway 的架构取舍","最小协议 fixture 与失效模式验证"]
+      out: ["实现生产适配器","修改 Pi 上游","默认启用群聊或向真实业务会话试发","把企业微信验收结果复用为微信 ClawBot 验收"]
+    constraints: ["企业微信首发完整业务验收完成后再启动；完成须集成并验证于 main","只使用腾讯官方仓库、协议文档与经授权测试账号；外部资料仅作线索","保持 App 退出后无独立后台活动；凭据仅引用，不写日志、fixture 或任务证据"]
+    forbidden: ["因参考插件可运行就宣称 Yuanpu 已接通","把 OpenClaw Gateway 静默加入 Runtime 或修改 Pi 上游","用个人真实聊天、附件或二维码凭据制作 fixture"]
+    acceptance:
+      - type: assertion
+        expect: "记录官方接入身份、账号资格、版本、网络端点及许可；明确二维码授权、bot_token/baseurl、长轮询 get_updates_buf、context_token、client_id 和媒体加密字段的生命周期"
+      - type: assertion
+        expect: "对比 Yuanpu 自有 adapter、复用官方 MIT 实现和受管 OpenClaw Gateway，给出一项可执行选择；证明所选方案不破坏 Pi 边界、SEA 打包和 App 生命周期"
+      - type: assertion
+        expect: "威胁模型覆盖 token/二维码泄漏、日志正文、附件与 quote cache 留存、账号/会话串线、重复投递、发送结果未知、旧绑定无法解绑及版本漂移；每项有降级或清理策略"
+      - type: assertion
+        expect: "用合成 fixture 验证消息/会话标识、游标恢复、去重和未知结果契约；没有授权账号时明确列出真实收发、重新绑定和多设备行为的未验证项"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-021"]
+    risk_level: L4
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["腾讯官方 Tencent/openclaw-weixin 的 README、docs/protocol.md、package.json、CHANGELOG 与源代码；记录核验 revision","从 packages/yuanpu-runtime/src/channels/adapters 预期入口和 apps/runtime 装配边界评估，不直接复制 OpenClaw ChannelPlugin 接口","先协议/数据流/威胁模型评审，再决定 TASK-024 的依赖与实现范围；需要变更总体 Runtime 架构时标 needs_arch_review"]
+    escalation_conditions: ["官方协议或账号资格不能支持第三方兼容客户端时停止实现并报告，不绕过限制","需要独立 OpenClaw Gateway、后台守护进程、未公开 API 或扩大真实数据范围时请求明确架构与数据授权"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-024
+    title: "实现微信 ClawBot 对话渠道"
+    status: pending
+    goal: "在已批准的适配架构上，让授权微信用户通过 ClawBot 与本机 Pi 对话，并保持可靠身份、会话和投递语义。"
+    scope:
+      in: ["一个 Yuanpu-owned ClawBot adapter 及 Runtime 装配","二维码登录/重新绑定、入站长轮询、回复和基础媒体","配对、去重、断线恢复、投递持久化与退出清理"]
+      out: ["替换企业微信首发渠道","修改腾讯或 Pi 上游","未在 TASK-023 批准的独立网关与后台服务","默认开放群聊或全部本机权限"]
+    constraints: ["严格采用 TASK-023 批准的接入方式；完成须集成并验证于 main","只向明确授权的测试账号/会话外发；测试证据脱敏","凭据进入 SecretStore；App 退出关闭轮询并清理临时媒体，持久缓存服从显式保留策略"]
+    forbidden: ["自动重放发送结果未知的回复或重复执行 Agent","在日志中记录 bot_token、context_token、正文、二维码、媒体密钥/URL 或真实用户标识","用合成 fixture 冒充微信真实收发"]
+    acceptance:
+      - type: assertion
+        expect: "已配对微信用户发送文本后收到同一会话回复；未配对身份被拒绝，两个账号/会话不串内容，重复消息只产生一次 run"
+      - type: assertion
+        expect: "游标、消息去重、context_token 和投递状态持久化；断线或重启不重复执行，发送未知保持 result_unknown 并支持显式对账"
+      - type: assertion
+        expect: "二维码与 token 可安全创建、撤销和重新绑定；App 退出无 ClawBot 后台活动；日志和持久数据通过敏感字段拒绝测试"
+      - type: assertion
+        expect: "文本必测，媒体按 TASK-023 已核验能力实现并验证大小/类型/加密/清理；未支持能力返回明确结果而非静默丢失"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native && pnpm smoke:native"
+    dependencies: ["TASK-023"]
+    risk_level: L4
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["复用 TASK-018 的共用 channel 路由、身份与投递接口，只新增平台 adapter；避免复制第二套 Agent/持久化状态机","从官方协议合成重放与错误帧测试开始，再做授权账号单会话、双会话、断线和重新绑定；记录官方依赖版本/revision","实现后要求独立安全复审：凭据/日志/媒体留存、会话隔离、未知发送与进程生命周期"]
+    escalation_conditions: ["实现证据与 TASK-023 选择冲突或需要未公开接口时停止并回到架构评审","缺授权微信账号、二维码或测试会话时可完成 fixture，但不得标 done 或宣称真实接通"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-025
+    title: "微信 ClawBot 独立业务验收"
+    status: pending
+    goal: "由非实现者证明 ClawBot 在授权真实微信环境中的身份、收发、恢复和数据清理满足契约。"
+    scope:
+      in: ["真实授权账号的文本与已实现媒体旅程","双会话隔离、重复消息、断线重启、重新绑定和发送未知故障注入","日志、SQLite、缓存目录与 App 退出后的数据/进程检查"]
+      out: ["在验收卡内修复实现","扩大到未授权联系人或业务群","把企业微信或 fixture 结果替代 ClawBot 真实证据"]
+    constraints: ["非 TASK-024 主要实现者执行；只使用明确授权测试账号/会话","证据只保留替换 ID、事件序列、状态和必要截图；不保存二维码、token、正文或附件原件","完成须集成并验证于 main"]
+    forbidden: ["构建成功冒充业务验收","submitted 或发送请求完成冒充用户已收到","遗漏账号解绑、多设备或版本兼容未验证项"]
+    acceptance:
+      - type: assertion
+        expect: "授权用户完成消息 → 单次 Agent run → 原会话回复；第二会话同时操作不串线，重放同一平台消息不重复执行"
+      - type: assertion
+        expect: "连接中断、App 退出/重启和发送回执丢失分别得到契约规定的恢复结果，未知发送不自动重复"
+      - type: assertion
+        expect: "凭据、日志、引用/媒体缓存和临时文件检查无敏感泄漏；删除账号或到期清理符合 TASK-023 保留策略"
+      - type: assertion
+        expect: "记录当前 revision、腾讯插件/协议版本、客户端与账号环境；多设备、重新绑定或平台限制不能验证时逐项标记，不扩大结论"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-024"]
+    risk_level: L4
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["证据写入 .tasks/verification/TASK-025/results.md；引用 TASK-023 契约和 TASK-024 实现 revision","先 fixture 故障注入与本地数据检查，再授权真实微信双会话；验收失败建独立修复卡","独立复核问题：平台事实是否仍有效、敏感数据是否最小化、局部成功是否被扩大为整体通过"]
+    escalation_conditions: ["没有授权账号或平台仍处灰度/绑定限制时保留未验证并等待环境，不改用非官方登录方案","发现平台条款、协议或版本变化影响接入合法性/兼容性时暂停验收并重开 TASK-023 决策"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
       follow_up_candidates: []
