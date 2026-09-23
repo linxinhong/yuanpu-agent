@@ -863,7 +863,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-021
     title: "App 多入口与升级完整业务验收"
-    status: ready
+    status: in_progress
     goal: "证明用户从配置到 IM/定时任务执行、结果导航及升级恢复的完整体验；原生通知另行验收。"
     scope:
       in: ["桌面端完整用户旅程和打包应用","App 生命周期、SEA 升级与持久数据兼容的跨平台回归"]
@@ -889,12 +889,12 @@ tasks:
     investigation_hints: ["阶段验证记录、apps/desktop/test、apps/runtime/scripts/native 与打包配置；通知暂缓见 docs/adr/0003-defer-native-notifications.md","pnpm check → pnpm build:native && pnpm smoke:native → pnpm package:desktop → 当前 revision 平台旅程","证据保存 .tasks/verification/TASK-021/results.md；回归失败提独立修复，不修改历史验收结论"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "codex-t019sep23-12136-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T11:08:20.618Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-019"
+      branch: "task/task-021-business-acceptance"
       evidence: []
       follow_up_candidates: []
   - id: TASK-029
