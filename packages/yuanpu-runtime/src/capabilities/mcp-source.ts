@@ -93,6 +93,8 @@ public static class YuanpuJob {
   [DllImport("kernel32.dll")]
   public static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length);
   [DllImport("kernel32.dll")]
+  public static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length, out uint returnedLength);
+  [DllImport("kernel32.dll")]
   public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll")]
   public static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
@@ -100,6 +102,20 @@ public static class YuanpuJob {
   public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
   [DllImport("kernel32.dll")]
   public static extern bool CloseHandle(IntPtr handle);
+  public static bool HasKillOnClose(IntPtr job) {
+    uint size = (uint)Marshal.SizeOf(typeof(ExtendedLimits));
+    IntPtr info = Marshal.AllocHGlobal((int)size);
+    try {
+      uint returnedLength;
+      if (!QueryInformationJobObject(job, 9, info, size, out returnedLength)) {
+        throw new InvalidOperationException("QueryInformationJobObject failed");
+      }
+      ExtendedLimits limits = (ExtendedLimits)Marshal.PtrToStructure(info, typeof(ExtendedLimits));
+      return (limits.BasicLimitInformation.LimitFlags & 0x2000) != 0;
+    } finally {
+      Marshal.FreeHGlobal(info);
+    }
+  }
 }
 '@
 Trace-McpStage 'add-type'
@@ -107,7 +123,9 @@ Trace-McpStage 'add-type'
 $job = [YuanpuJob]::CreateJobObject([IntPtr]::Zero, $null)
 if ($job -eq [IntPtr]::Zero) { throw 'CreateJobObject failed' }
 $limits = New-Object YuanpuJob+ExtendedLimits
-$limits.BasicLimitInformation.LimitFlags = 0x2000
+$basicLimits = New-Object YuanpuJob+BasicLimits
+$basicLimits.LimitFlags = 0x2000
+$limits.BasicLimitInformation = $basicLimits
 $size = [Runtime.InteropServices.Marshal]::SizeOf($limits)
 $pointer = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
 try {
@@ -118,6 +136,7 @@ try {
 } finally {
   [Runtime.InteropServices.Marshal]::FreeHGlobal($pointer)
 }
+if (-not [YuanpuJob]::HasKillOnClose($job)) { throw 'Job Object kill-on-close limit was not applied' }
 $process = [YuanpuJob]::OpenProcess(0x101101, $false, [uint32]$env:YUANPU_MCP_CHILD_PID)
 if ($process -eq [IntPtr]::Zero) { throw 'OpenProcess failed' }
 try {
