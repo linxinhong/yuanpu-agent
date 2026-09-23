@@ -52,10 +52,14 @@ test('private IM summary requires a current paired sender and exposes only run a
       kind: 'channel_user', subjectId: 'conversation-digest',
       authorityId: 'imc_fixture', authenticatedBy: 'channel_adapter',
     } },
-    context: { workspaceId: '/fixture/workspace', conversation: { namespace: 'im:wecom:fixture' } },
+    context: {
+      workspaceId: '/fixture/workspace',
+      conversation: { namespace: 'im:wecom:fixture', conversationId: 'single:conversation-digest' },
+      delivery: { kind: 'channel', routeId: 'inbound-fixture' },
+    },
   };
   const inbound = {
-    provider: 'wecom', connectionId: 'imc_fixture', conversationType: 'single',
+    inboundId: 'inbound-fixture', provider: 'wecom', connectionId: 'imc_fixture', conversationType: 'single',
     conversationDigest: 'conversation-digest', senderDigest: 'sender-digest', action: 'run',
   };
   const stores = {
@@ -81,6 +85,10 @@ test('private IM summary requires a current paired sender and exposes only run a
   assert.equal(getDesktopPrivateImRunSummary('im-run', {
     ...stores,
     agentRuns: { get: () => ({ ...run, owner: { ...run.owner, identity: { ...run.owner.identity, subjectId: 'foreign' } } }) },
+  }, document, '/fixture/workspace'), undefined);
+  assert.equal(getDesktopPrivateImRunSummary('im-run', {
+    ...stores,
+    agentRuns: { get: () => ({ ...run, context: { ...run.context, delivery: { kind: 'channel', routeId: 'foreign' } } }) },
   }, document, '/fixture/workspace'), undefined);
   assert.deepEqual(getDesktopPrivateImRunSummary('im-run', {
     ...stores,

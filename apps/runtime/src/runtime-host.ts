@@ -40,6 +40,9 @@ export function getDesktopPrivateImRunSummary(
     || run.owner.identity.subjectId !== inbound.conversationDigest
     || run.context.workspaceId !== workspaceId
     || !run.context.conversation.namespace.startsWith('im:wecom:')
+    || run.context.conversation.conversationId !== `single:${inbound.conversationDigest}`
+    || run.context.delivery.kind !== 'channel'
+    || run.context.delivery.routeId !== inbound.inboundId
     || inbound.provider !== 'wecom'
     || inbound.conversationType !== 'single'
     || inbound.action !== 'run'
