@@ -24,6 +24,7 @@ import {
   type AgentRunRecord,
   type AgentRunCancellationReceipt,
   type AgentRunReceipt,
+  type PrivateImRunSummary,
   type ScheduleHistoryRecord,
   type ScheduleInput,
   type SchedulePrivateContact,
@@ -461,6 +462,13 @@ export class RuntimeManager {
       throw new Error('runId must be a non-empty string of at most 200 characters.');
     }
     return this.request(`${RUNTIME_ROUTES.agentRuns}/${encodeURIComponent(runId)}`);
+  }
+
+  getPrivateImRunSummary(runId: string): Promise<PrivateImRunSummary> {
+    if (typeof runId !== 'string' || runId.length < 1 || runId.length > 200) {
+      throw new Error('runId must be a non-empty string of at most 200 characters.');
+    }
+    return this.request(`${RUNTIME_ROUTES.privateImRuns}/${encodeURIComponent(runId)}`);
   }
 
   cancelAgentRun(runId: string): Promise<AgentRunCancellationReceipt> {

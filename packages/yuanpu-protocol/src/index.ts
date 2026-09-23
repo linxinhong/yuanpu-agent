@@ -1,7 +1,7 @@
 export const PROTOCOL_VERSION = 3;
 
 import type { NotificationNavigationTarget } from './host-events.js';
-import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord } from './agent.js';
+import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
 import type {
   ScheduleHistoryRecord,
   ScheduleInput,
@@ -19,6 +19,7 @@ export const RUNTIME_ROUTES = {
   chat: '/v1/chat',
   chatSubmit: '/v1/chat/submit',
   agentRuns: '/v1/agent/runs',
+  privateImRuns: '/v1/im/private-runs',
   hostEvents: '/v1/host/events',
   hostEventReceipts: '/v1/host/events/receipts',
   notificationTargetValidation: '/v1/notifications/targets/validate',
@@ -53,6 +54,12 @@ export interface RuntimeInfo {
 
 export interface RuntimeGreeting {
   message: string;
+}
+
+export interface PrivateImRunSummary {
+  runId: string;
+  runStatus: AgentRunStatus;
+  replyDeliveryStatus: 'not_created' | 'pending' | 'delivering' | 'accepted' | 'failed' | 'unknown';
 }
 
 /** Deliberately excludes bot ID, credential reference, secret and sender digests. */
@@ -251,6 +258,7 @@ export interface DesktopBridge {
   chat(message: string): Promise<ChatResponse>;
   submitDesktopMessage(message: string): Promise<AgentRunReceipt>;
   getAgentRun(runId: string): Promise<AgentRunRecord>;
+  getPrivateImRunSummary(runId: string): Promise<PrivateImRunSummary>;
   cancelAgentRun(runId: string): Promise<AgentRunCancellationReceipt>;
   listSchedules(): Promise<ScheduleRecord[]>;
   createSchedule(input: ScheduleInput): Promise<ScheduleRecord>;
