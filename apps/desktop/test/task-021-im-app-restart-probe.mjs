@@ -211,6 +211,7 @@ try {
   assert.match(detail, /运行状态\s+succeeded/);
   assert.match(detail, /回复投递\s+投递结果未知/);
   assert.match(detail, /不会自动重发/);
+  assert.doesNotMatch(detail, /synthetic-member|synthetic reply|https?:\/\//);
   const uiFacts = await second.renderer.evaluate(`({
     mounted: Boolean(document.querySelector('.app-shell')),
     imDeliveryLabel: document.body.innerText.includes('投递结果未知'),
@@ -223,6 +224,7 @@ try {
   await eventually(async () => second.renderer.evaluate(`Boolean(document.querySelector('.app-shell'))`), 'Renderer did not reload.');
   const refreshedDetail = await navigate(second, run);
   assert.match(refreshedDetail, /回复投递\s+投递结果未知/);
+  assert.doesNotMatch(refreshedDetail, /synthetic-member|synthetic reply|https?:\/\//);
   await stop(second);
   console.log(JSON.stringify({ status: 'passed', appLaunches: 2, outbound: 'unknown', imRuns: 1, sends: 1, agentExecutions: 1, rendererMounted: uiFacts.mounted, imDeliveryVisible: uiFacts.imDeliveryLabel, refreshRetained: true, pairedOnly: true, summarySanitized: true, runtimeChildrenStopped: true }));
 } finally {
