@@ -31,6 +31,8 @@
 - 正式 App 预检（集成 `main` `1564bf8`）：Electron 窗口可见“本地 Runtime 已连接”，但现有企业微信连接仍禁用、配对数 0。TASK-027 已隔离可选连接启动失败；窗口就绪不等于渠道就绪。用户授权将现有 `.env` 的 Bot Secret 绑定到该连接专用 macOS Keychain 项，使用不回显的双重提示写入；随后由进程内变量比较确认 Keychain 可读且值一致，未输出 ID/Secret。虚拟 Keychain 流程测试项已删除。旧配置 Bot ID 与新变量不同，未直接读取或输出变量值。
 - 新增正式 App 配对探针 `packages/yuanpu-runtime/test/task-019-formal-app-pairing-probe.mjs`：仅在 SDK 鉴权且收到本轮精确私聊口令后，把认证回调的 sender 转为连接作用域摘要，备份原配置并原子写入启用/Keychain 引用/单人配对；无原始 userid 或凭据日志。首轮 `ready` 后 180 秒内 `inboundSeen=0`、`matched=0`，退出 `message_timeout`；用户未确认在窗口中发出该口令。探针关闭、配置未改、连接仍禁用、无备份产生。此轮 **unverified（待用户再次试发）**，不记平台故障；Keychain 项保留供后续正式连接使用。
 - 用户回复“现在方便”后，第二轮使用新的随机口令并先确认 SDK `ready`；180 秒窗口仍 `inboundSeen=0`、`matched=0`、`message_timeout`，用户尚未确认实际在企业微信发送该轮口令。再次检查连接仍禁用、配对数 0、无配置备份。配对探针随后补充仅记录 SDK 事件计数与超时刻 `isReady()` 的脱敏诊断，语法检查通过；该改动尚未经历新的真实试发。正式 App 配对维持 **unverified（待确认发送及再次试收）**。
+- 第三轮正式 App 配对口令在官方 SDK `ready` 后由用户确认发出，探针退出码 0，脱敏事实为 `inboundSeen=1`、`matched=1`、`pairedCount=1`。原配置已备份在用户本机 `wecom.json.task019-before-pairing.bak`，新配置仅启用同一机器人、单个连接作用域配对摘要、私聊文本和已有 Keychain 引用；进程内检查 schema、Bot 与环境变量匹配、Keychain Secret 匹配、群聊禁用均为 true。未输出或持久记录 Bot ID、Secret、原始 userid、消息正文。此项证明单人配对配置成功，不证明正式 App 的消息收发。
+- 启用连接后第一次正式 App 启动失败：Desktop 把 Runtime 标准输出首行的 `[wecom] ...` SDK `info` 诊断当作 JSON ready 解析，报 `Unexpected token 'w'`。这是产品缺陷，不是配对或平台鉴权失败。独立 `隔离企业微信日志与 Runtime 就绪协议（TASK-028）` 在 `8a2f721` 将脱敏日志隔离到 stderr，回归测试先红后绿；集成 `main` `3563d1d` 后 `pnpm check` 通过。用已启用连接启动开发 Electron，Runtime 与 renderer 均持续运行，未再出现 JSON 就绪错误；正式窗口显示“本地 Runtime 已连接”。本机仍有 `plugins:search` 缺能力制品信任根的诊断，未据此判定企业微信故障。正式 App 业务库此时 `inbound=0`、`outbound=0`、`runs=0`，已请用户再从同一私聊发送无敏感内容的普通测试消息，V19-06 正式 App 收发仍待观测。
 
 ## 执行记录
 
