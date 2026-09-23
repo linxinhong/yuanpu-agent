@@ -70,7 +70,6 @@ test('cron skips nonexistent DST time and uses only the first ambiguous wall tim
 
 test('each schedule revision fires once and default overlap policy skips a concurrent occurrence', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-once-'));
-  context.after(() => rm(root, { recursive: true, force: true }));
   const databasePath = join(root, 'automation.sqlite');
   const metadata = openYuanpuMetadataDatabase(databasePath);
   let now = new Date('2026-09-22T00:00:30.000Z');
@@ -98,6 +97,7 @@ test('each schedule revision fires once and default overlap policy skips a concu
     await scheduler.close();
     await agent.close();
     metadata.close();
+    await rm(root, { recursive: true, force: true });
   });
 
   assert.deepEqual(scheduler.preview(scheduleInput()), { nextTriggerAt: '2026-09-22T00:01:00.000Z' });
