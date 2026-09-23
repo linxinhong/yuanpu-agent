@@ -46,6 +46,12 @@ const execFileAsync = promisify(execFile);
 
 const WINDOWS_JOB_SUPERVISOR = String.raw`
 $ErrorActionPreference = 'Stop'
+function Trace-McpStage([string]$stage) {
+  if ($env:YUANPU_MCP_DIAGNOSTIC_FILE) {
+    [IO.File]::AppendAllText($env:YUANPU_MCP_DIAGNOSTIC_FILE, $stage + [Environment]::NewLine)
+  }
+}
+Trace-McpStage 'start'
 Add-Type @'
 using System;
 using System.Diagnostics;
@@ -94,6 +100,7 @@ public static class YuanpuJob {
   public static extern bool CloseHandle(IntPtr handle);
 }
 '@
+Trace-McpStage 'add-type'
 
 $job = [YuanpuJob]::CreateJobObject([IntPtr]::Zero, $null)
 if ($job -eq [IntPtr]::Zero) { throw 'CreateJobObject failed' }
@@ -113,6 +120,7 @@ if (-not [YuanpuJob]::AssignProcessToJobObject($job, [YuanpuJob]::GetCurrentProc
   [YuanpuJob]::CloseHandle($job) | Out-Null
   throw 'Assign supervisor to Job Object failed'
 }
+Trace-McpStage 'job-assigned'
 
 $process = New-Object Diagnostics.Process
 $process.StartInfo.FileName = $env:YUANPU_MCP_CHILD_COMMAND
@@ -124,9 +132,11 @@ $process.StartInfo.RedirectStandardError = $true
 $process.StartInfo.CreateNoWindow = $true
 try {
   if (-not $process.Start()) { throw 'MCP child failed to start' }
+  Trace-McpStage 'child-started'
   $stdout = $process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
   $stderr = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
   $stdin = [Console]::OpenStandardInput().CopyToAsync($process.StandardInput.BaseStream)
+  Trace-McpStage 'streams-started'
   $process.WaitForExit()
   $exitCode = $process.ExitCode
 } finally {

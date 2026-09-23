@@ -19,6 +19,7 @@ const pythonExecutable = process.platform === 'win32'
   ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
   : join(pythonRoot, '.venv', 'bin', 'python');
 const testPrivateHome = await mkdtemp(join(tmpdir(), 'yuanpu-mcp-test-'));
+const windowsDiagnosticFile = join(testPrivateHome, 'supervisor-stages.log');
 after(() => rm(testPrivateHome, { recursive: true, force: true }));
 
 function pythonSource(overrides = {}) {
@@ -40,6 +41,7 @@ function pythonSource(overrides = {}) {
       PATH: dirname(pythonExecutable),
       PYTHONPATH: join(pythonRoot, 'src'),
       PYTHONUNBUFFERED: '1',
+      ...(process.platform === 'win32' ? { YUANPU_MCP_DIAGNOSTIC_FILE: windowsDiagnosticFile } : {}),
       YUANPU_MCP_TEST_FIXTURES: '1',
       ...(process.platform === 'win32' && process.env.SYSTEMROOT
         ? { SYSTEMROOT: process.env.SYSTEMROOT }
@@ -56,7 +58,10 @@ test('real Python MCP discovery and execution preserve structured results and er
   const server = createYuanpuMcpServer([source]);
   const search = await server.search({ query: 'echo' });
   const echo = search.matches.find((match) => match.originalName === 'yuanpu_echo_text');
-  assert.ok(echo, JSON.stringify(search));
+  const stages = process.platform === 'win32'
+    ? await readFile(windowsDiagnosticFile, 'utf8').catch(() => 'no supervisor stage')
+    : '';
+  assert.ok(echo, `${JSON.stringify(search)}; stages=${stages}`);
   const result = await server.execute({ name: echo.name, arguments: { text: '源谱' } });
   assert.deepEqual(result.structuredContent, { text: '源谱', length: 2 });
   assert.equal(result.content[0].type, 'text');
