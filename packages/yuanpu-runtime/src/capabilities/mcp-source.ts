@@ -170,11 +170,15 @@ public static class YuanpuJob {
     IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
     if (snapshot == new IntPtr(-1)) throw new InvalidOperationException("Process snapshot failed");
     var children = new Dictionary<uint, List<uint>>();
+    var pythonProcesses = new List<string>();
     try {
       ProcessEntry entry = new ProcessEntry();
       entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
       if (Process32FirstW(snapshot, ref entry)) {
         do {
+          if (entry.Executable != null && entry.Executable.EndsWith("python.exe", StringComparison.OrdinalIgnoreCase)) {
+            pythonProcesses.Add(entry.ProcessId + ":" + entry.ParentProcessId);
+          }
           List<uint> siblings;
           if (!children.TryGetValue(entry.ParentProcessId, out siblings)) {
             siblings = new List<uint>();
@@ -222,7 +226,7 @@ public static class YuanpuJob {
         CloseHandle(process);
       }
     }
-    return string.Join(",", outcomes.ToArray());
+    return string.Join(",", outcomes.ToArray()) + ";python=" + string.Join(",", pythonProcesses.ToArray());
   }
 }
 '@
