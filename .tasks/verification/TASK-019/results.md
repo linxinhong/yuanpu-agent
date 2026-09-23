@@ -30,6 +30,7 @@
 - 上述脚本与证据更新后，`node --check`、`git diff --check` 和 Node 24.15.0/pnpm 11.22.0 的 `pnpm check` 全部通过（runtime-kit 122/122、Runtime 15/15）；安装产生的无关 lockfile checksum 已移除。完整检查不代替未验证的 Electron 通知与重启业务旅程。
 - 正式 App 预检（集成 `main` `1564bf8`）：Electron 窗口可见“本地 Runtime 已连接”，但现有企业微信连接仍禁用、配对数 0。TASK-027 已隔离可选连接启动失败；窗口就绪不等于渠道就绪。用户授权将现有 `.env` 的 Bot Secret 绑定到该连接专用 macOS Keychain 项，使用不回显的双重提示写入；随后由进程内变量比较确认 Keychain 可读且值一致，未输出 ID/Secret。虚拟 Keychain 流程测试项已删除。旧配置 Bot ID 与新变量不同，未直接读取或输出变量值。
 - 新增正式 App 配对探针 `packages/yuanpu-runtime/test/task-019-formal-app-pairing-probe.mjs`：仅在 SDK 鉴权且收到本轮精确私聊口令后，把认证回调的 sender 转为连接作用域摘要，备份原配置并原子写入启用/Keychain 引用/单人配对；无原始 userid 或凭据日志。首轮 `ready` 后 180 秒内 `inboundSeen=0`、`matched=0`，退出 `message_timeout`；用户未确认在窗口中发出该口令。探针关闭、配置未改、连接仍禁用、无备份产生。此轮 **unverified（待用户再次试发）**，不记平台故障；Keychain 项保留供后续正式连接使用。
+- 用户回复“现在方便”后，第二轮使用新的随机口令并先确认 SDK `ready`；180 秒窗口仍 `inboundSeen=0`、`matched=0`、`message_timeout`，用户尚未确认实际在企业微信发送该轮口令。再次检查连接仍禁用、配对数 0、无配置备份。配对探针随后补充仅记录 SDK 事件计数与超时刻 `isReady()` 的脱敏诊断，语法检查通过；该改动尚未经历新的真实试发。正式 App 配对维持 **unverified（待确认发送及再次试收）**。
 
 ## 执行记录
 

@@ -17,6 +17,7 @@ if (!botId || !secret || !process.env.HOME) {
   let temporaryPath;
   let inboundSeen = 0;
   let matched = 0;
+  const sdkEvents = {};
   const challenge = `Yuanpu-019-pair-${randomBytes(4).toString('hex')}`;
   try {
     const original = await readFile(configPath, 'utf8');
@@ -39,7 +40,7 @@ if (!botId || !secret || !process.env.HOME) {
       connectionId,
       botId,
       secret,
-      log: () => undefined,
+      log: ({ event }) => { sdkEvents[event] = (sdkEvents[event] ?? 0) + 1; },
     });
     transport.connect(async (message) => {
       inboundSeen += 1;
@@ -93,7 +94,7 @@ if (!botId || !secret || !process.env.HOME) {
     });
     await rename(temporaryPath, configPath);
     temporaryPath = undefined;
-    console.log(JSON.stringify({ status: 'configured', inboundSeen, matched, pairedCount: 1 }));
+    console.log(JSON.stringify({ status: 'configured', inboundSeen, matched, pairedCount: 1, sdkEvents }));
   } catch (error) {
     const known = error instanceof Error && [
       'configuration_precondition_failed',
@@ -101,7 +102,11 @@ if (!botId || !secret || !process.env.HOME) {
       'authentication_timeout',
       'message_timeout',
     ].includes(error.message) ? error.message : 'probe_error';
-    console.log(JSON.stringify({ status: known, inboundSeen, matched }));
+    console.log(JSON.stringify({
+      status: known, inboundSeen, matched,
+      transportReady: transport?.isReady() ?? false,
+      sdkEvents,
+    }));
     process.exitCode = 1;
   } finally {
     clearTimeout(timer);
