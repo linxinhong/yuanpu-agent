@@ -213,10 +213,38 @@ try {
   await eventually(async () => evaluate(third, "document.querySelector('.runtime-recovery-notice') === null"),
     'Runtime recovery notice could not be dismissed.');
   await stop(third);
+
+  const genericMarker = 'TASK021_SYNTHETIC_DIAGNOSTIC_MARKER';
+  const genericFailure = join(root, 'generic-failure-runtime');
+  await writeFile(genericFailure,
+    `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 9.9.10; else echo ${genericMarker} >&2; exit 9; fi\n`);
+  await chmod(genericFailure, 0o755);
+  await mkdir(stagedRoot, { recursive: true });
+  const genericStaged = join(stagedRoot, 'runtime');
+  await copyFile(genericFailure, genericStaged);
+  await writeFile(join(stagedRoot, 'staged.json'), JSON.stringify({
+    version: '9.9.10', filename: 'runtime',
+    sha256: createHash('sha256').update(await readFile(genericStaged)).digest('hex'),
+  }));
+  const fourth = await start();
+  assert.deepEqual(JSON.parse(await readFile(join(canonicalUserData, 'runtime', 'current.json'), 'utf8')), active);
+  assert.equal((await evaluate(fourth, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
+  assert.equal(fourth.diagnostics.join('').includes(genericMarker), true);
+  assert.equal(await evaluate(fourth,
+    "window.yuanpu.runtimeRecoveryNotice().then((notice) => notice?.kind === 'activation_failed')"), true);
+  await eventually(async () => evaluate(fourth,
+    "(() => { const notice = document.querySelector('.runtime-recovery-notice'); return Boolean(notice && notice.innerText.includes('Runtime 更新失败') && notice.innerText.includes('已恢复上一版本') && notice.getClientRects().length > 0); })()"),
+  'Generic update failure notice was not visible in packaged UI.');
+  assert.equal(await evaluate(fourth,
+    `!document.querySelector('.runtime-recovery-notice').innerText.includes(${JSON.stringify(genericMarker)}) && !document.querySelector('.runtime-recovery-notice').innerText.includes(${JSON.stringify(root)})`), true);
+  await evaluate(fourth, "document.querySelector('.runtime-recovery-notice button[aria-label=\"关闭 Runtime 更新提示\"]').click()");
+  await eventually(async () => evaluate(fourth, "document.querySelector('.runtime-recovery-notice') === null"),
+    'Generic Runtime recovery notice could not be dismissed.');
+  await stop(fourth);
   console.log(JSON.stringify({
-    status: 'passed', packagedAppLaunches: 3, persistedScheduleVisible: true,
+    status: 'passed', packagedAppLaunches: 4, persistedScheduleVisible: true,
     stagedSeaConfirmed: true, incompatibleCandidateRolledBack: true,
-    visibleIncompatibilityNotice, runtimeChildrenStopped: true,
+    visibleIncompatibilityNotice, genericFailureSanitized: true, runtimeChildrenStopped: true,
   }));
 } finally {
   for (const app of apps) {
