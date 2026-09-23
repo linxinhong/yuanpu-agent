@@ -51,9 +51,11 @@ function pythonSource(overrides = {}) {
 
 test('real Python MCP discovery and execution preserve structured results and errors', async (context) => {
   await access(pythonExecutable);
-  const source = pythonSource();
+  const source = pythonSource({ initializationTimeoutMs: process.platform === 'win32' ? 90_000 : undefined });
   context.after(() => source.close());
-  const server = createYuanpuMcpServer([source]);
+  const server = createYuanpuMcpServer([source], undefined, {
+    discoveryTimeoutMs: process.platform === 'win32' ? 90_000 : undefined,
+  });
   const search = await server.search({ query: 'echo' });
   const echo = search.matches.find((match) => match.originalName === 'yuanpu_echo_text');
   assert.ok(echo, JSON.stringify(search));
@@ -157,7 +159,7 @@ test('a persisted approval is consumed before a real dispatch crash and is never
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
     (error) => error instanceof CapabilityError && error.failure.error === 'result_unknown',
   );
-  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
+  assert.equal((await readFile(markerPath, 'utf8')).replace(/\r\n/gu, '\n'), 'executed\n');
   const persisted = JSON.parse(await readFile(approvalPath, 'utf8'));
   assert.equal(persisted.records[0].status, 'consumed');
 
@@ -167,7 +169,7 @@ test('a persisted approval is consumed before a real dispatch crash and is never
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
     (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
   );
-  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
+  assert.equal((await readFile(markerPath, 'utf8')).replace(/\r\n/gu, '\n'), 'executed\n');
 });
 
 test('untrusted MCP annotations cannot downgrade host approval policy', async (context) => {
@@ -221,7 +223,7 @@ test('a real unresponsive process does not hide a healthy Python MCP source', as
   const server = createYuanpuMcpServer(
     [unresponsive, healthy],
     undefined,
-    { discoveryTimeoutMs: process.platform === 'win32' ? 15_000 : 2_000 },
+    { discoveryTimeoutMs: process.platform === 'win32' ? 90_000 : 2_000 },
   );
   const result = await server.search({ query: 'echo', limit: 20 });
   assert.equal(

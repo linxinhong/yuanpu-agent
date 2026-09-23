@@ -48,10 +48,11 @@ const WINDOWS_JOB_SUPERVISOR = String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type @'
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 public static class YuanpuJob {
+  private static readonly Dictionary<uint, IntPtr> TrackedDescendants = new Dictionary<uint, IntPtr>();
   [StructLayout(LayoutKind.Sequential)]
   public struct BasicLimits {
     public long PerProcessUserTimeLimit;
@@ -82,23 +83,160 @@ public static class YuanpuJob {
     public UIntPtr PeakProcessMemoryUsed;
     public UIntPtr PeakJobMemoryUsed;
   }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct ProcessEntry {
+    public uint Size;
+    public uint Usage;
+    public uint ProcessId;
+    public UIntPtr DefaultHeapId;
+    public uint ModuleId;
+    public uint Threads;
+    public uint ParentProcessId;
+    public int BasePriority;
+    public uint Flags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+    public string Executable;
+  }
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
   public static extern IntPtr CreateJobObject(IntPtr securityAttributes, string name);
   [DllImport("kernel32.dll")]
   public static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length);
   [DllImport("kernel32.dll")]
+  public static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length, out uint returnedLength);
+  [DllImport("kernel32.dll")]
   public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll")]
-  public static extern IntPtr GetCurrentProcess();
+  public static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+  [DllImport("kernel32.dll")]
+  public static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
+  [DllImport("kernel32.dll")]
+  public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
   [DllImport("kernel32.dll")]
   public static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")]
+  public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern bool Process32FirstW(IntPtr snapshot, ref ProcessEntry entry);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern bool Process32NextW(IntPtr snapshot, ref ProcessEntry entry);
+  [DllImport("kernel32.dll")]
+  public static extern bool TerminateProcess(IntPtr process, uint exitCode);
+  public static bool HasKillOnClose(IntPtr job) {
+    uint size = (uint)Marshal.SizeOf(typeof(ExtendedLimits));
+    IntPtr info = Marshal.AllocHGlobal((int)size);
+    try {
+      uint returnedLength;
+      if (!QueryInformationJobObject(job, 9, info, size, out returnedLength)) {
+        throw new InvalidOperationException("QueryInformationJobObject failed");
+      }
+      ExtendedLimits limits = (ExtendedLimits)Marshal.PtrToStructure(info, typeof(ExtendedLimits));
+      return (limits.BasicLimitInformation.LimitFlags & 0x2000) != 0;
+    } finally {
+      Marshal.FreeHGlobal(info);
+    }
+  }
+  public static List<uint> FindDescendants(IEnumerable<uint> roots) {
+    IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
+    if (snapshot == new IntPtr(-1)) throw new InvalidOperationException("Process snapshot failed");
+    var children = new Dictionary<uint, List<uint>>();
+    try {
+      ProcessEntry entry = new ProcessEntry();
+      entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
+      if (Process32FirstW(snapshot, ref entry)) {
+        do {
+          List<uint> siblings;
+          if (!children.TryGetValue(entry.ParentProcessId, out siblings)) {
+            siblings = new List<uint>();
+            children.Add(entry.ParentProcessId, siblings);
+          }
+          siblings.Add(entry.ProcessId);
+          entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
+        } while (Process32NextW(snapshot, ref entry));
+      }
+    } finally {
+      CloseHandle(snapshot);
+    }
+    var queue = new Queue<uint>();
+    var seen = new HashSet<uint>();
+    var descendants = new List<uint>();
+    foreach (uint rootPid in roots) {
+      queue.Enqueue(rootPid);
+      seen.Add(rootPid);
+    }
+    while (queue.Count > 0) {
+      List<uint> direct;
+      if (!children.TryGetValue(queue.Dequeue(), out direct)) continue;
+      foreach (uint pid in direct) {
+        if (!seen.Add(pid)) continue;
+        descendants.Add(pid);
+        queue.Enqueue(pid);
+      }
+    }
+    return descendants;
+  }
+  public static string AssignDescendantsToJob(IntPtr job, uint rootPid) {
+    var outcomes = new List<string>();
+    foreach (uint pid in FindDescendants(new uint[] { rootPid })) {
+      IntPtr process = OpenProcess(0x101101, false, pid);
+      if (process == IntPtr.Zero) {
+        outcomes.Add(pid + ":not-open");
+        continue;
+      }
+      try {
+        if (WaitForSingleObject(process, 0) != 0) {
+          outcomes.Add(pid + (AssignProcessToJobObject(job, process) ? ":assigned" : ":not-assigned"));
+        } else {
+          outcomes.Add(pid + ":exited");
+        }
+      } finally {
+        CloseHandle(process);
+      }
+    }
+    return string.Join(",", outcomes.ToArray());
+  }
+  public static string TrackDescendants(uint rootPid) {
+    var outcomes = new List<string>();
+    var roots = new List<uint>(TrackedDescendants.Keys);
+    roots.Add(rootPid);
+    foreach (uint pid in FindDescendants(roots)) {
+      if (TrackedDescendants.ContainsKey(pid)) continue;
+      IntPtr process = OpenProcess(0x100001, false, pid);
+      if (process == IntPtr.Zero) {
+        outcomes.Add(pid + ":not-open");
+        continue;
+      }
+      TrackedDescendants.Add(pid, process);
+      outcomes.Add(pid + ":tracked");
+    }
+    return string.Join(",", outcomes.ToArray());
+  }
+  public static string TerminateTrackedDescendants() {
+    var outcomes = new List<string>();
+    foreach (var descendant in TrackedDescendants) {
+      try {
+        if (WaitForSingleObject(descendant.Value, 0) == 0) {
+          outcomes.Add(descendant.Key + ":exited");
+        } else if (TerminateProcess(descendant.Value, 1) && WaitForSingleObject(descendant.Value, 5000) == 0) {
+          outcomes.Add(descendant.Key + ":terminated");
+        } else {
+          outcomes.Add(descendant.Key + ":not-terminated");
+        }
+      } finally {
+        CloseHandle(descendant.Value);
+      }
+    }
+    TrackedDescendants.Clear();
+    return string.Join(",", outcomes.ToArray());
+  }
 }
 '@
 
 $job = [YuanpuJob]::CreateJobObject([IntPtr]::Zero, $null)
 if ($job -eq [IntPtr]::Zero) { throw 'CreateJobObject failed' }
 $limits = New-Object YuanpuJob+ExtendedLimits
-$limits.BasicLimitInformation.LimitFlags = 0x2000
+$basicLimits = New-Object YuanpuJob+BasicLimits
+$basicLimits.LimitFlags = 0x2000
+$limits.BasicLimitInformation = $basicLimits
 $size = [Runtime.InteropServices.Marshal]::SizeOf($limits)
 $pointer = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
 try {
@@ -109,39 +247,30 @@ try {
 } finally {
   [Runtime.InteropServices.Marshal]::FreeHGlobal($pointer)
 }
-if (-not [YuanpuJob]::AssignProcessToJobObject($job, [YuanpuJob]::GetCurrentProcess())) {
-  [YuanpuJob]::CloseHandle($job) | Out-Null
-  throw 'Assign supervisor to Job Object failed'
-}
-
-$process = New-Object Diagnostics.Process
-$process.StartInfo.FileName = $env:YUANPU_MCP_CHILD_COMMAND
-$process.StartInfo.Arguments = $env:YUANPU_MCP_CHILD_ARGUMENTS
-$process.StartInfo.UseShellExecute = $false
-$process.StartInfo.RedirectStandardInput = $true
-$process.StartInfo.RedirectStandardOutput = $true
-$process.StartInfo.RedirectStandardError = $true
-$process.StartInfo.CreateNoWindow = $true
+if (-not [YuanpuJob]::HasKillOnClose($job)) { throw 'Job Object kill-on-close limit was not applied' }
+$process = [YuanpuJob]::OpenProcess(0x101101, $false, [uint32]$env:YUANPU_MCP_CHILD_PID)
+if ($process -eq [IntPtr]::Zero) { throw 'OpenProcess failed' }
 try {
-  if (-not $process.Start()) { throw 'MCP child failed to start' }
-  $stdout = $process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
-  $stderr = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
-  $stdin = [Console]::OpenStandardInput().CopyToAsync($process.StandardInput.BaseStream)
-  $process.WaitForExit()
-  $exitCode = $process.ExitCode
+  if (-not [YuanpuJob]::AssignProcessToJobObject($job, $process)) {
+    throw 'Assign child to Job Object failed'
+  }
+  # A venv launcher can create the real interpreter before it joins the Job.
+  [YuanpuJob]::AssignDescendantsToJob($job, [uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null
+  [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null
+  [Console]::Out.WriteLine('READY')
+  [Console]::Out.Flush()
+  do {
+    $waitResult = [YuanpuJob]::WaitForSingleObject($process, 50)
+    if ($waitResult -eq 258) { [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null }
+  } while ($waitResult -eq 258)
+  [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null
+  if (-not [YuanpuJob]::TerminateJobObject($job, 1)) { throw 'TerminateJobObject failed' }
 } finally {
-  # Closing the last Job handle terminates this supervisor and every inherited
-  # descendant. Do this before waiting for pipe EOF: descendants may hold the
-  # inherited stdout/stderr handles open indefinitely.
+  [YuanpuJob]::TerminateTrackedDescendants() | Out-Null
+  [YuanpuJob]::CloseHandle($process) | Out-Null
   [YuanpuJob]::CloseHandle($job) | Out-Null
 }
-exit $exitCode
 `;
-
-function quoteWindowsArgument(value: string): string {
-  if (value.length > 0 && !/[\s"]/u.test(value)) return value;
-  return `"${value.replace(/(\\*)"/gu, '$1$1\\"').replace(/(\\*)$/u, '$1$1')}"`;
-}
 
 async function terminateProcessGroup(rootPid: number): Promise<void> {
   if (process.platform === 'win32') {
@@ -165,16 +294,20 @@ class ProcessGroupStdioTransport implements Transport {
   readonly #args: string[];
   readonly #cwd: string;
   readonly #env: Record<string, string>;
+  readonly #windowsSupervisorScript?: string;
   readonly #readBuffer = new ReadBuffer();
   #process?: ChildProcess;
+  #supervisor?: ChildProcess;
+  #supervisorReady = false;
   #groupId?: number;
   #closing?: Promise<void>;
 
-  constructor(options: { command: string; args: string[]; cwd: string; env: Record<string, string> }) {
+  constructor(options: { command: string; args: string[]; cwd: string; env: Record<string, string>; windowsSupervisorScript?: string }) {
     this.#command = options.command;
     this.#args = options.args;
     this.#cwd = options.cwd;
     this.#env = options.env;
+    this.#windowsSupervisorScript = options.windowsSupervisorScript;
   }
 
   get pid(): number | null {
@@ -218,12 +351,84 @@ class ProcessGroupStdioTransport implements Transport {
         const groupId = this.#groupId;
         this.#groupId = undefined;
         if (groupId) {
-          void terminateProcessGroup(groupId).finally(() => this.onclose?.());
+          void (this.#supervisor ? this.#waitWindowsSupervisor() : terminateProcessGroup(groupId))
+            .finally(() => this.onclose?.());
         } else {
           this.onclose?.();
         }
       });
     });
+    if (this.#windowsSupervisorScript && this.#groupId) {
+      try {
+        await this.#attachWindowsSupervisor(this.#groupId);
+      } catch (error) {
+        await this.close();
+        throw error;
+      }
+    }
+  }
+
+  async #attachWindowsSupervisor(rootPid: number): Promise<void> {
+    const systemRoot = this.#env.SYSTEMROOT;
+    if (!systemRoot || !this.#windowsSupervisorScript) throw new Error('Windows MCP supervisor is not configured.');
+    const supervisor = spawn(join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', this.#windowsSupervisorScript,
+    ], {
+      cwd: this.#cwd,
+      env: { ...this.#env, YUANPU_MCP_CHILD_PID: String(rootPid) },
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    this.#supervisor = supervisor;
+    supervisor.on('error', (error) => this.onerror?.(error));
+    await new Promise<void>((resolveReady, rejectReady) => {
+      let output = '';
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        if (error) rejectReady(error);
+        else resolveReady();
+      };
+      const timeout = setTimeout(() => finish(new Error('Windows MCP Job Object setup timed out.')), 90_000);
+      const fail = (error: Error) => finish(error);
+      supervisor.once('error', fail);
+      supervisor.once('exit', () => finish(new Error('Windows MCP Job Object supervisor exited before ready.')));
+      supervisor.stdout?.on('data', (chunk: Buffer) => {
+        output += chunk.toString('utf8');
+        if (output.includes('READY')) {
+          this.#supervisorReady = true;
+          finish();
+        }
+        if (output.length > 4_096) finish(new Error('Windows MCP Job Object supervisor did not become ready.'));
+      });
+    });
+  }
+
+  async #waitWindowsSupervisor(): Promise<void> {
+    const supervisor = this.#supervisor;
+    if (!supervisor) return;
+    if (!this.#supervisorReady && supervisor.pid) {
+      await terminateProcessGroup(supervisor.pid);
+      this.#supervisor = undefined;
+      this.#supervisorReady = false;
+      return;
+    }
+    if (supervisor.exitCode === null && supervisor.signalCode === null) {
+      await new Promise<void>((resolveExit) => {
+        const timeout = setTimeout(resolveExit, 3_000);
+        supervisor.once('exit', () => {
+          clearTimeout(timeout);
+          resolveExit();
+        });
+      });
+    }
+    if (supervisor.exitCode === null && supervisor.signalCode === null && supervisor.pid) {
+      await terminateProcessGroup(supervisor.pid);
+    }
+    this.#supervisor = undefined;
+    this.#supervisorReady = false;
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
@@ -240,6 +445,7 @@ class ProcessGroupStdioTransport implements Transport {
       const groupId = this.#groupId;
       this.#groupId = undefined;
       if (groupId) await terminateProcessGroup(groupId);
+      await this.#waitWindowsSupervisor();
       this.#process = undefined;
       this.#readBuffer.clear();
     })();
@@ -317,34 +523,31 @@ export class ManagedMcpCapabilitySource {
         APPDATA: appData,
         LOCALAPPDATA: localAppData,
       };
-      let command = this.#options.command;
-      let args = this.#options.args;
+      let windowsSupervisorScript: string | undefined;
       if (process.platform === 'win32') {
         const systemRoot = isolatedEnv.SYSTEMROOT;
         if (!systemRoot) throw new ManagedMcpSourceError('unavailable', 'SYSTEMROOT is required for Windows MCP isolation.');
-        const supervisor = join(this.#options.privateHome, 'mcp-job-supervisor.ps1');
-        await writeFile(supervisor, WINDOWS_JOB_SUPERVISOR, { encoding: 'utf8', mode: 0o600 });
-        isolatedEnv.YUANPU_MCP_CHILD_COMMAND = command;
-        isolatedEnv.YUANPU_MCP_CHILD_ARGUMENTS = args.map(quoteWindowsArgument).join(' ');
-        command = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-        args = [
-          '-NoLogo',
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-File',
-          supervisor,
-        ];
+        const temp = join(this.#options.privateHome, 'temp');
+        await mkdir(temp, { recursive: true });
+        isolatedEnv.TEMP = temp;
+        isolatedEnv.TMP = temp;
+        isolatedEnv.PATH = [
+          isolatedEnv.PATH,
+          join(systemRoot, 'System32'),
+          systemRoot,
+        ].filter(Boolean).join(';');
+        windowsSupervisorScript = join(this.#options.privateHome, 'mcp-job-supervisor.ps1');
+        await writeFile(windowsSupervisorScript, WINDOWS_JOB_SUPERVISOR, { encoding: 'utf8', mode: 0o600 });
       }
       if (this.#closing) {
         throw new ManagedMcpSourceError('unavailable', 'MCP source is closing.');
       }
       const transport = new ProcessGroupStdioTransport({
-        command,
-        args,
+        command: this.#options.command,
+        args: this.#options.args,
         cwd: this.#options.cwd,
         env: isolatedEnv,
+        windowsSupervisorScript,
       });
       const client = new Client({ name: 'yuanpu-agent', version: '0.1.0' });
       this.#transport = transport;
