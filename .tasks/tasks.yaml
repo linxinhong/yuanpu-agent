@@ -823,7 +823,7 @@ tasks:
         - "TASK-029 retains native notification reminder UI and effectively signed macOS display/click verification; V19-07 unsigned development failed-event history remains unverified."
   - id: TASK-020
     title: "实现连接与定时任务管理界面"
-    status: in_progress
+    status: done
     goal: "用户能在现有 Electron 界面管理连接和计划，并追踪执行与 IM 投递结果。"
     scope:
       in: ["沿用现有壳的连接列表/配置、定时任务列表/编辑及运行详情","会话来源、取消入口和 IM 投递状态","对接已验证的 Runtime API 和 preload"]
@@ -850,14 +850,20 @@ tasks:
       owner: "codex-t019sep23-12136"
       attempts: 0
       claimed_at: "2026-09-23T09:55:35.495Z"
-      completed_at: null
+      completed_at: "2026-09-23T10:59:23.023Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-019"
       branch: "task/task-020-management-ui"
-      evidence: []
+      evidence:
+        - {type: "verification", check: "approved TASK-020 management UI and browser task walkthrough", status: "passed", summary: "User approved v001 on 2026-09-23. At implementation b3c22d0, isolated browser fixture exercised sidebar, schedule create/preview/save/list/detail, conversation return and connection error draft retention at 1440/1280/1024/390 px without horizontal overflow. axe-core found zero definite WCAG A/AA violations; gradient text contrast needs manual review. Evidence: docs/frontend/tasks/connection-schedule-management.md and .tasks/ui/TASK-020/images/."}
+        - {type: "verification", check: "isolated production Electron App management journey", status: "passed", summary: "At b3c22d0, apps/desktop/test/task-020-management-app-probe.mjs passed with temporary YUANPU_HOME/userData/workspace: formal Electron IPC persisted a disabled connection and a schedule, toggled the schedule, submitted and cancelled a desktop run, and removed its Runtime child on exit. No real Enterprise WeChat message or user credential was touched."}
+        - {type: "verification", check: "connection failure recovery and scoped reconfiguration", status: "passed", summary: "Focused Runtime/SDK tests at b3c22d0 passed for strict Keychain references, no secret echo, unavailable credential rollback, authentication-failure diagnostic, and targeted connection startup. Independent read-only review found history refresh, async authentication, all-channel restart, and enabled-save reconnect defects; repaired and rerun before integration."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0 full build, Yuanpu typechecks and tests passed after task branch b3c22d0 plus memory commit 3523263 were fast-forwarded to main. Main's pre-existing dirty files were preserved."}
+        - {type: "memory", check: "TASK-020 handoff and verification record", status: "passed", summary: "Integrated .tasks/memory/TASK-020.md and .tasks/verification/TASK-020/results.md record source revision, entry points, checks, recovery behavior and remaining live/platform boundaries."}
+        - {type: "boundary", check: "live Enterprise WeChat and signed/cross-platform business journey", status: "unverified", summary: "TASK-020 did not reconfigure the user's running bot or send a real message. Real SDK authentication failure/retry during traffic and end-to-end UI + IM scheduled delivery remain for TASK-021; native signed notification display/click belongs to TASK-029. Fixture success is not claimed as live platform acceptance."}
       follow_up_candidates: []
   - id: TASK-021
     title: "App 多入口与升级完整业务验收"
-    status: pending
+    status: ready
     goal: "证明用户从配置到 IM/定时任务执行、结果导航及升级恢复的完整体验；原生通知另行验收。"
     scope:
       in: ["桌面端完整用户旅程和打包应用","App 生命周期、SEA 升级与持久数据兼容的跨平台回归"]
@@ -893,7 +899,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-029
     title: "补齐提醒界面与签名版原生通知验收"
-    status: pending
+    status: ready
     goal: "待具备有效 macOS 签名验收环境后，补齐提醒偏好、系统通知展示和点击回到对应运行的真实体验。"
     scope:
       in: ["提醒偏好和通知权限状态界面","当前版本有效签名的 macOS App 原生通知展示、点击与目标导航验收","失败事件、权限拒绝、submitted 与用户可见性的区分"]
