@@ -326,6 +326,15 @@ export class ChannelStore {
     return row?.run_id;
   }
 
+  getInboundForRun(runId: string): ChannelInboundRoute | undefined {
+    const row = this.database.prepare(`
+      SELECT * FROM yp_channel_inbound
+      WHERE run_id = ? AND action = 'run'
+      LIMIT 1
+    `).get(runId) as InboundRow | undefined;
+    return row ? inboundFromRow(row) : undefined;
+  }
+
   recoverableInbound(provider: string, connectionId: string): ChannelInboundRoute[] {
     const rows = this.database.prepare(`
       SELECT i.* FROM yp_channel_inbound i

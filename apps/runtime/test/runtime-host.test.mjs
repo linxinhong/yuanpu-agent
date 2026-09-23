@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   cleanupRuntimeResources,
   getDesktopNavigableRun,
+  getDesktopPrivateImRunSummary,
 } from '../src/runtime-host.ts';
 
 const desktopCaller = { entryPoint: 'desktop' };
@@ -42,6 +43,49 @@ test('desktop navigation uses only the fixed desktop and scheduler authorization
     ['desktop', 'foreign-desktop-run'],
     ['scheduler', 'foreign-desktop-run'],
   ]);
+});
+
+test('private IM summary requires a current paired sender and exposes only run and delivery states', () => {
+  const run = {
+    runId: 'im-run', status: 'succeeded',
+    owner: { entryPoint: 'im', identity: {
+      kind: 'channel_user', subjectId: 'conversation-digest',
+      authorityId: 'imc_fixture', authenticatedBy: 'channel_adapter',
+    } },
+    context: { workspaceId: '/fixture/workspace', conversation: { namespace: 'im:wecom:fixture' } },
+  };
+  const inbound = {
+    provider: 'wecom', connectionId: 'imc_fixture', conversationType: 'single',
+    conversationDigest: 'conversation-digest', senderDigest: 'sender-digest', action: 'run',
+  };
+  const stores = {
+    agentRuns: { get: () => run },
+    channels: {
+      getInboundForRun: () => inbound,
+      getOutboundForRun: () => ({ status: 'unknown', contentDigest: 'secret-digest', failureCode: 'private-error' }),
+    },
+  };
+  const document = {
+    schemaVersion: 1,
+    connections: [{ connectionId: 'imc_fixture', pairedSenderDigests: ['sender-digest'] }],
+  };
+  assert.deepEqual(getDesktopPrivateImRunSummary('im-run', stores, document, '/fixture/workspace'), {
+    runId: 'im-run', runStatus: 'succeeded', replyDeliveryStatus: 'unknown',
+  });
+  assert.equal(getDesktopPrivateImRunSummary('im-run', stores, { ...document, connections: [] }, '/fixture/workspace'), undefined);
+  assert.equal(getDesktopPrivateImRunSummary('im-run', stores, document, '/other/workspace'), undefined);
+  assert.equal(getDesktopPrivateImRunSummary('im-run', {
+    ...stores,
+    channels: { ...stores.channels, getInboundForRun: () => ({ ...inbound, conversationType: 'group' }) },
+  }, document, '/fixture/workspace'), undefined);
+  assert.equal(getDesktopPrivateImRunSummary('im-run', {
+    ...stores,
+    agentRuns: { get: () => ({ ...run, owner: { ...run.owner, identity: { ...run.owner.identity, subjectId: 'foreign' } } }) },
+  }, document, '/fixture/workspace'), undefined);
+  assert.deepEqual(getDesktopPrivateImRunSummary('im-run', {
+    ...stores,
+    channels: { ...stores.channels, getOutboundForRun: () => undefined },
+  }, document, '/fixture/workspace')?.replyDeliveryStatus, 'not_created');
 });
 
 test('cleanup continues after scheduler rejection and aggregates all close failures', async () => {

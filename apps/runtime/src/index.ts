@@ -53,7 +53,7 @@ import { promisify } from 'node:util';
 
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
-import { cleanupRuntimeResources, getDesktopNavigableRun } from './runtime-host.js';
+import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
 import {
   closeWecomChannels,
@@ -877,9 +877,16 @@ async function serve(): Promise<void> {
             desktopCaller,
             schedulerCaller,
           );
-          const conversationId = run?.context.conversation.conversationId;
-          result = run && conversationId && (!requestedConversationId || requestedConversationId === conversationId)
-            ? { valid: true, target: { conversationId, runId: run.runId } }
+          const privateImSummary = run ? undefined : getDesktopPrivateImRunSummary(
+            requestedRunId,
+            metadata,
+            await readWecomConnectionDocument(home.appPath).catch(() => ({ schemaVersion: 1 as const, connections: [] })),
+            home.config.workingDirectory,
+          );
+          const conversationId = run?.context.conversation.conversationId
+            ?? (privateImSummary ? metadata.agentRuns.get(requestedRunId)?.context.conversation.conversationId : undefined);
+          result = (run || privateImSummary) && conversationId && (!requestedConversationId || requestedConversationId === conversationId)
+            ? { valid: true, target: { conversationId, runId: requestedRunId } }
             : { valid: false, message: 'The notification target is not owned by this desktop user.' };
         } else if (requestedConversationId === 'default') {
           result = { valid: true, target: { conversationId: 'default' } };
@@ -925,6 +932,24 @@ async function serve(): Promise<void> {
                 : 400;
         }
         response.end(JSON.stringify(submission));
+        return;
+      }
+
+      const privateImRunPath = url.pathname.startsWith(`${RUNTIME_ROUTES.privateImRuns}/`)
+        ? url.pathname.slice(RUNTIME_ROUTES.privateImRuns.length + 1).split('/')
+        : undefined;
+      if (privateImRunPath?.length === 1 && request.method === 'GET') {
+        const runId = decodeURIComponent(privateImRunPath[0]!);
+        const summary = runId.length > 0 && runId.length <= 200
+          ? getDesktopPrivateImRunSummary(
+            runId,
+            metadata,
+            await readWecomConnectionDocument(home.appPath).catch(() => ({ schemaVersion: 1 as const, connections: [] })),
+            home.config.workingDirectory,
+          )
+          : undefined;
+        response.statusCode = summary ? 200 : 404;
+        response.end(JSON.stringify(summary ?? { error: 'Private IM run not found.' }));
         return;
       }
 

@@ -114,6 +114,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('runtime:chat', trustedHandler((message: string) => runtime.chat(message)));
   ipcMain.handle('runtime:chat:submit', trustedHandler((message: string) => runtime.submitDesktopMessage(message)));
   ipcMain.handle('agent:runs:get', trustedHandler((runId: string) => runtime.getAgentRun(runId)));
+  ipcMain.handle('im:private-runs:summary', trustedHandler((runId: string) => runtime.getPrivateImRunSummary(runId)));
   ipcMain.handle('agent:runs:cancel', trustedHandler((runId: string) => runtime.cancelAgentRun(runId)));
   ipcMain.handle('schedules:list', trustedHandler(() => runtime.listSchedules()));
   ipcMain.handle('schedules:create', trustedHandler((input) => runtime.createSchedule(input)));

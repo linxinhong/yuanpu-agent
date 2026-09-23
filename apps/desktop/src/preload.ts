@@ -8,6 +8,7 @@ const bridge: DesktopBridge = {
   chat: (message) => ipcRenderer.invoke('runtime:chat', message),
   submitDesktopMessage: (message) => ipcRenderer.invoke('runtime:chat:submit', message),
   getAgentRun: (runId) => ipcRenderer.invoke('agent:runs:get', runId),
+  getPrivateImRunSummary: (runId) => ipcRenderer.invoke('im:private-runs:summary', runId),
   cancelAgentRun: (runId) => ipcRenderer.invoke('agent:runs:cancel', runId),
   listSchedules: () => ipcRenderer.invoke('schedules:list'),
   createSchedule: (input) => ipcRenderer.invoke('schedules:create', input),
