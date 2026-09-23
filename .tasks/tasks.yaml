@@ -1035,6 +1035,38 @@ tasks:
         - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 macOS task branch 193fe5a runner 1790172504403108000.json and independent verification branch runner 1790172530489632000.json passed. Integrated main e16cfef passed ubuntu-24.04 CI run 35872482174."}
         - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-033.md at main f0db8be records exact public seams, auth policy, fixture/business limits and Linux CI evidence. TASK-021 remains separately in progress."}
       follow_up_candidates: []
+  - id: TASK-034
+    title: "修复跨平台打包验证流水线"
+    status: ready
+    goal: "修复 TASK-021 三平台扩展验收发现的构建前置与空配置处理，使 macOS、Windows、Linux 在各自 runner 上完成原有 Runtime smoke 与桌面打包步骤。"
+    scope:
+      in: ["Runtime Bundle 测试前构建所需 workspace 依赖", "Windows 模型数据补全脚本的 pnpm 子进程启动", "无生产信任根时 CI 空签名 Key ID 的开发构建处理", "三个目标平台原工作流复验"]
+      out: ["绕过真实生产签名或制品信任校验", "把打包成功当作桌面用户旅程通过", "修改 Pi 上游包", "在修复卡内宣称 TASK-021 整体验收完成"]
+    constraints: ["生产信任根或签名密钥已配置时仍要求有效 Key ID；开发临时签名须明确标记", "保持现有平台矩阵和 native smoke 的原有断言", "完成须集成并验证于 main"]
+    forbidden: ["跳过失败的 smoke/test 步骤", "在日志、仓库或验收记录中写入私钥值", "伪造 Windows/Linux 可执行结果"]
+    acceptance:
+      - type: assertion
+        expect: "Runtime Bundle 在 macOS/Windows/Linux 的干净 runner 上先构建测试所需依赖，随后原有 managed MCP、Python artifact、SEA smoke 和更新 smoke 均执行通过"
+      - type: assertion
+        expect: "Desktop Bundle 在三平台完成打包与制品上传；Windows 模型数据补全不依赖直接 spawn 不存在的 pnpm 可执行文件"
+      - type: assertion
+        expect: "未配置生产信任根与签名密钥时空 Key ID 可选用明确的开发临时签名；存在生产信任根但缺 Key ID 时仍失败"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-020"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["TASK-021 main e16cfef 的 Runtime Bundle run 35872575801 与 Desktop Bundle run 35872590465", ".github/workflows/runtime-bundle.yml 的 Test managed MCP lifecycle；scripts/hydrate-pi-model-data.mjs；apps/python-capabilities/scripts/build-artifact.mjs 的 keyId 默认分支", "先本地复现无信任根/空 Key ID 与生产信任根缺 ID 的分支，再 push 触发三平台 workflow_dispatch 验证"]
+    escalation_conditions: ["若生产 trust root 来源不明确，先核对非秘密的配置状态，不读取或输出密钥值", "若某目标 runner 无法执行平台 binary，则保留未验证并记录具体环境阻断"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
     status: done
