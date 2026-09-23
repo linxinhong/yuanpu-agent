@@ -755,7 +755,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-019
     title: "IM 渠道与调度阶段验证"
-    status: in_progress
+    status: done
     goal: "独立证明单人 IM 发起、定时触发和原会话/主动投递组合可用，再支撑管理页面。"
     scope:
       in: ["真实 API/数据库的渠道与调度组合测试","同一获授权用户的真实企业微信私聊、主动投递及 App 重启验证"]
@@ -786,7 +786,7 @@ tasks:
       owner: "codex-t019sep23"
       attempts: 0
       claimed_at: "2026-09-23T01:15:07.407Z"
-      completed_at: null
+      completed_at: "2026-09-23T09:53:37.765Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-019"
       branch: "task/task-019-stage-verification"
       evidence:
@@ -818,11 +818,12 @@ tasks:
         - {type: "boundary", check: "2026-09-23 native notification scope deferral", status: "passed", summary: "By user request, native display/click and reminder UI are no longer completion gates for TASK-019/020/021; docs/adr/0003-defer-native-notifications.md assigns them to TASK-029. V19-07 failed user visibility and unsigned dev-binary evidence remain historical unverified facts, not a pass. TASK-019 remains in progress for non-notification evidence review."}
         - {type: "verification", check: "V19-03 isolated production Electron App in-flight restart", status: "passed", summary: "On integrated main 3a6f4cf, apps/desktop/test/task-019-electron-app-probe.mjs launched production Electron main/preload/Runtime twice with isolated temp home and trusted fixture renderer. One held model request was interrupted by App quit; Runtime child stopped, SQLite run was result_unknown with possible external effect, second launch queried the same run through formal IPC, model request count remained one, and second quit left no child. No user connection or credentials were accessed."}
         - {type: "command", check: "pnpm check on integrated main after Electron App probe", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 full build, Yuanpu typechecks and tests passed on main 3a6f4cf; Runtime 22/22, Desktop 20/20. New macOS-only Electron acceptance probe was executed separately and passed on the same revision."}
+        - {type: "verification", check: "TASK-019 non-notification stage acceptance on integrated main", status: "passed", summary: "Integrated main 59cb7a4 contains the evidence and memory for the revised single-user IM/scheduler scope. Real authorized WeCom private reply, scheduled proactive delivery and clean restart were user-visible; real-SQLite fixtures cover concurrency, deduplication, identity, failed/unknown delivery and approval states. The isolated production Electron main/preload/Runtime probe at 3a6f4cf passed two App launches, in-flight shutdown, result_unknown/possible persistence, one model request and no Runtime child after quit. pnpm check passed on integrated main 3a6f4cf. Native display/click remains unverified and belongs to TASK-029; no second human or true IM in-flight interruption is claimed."}
       follow_up_candidates:
         - "TASK-029 retains native notification reminder UI and effectively signed macOS display/click verification; V19-07 unsigned development failed-event history remains unverified."
   - id: TASK-020
     title: "实现连接与定时任务管理界面"
-    status: pending
+    status: ready
     goal: "用户能在现有 Electron 界面管理连接和计划，并追踪执行与 IM 投递结果。"
     scope:
       in: ["沿用现有壳的连接列表/配置、定时任务列表/编辑及运行详情","会话来源、取消入口和 IM 投递状态","对接已验证的 Runtime API 和 preload"]
