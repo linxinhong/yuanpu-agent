@@ -1037,7 +1037,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-034
     title: "修复跨平台打包验证流水线"
-    status: ready
+    status: in_progress
     goal: "修复 TASK-021 三平台扩展验收发现的构建前置与空配置处理，使 macOS、Windows、Linux 在各自 runner 上完成原有 Runtime smoke 与桌面打包步骤。"
     scope:
       in: ["Runtime Bundle 测试前构建所需 workspace 依赖", "Windows 模型数据补全脚本的 pnpm 子进程启动", "无生产信任根时 CI 空签名 Key ID 的开发构建处理", "三个目标平台原工作流复验"]
@@ -1059,12 +1059,12 @@ tasks:
     investigation_hints: ["TASK-021 main e16cfef 的 Runtime Bundle run 35872575801 与 Desktop Bundle run 35872590465", ".github/workflows/runtime-bundle.yml 的 Test managed MCP lifecycle；scripts/hydrate-pi-model-data.mjs；apps/python-capabilities/scripts/build-artifact.mjs 的 keyId 默认分支", "先本地复现无信任根/空 Key ID 与生产信任根缺 ID 的分支，再 push 触发三平台 workflow_dispatch 验证"]
     escalation_conditions: ["若生产 trust root 来源不明确，先核对非秘密的配置状态，不读取或输出密钥值", "若某目标 runner 无法执行平台 binary，则保留未验证并记录具体环境阻断"]
     result:
-      owner: null
+      owner: "codex-task021-followup-20260923-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T14:17:37.367Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-032"
+      branch: "task/task-034-platform-bundle-ci"
       evidence: []
       follow_up_candidates: []
   - id: TASK-031
