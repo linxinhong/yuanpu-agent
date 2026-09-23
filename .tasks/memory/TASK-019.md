@@ -29,3 +29,4 @@
 - 后续先在探针 ready 后请同一获授权用户发当轮新口令，并确认两条消息可见；再测正式 App 连接、退出/重启、真实 Electron 通知展示与点击。未覆盖前不得 complete。旧验证脚本和事实保留作为历史，不把 fixture `submitted` 当作用户可见。
 - 检索：本轮 ZG 针对 TASK-019/TASK-026 的 Runtime、绑定私聊与通知关系返回 fresh，随后 scoped `rg` 核对 `scheduled-im-delivery.ts`、SDK 适配和相邻测试；未建索引。
 - 本轮重新 ready 后收到同一授权用户的随机私聊口令：一次入站、两次 Agent 执行与两条持久 run，定时主动发送平台回执 `accepted`、计划 `delivered`；用户确认在企业微信看到两条机器人消息。V19-02 的真实单用户主动投递已通过。探针曾在即时回复 outbound 仍为 `delivering` 时过早取快照而退出 1；SDK 已有 reply ack，且用户看到两条，故不记产品失败。脚本现增加 15 秒有界等待，修正本身尚未再次实发验证。正式 App 连接、重启组合和真实 Electron 通知展示/点击仍未验收，TASK-019 保持 in_progress。
+- `main` `1564bf8` 的正式 Electron 窗口已见 Runtime 连接。现有企业微信配置仍禁用/0 配对；新 Bot Secret 已通过变量不回显地写入专用 Keychain，进程内比对可读且一致。正式 App 配对探针首轮已鉴权 ready，但 180 秒未见入站，用户未确认发出本轮口令；没有启用连接或产生配置备份。待用户方便时重新生成口令，收到认证 sender 后仅保存连接作用域摘要并启用，再重启正式 App。虚拟 Keychain 测试项已删除；凭据及 raw userid 未输出。TASK-019 仍 in_progress。

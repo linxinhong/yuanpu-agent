@@ -28,6 +28,8 @@
 
 - 用户回复“准备好了”后重新启动独占官方 SDK 长连接探针，确认环境变量存在且没有其他匹配监听进程；`ready` 后发送本轮随机口令。脱敏观测为 `inboundSeen=1`、`matched=1`、`executions=2`、`runCount=2`、`proactiveStatus=accepted`、`scheduledDeliveryStatus=delivered`、`notificationStatus=submitted`，SDK 有 `wecom.reply_ack=1`；用户明确确认企业微信私聊窗口看到了 **2 条**机器人消息。因此 V19-02 的单用户真实定时主动投递及原私聊可见性 **pass**，但通知 `submitted` 仅为 fixture 宿主确认，不是系统展示。探针快照过早，曾输出 `outboundStatuses=[delivering]`、`replyStatus=null` 并退出码 1；结合 SDK reply ack 与用户实际可见两条消息，此非零退出不能作为产品投递失败。已将探针改为有界等待即时回复 outbound 离开 `delivering` 后再汇总，尚未用第二次真实发送验证该脚本修正。临时 SQLite 与长连接已清理；记录不含凭据、真实 userid 或用户消息正文。
 - 上述脚本与证据更新后，`node --check`、`git diff --check` 和 Node 24.15.0/pnpm 11.22.0 的 `pnpm check` 全部通过（runtime-kit 122/122、Runtime 15/15）；安装产生的无关 lockfile checksum 已移除。完整检查不代替未验证的 Electron 通知与重启业务旅程。
+- 正式 App 预检（集成 `main` `1564bf8`）：Electron 窗口可见“本地 Runtime 已连接”，但现有企业微信连接仍禁用、配对数 0。TASK-027 已隔离可选连接启动失败；窗口就绪不等于渠道就绪。用户授权将现有 `.env` 的 Bot Secret 绑定到该连接专用 macOS Keychain 项，使用不回显的双重提示写入；随后由进程内变量比较确认 Keychain 可读且值一致，未输出 ID/Secret。虚拟 Keychain 流程测试项已删除。旧配置 Bot ID 与新变量不同，未直接读取或输出变量值。
+- 新增正式 App 配对探针 `packages/yuanpu-runtime/test/task-019-formal-app-pairing-probe.mjs`：仅在 SDK 鉴权且收到本轮精确私聊口令后，把认证回调的 sender 转为连接作用域摘要，备份原配置并原子写入启用/Keychain 引用/单人配对；无原始 userid 或凭据日志。首轮 `ready` 后 180 秒内 `inboundSeen=0`、`matched=0`，退出 `message_timeout`；用户未确认在窗口中发出该口令。探针关闭、配置未改、连接仍禁用、无备份产生。此轮 **unverified（待用户再次试发）**，不记平台故障；Keychain 项保留供后续正式连接使用。
 
 ## 执行记录
 
