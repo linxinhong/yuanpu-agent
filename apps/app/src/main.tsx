@@ -16,6 +16,7 @@ import type {
   PluginConfigScope,
   PluginSearchResult,
   NotificationNavigationTarget,
+  RuntimeRecoveryNotice,
   AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 
@@ -1122,10 +1123,17 @@ function App() {
   const [configRoot, setConfigRoot] = useState('~/.yuanpu');
   const [notificationTarget, setNotificationTarget] = useState<NotificationNavigationTarget>();
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>();
+  const [runtimeRecoveryNotice, setRuntimeRecoveryNotice] = useState<RuntimeRecoveryNotice>();
 
   useEffect(() => {
     void window.yuanpu?.runtimeInfo()
       .then((info) => setConfigRoot(info.configRoot))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    void window.yuanpu?.runtimeRecoveryNotice()
+      .then(setRuntimeRecoveryNotice)
       .catch(() => undefined);
   }, []);
 
@@ -1188,6 +1196,16 @@ function App() {
           <span className="route-note">Renderer → Electron → SEA</span>
         </div>
       </aside>
+
+      {runtimeRecoveryNotice && (
+        <div className="runtime-recovery-notice" role="alert">
+          <div>
+            <strong>{runtimeRecoveryNotice.kind === 'incompatible_protocol' ? 'Runtime 协议不兼容' : 'Runtime 更新失败'}</strong>
+            <span>已恢复上一版本，当前 App 可继续使用。请检查更新后再重试。</span>
+          </div>
+          <button type="button" aria-label="关闭 Runtime 更新提示" onClick={() => setRuntimeRecoveryNotice(undefined)}>关闭</button>
+        </div>
+      )}
 
       <ChatPanel active={view === 'chat'} navigationTarget={notificationTarget} scheduleOrigin={Boolean(selectedScheduleId)} onReturnToSchedules={() => setView('schedules')} />
       <SkillPage active={view === 'skills'} />
