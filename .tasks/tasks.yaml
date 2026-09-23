@@ -823,7 +823,7 @@ tasks:
         - "TASK-029 retains native notification reminder UI and effectively signed macOS display/click verification; V19-07 unsigned development failed-event history remains unverified."
   - id: TASK-020
     title: "实现连接与定时任务管理界面"
-    status: ready
+    status: in_progress
     goal: "用户能在现有 Electron 界面管理连接和计划，并追踪执行与 IM 投递结果。"
     scope:
       in: ["沿用现有壳的连接列表/配置、定时任务列表/编辑及运行详情","会话来源、取消入口和 IM 投递状态","对接已验证的 Runtime API 和 preload"]
@@ -847,12 +847,12 @@ tasks:
     investigation_hints: ["apps/app/src/main.tsx、styles.css、apps/desktop/src/preload.ts 与 yuanpu-protocol；未发现 .tasks/ui.yaml，沿用现有 UI 作为默认","UI 提案见 docs/application-architecture.md 第 13 节；通知部分按 docs/adr/0003-defer-native-notifications.md 暂缓；后续视觉证据保存在 .tasks/ui/TASK-020/","最小接口行为验证 → pnpm check → 真实 Electron 操作核心旅程；不能只截图或只用静态假数据"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "codex-t019sep23-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T09:55:35.495Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-019"
+      branch: "task/task-020-management-ui"
       evidence: []
       follow_up_candidates: []
   - id: TASK-021
