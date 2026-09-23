@@ -17,5 +17,5 @@
 
 - Node 24.15.0 / pnpm 11.22.0，隔离临时目录与 fixture。focused：runtime-kit 27/27、Runtime 5/5、Desktop 5/5；`pnpm check`：pass（runtime-kit 113/113、Runtime 14/14、Desktop 20/20）。API 探针按目标应为 201，实得 400，退出码 1。runner 记录编号和逐场景边界见 results.md。
 - 工作树准备使用 `worktree-kit.py prepare/doctor/run`；安装按仓库命令加 `--ignore-pnpmfile`，不要使用 helper 的默认 frozen install；它会遇到 pnpmfile checksum 不匹配。
-- 下一步：开发修复 D19-01 并在集成 revision 重跑 API 探针、渠道失败/未知组合与 `pnpm check`；先核对私聊机器人后台实际选择 HTTP 加密回调 URL 还是 Bot ID/Secret 长连接。用户给的官方文档 path/100719 是前者，而当前 `WecomSdkTransport` 使用官方 SDK `WSClient` 为后者；协议不匹配是 0 入站的一种解释，尚未证实。确认长连接后再运行脱敏单会话探针；若实际选择回调 URL，需另行授权产品接入方式变更。第二成员到位后补齐双会话与真实 Electron 验收。不要把 fixture 通知 `submitted` 写成用户已看到。
+- 下一步：开发修复 D19-01 并在集成 revision 重跑 API 探针、渠道失败/未知组合与 `pnpm check`。用户已确认后台是长连接；其给的官方 path/100719 与 path/101039 均描述 HTTP 回调，真正的长连接规范是 path/101463。该规范限定每机器人同时一条有效连接；SDK 收到 `aibot_msg_callback` 后触发本仓库监听的 `message`，但探针未见入站。需核对私聊机器人是否为同一 Bot ID、成员可用范围及其他连接占用。长连接入站 `from.userid` 才提供 sender，主动发送单聊也要求已知 userid；Bot 凭据和当前 Codex 会话无法推导该目标，`WECOM_TEST_USER_ID` 尚未配置。第二成员到位后补齐双会话与真实 Electron 验收。不要把 fixture 通知 `submitted` 写成用户已看到。
 - 检索：ZG 关系查询定位 `apps/runtime/src/index.ts`、`.tasks/tasks.yaml`、`docs/application-architecture.md`，再用 scoped `rg` 找到 scheduler 授权及相邻测试；未重建索引。
