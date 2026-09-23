@@ -967,7 +967,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-032
     title: "修复非 macOS 企业微信凭据诊断"
-    status: ready
+    status: in_progress
     goal: "修复 TASK-021 在 Linux CI 发现的 Keychain 不可用错误分类，使可选企业微信插件失败时仍能打开 Runtime，且诊断准确。"
     scope:
       in: ["非 macOS 系统 Keychain 不可用时的脱敏诊断分类", "覆盖原失败路径的 Runtime 回归测试"]
@@ -987,12 +987,12 @@ tasks:
     investigation_hints: ["GitHub CI main 9c7712f run 35868424221 失败于 apps/runtime/test/runtime.test.mjs 的 unavailable Keychain credential", "apps/runtime/src/wecom-channel.ts 的 resolveSystemKeychainCredential；apps/runtime/src/index.ts 的 wecomDiagnosticFor", "先运行原失败用例，再在 Linux CI 复验完整 pnpm check"]
     escalation_conditions: ["若修复需要改变非 macOS 凭据存储策略或扩展连接协议，先确认范围"]
     result:
-      owner: null
+      owner: "codex-task021-followup-20260923-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T13:43:36.414Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-032"
+      branch: "task/task-032-keychain-diagnostic"
       evidence: []
       follow_up_candidates: []
   - id: TASK-031
