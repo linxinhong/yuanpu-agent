@@ -203,10 +203,15 @@ public static class YuanpuJob {
     }
     int terminated = 0;
     for (int i = descendants.Count - 1; i >= 0; i--) {
-      IntPtr process = OpenProcess(1, false, descendants[i]);
+      IntPtr process = OpenProcess(0x100001, false, descendants[i]);
       if (process == IntPtr.Zero) continue;
       try {
-        if (TerminateProcess(process, 1)) terminated++;
+        if (TerminateProcess(process, 1)) {
+          if (WaitForSingleObject(process, 5000) != 0) {
+            throw new InvalidOperationException("Timed out waiting for descendant termination");
+          }
+          terminated++;
+        }
       } finally {
         CloseHandle(process);
       }
@@ -285,6 +290,7 @@ class ProcessGroupStdioTransport implements Transport {
   readonly #readBuffer = new ReadBuffer();
   #process?: ChildProcess;
   #supervisor?: ChildProcess;
+  #supervisorReady = false;
   #groupId?: number;
   #closing?: Promise<void>;
 
@@ -383,7 +389,10 @@ class ProcessGroupStdioTransport implements Transport {
       supervisor.once('exit', () => finish(new Error('Windows MCP Job Object supervisor exited before ready.')));
       supervisor.stdout?.on('data', (chunk: Buffer) => {
         output += chunk.toString('utf8');
-        if (output.includes('READY')) finish();
+        if (output.includes('READY')) {
+          this.#supervisorReady = true;
+          finish();
+        }
         if (output.length > 4_096) finish(new Error('Windows MCP Job Object supervisor did not become ready.'));
       });
     });
@@ -392,6 +401,12 @@ class ProcessGroupStdioTransport implements Transport {
   async #waitWindowsSupervisor(): Promise<void> {
     const supervisor = this.#supervisor;
     if (!supervisor) return;
+    if (!this.#supervisorReady && supervisor.pid) {
+      await terminateProcessGroup(supervisor.pid);
+      this.#supervisor = undefined;
+      this.#supervisorReady = false;
+      return;
+    }
     if (supervisor.exitCode === null && supervisor.signalCode === null) {
       await new Promise<void>((resolveExit) => {
         const timeout = setTimeout(resolveExit, 3_000);
@@ -405,6 +420,7 @@ class ProcessGroupStdioTransport implements Transport {
       await terminateProcessGroup(supervisor.pid);
     }
     this.#supervisor = undefined;
+    this.#supervisorReady = false;
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
