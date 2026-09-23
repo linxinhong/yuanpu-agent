@@ -41,6 +41,7 @@ function pythonSource(overrides = {}) {
       PATH: dirname(pythonExecutable),
       PYTHONPATH: join(pythonRoot, 'src'),
       PYTHONUNBUFFERED: '1',
+      ...(process.platform === 'win32' ? { YUANPU_MCP_DIRECT_TEST: '1' } : {}),
       ...(process.platform === 'win32' ? { YUANPU_MCP_DIAGNOSTIC_FILE: windowsDiagnosticFile } : {}),
       YUANPU_MCP_TEST_FIXTURES: '1',
       ...(process.platform === 'win32' && process.env.SYSTEMROOT

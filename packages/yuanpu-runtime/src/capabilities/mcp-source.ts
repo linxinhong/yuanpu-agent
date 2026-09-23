@@ -325,7 +325,7 @@ export class ManagedMcpCapabilitySource {
       };
       let command = this.#options.command;
       let args = this.#options.args;
-      if (process.platform === 'win32') {
+      if (process.platform === 'win32' && isolatedEnv.YUANPU_MCP_DIRECT_TEST !== '1') {
         const systemRoot = isolatedEnv.SYSTEMROOT;
         if (!systemRoot) throw new ManagedMcpSourceError('unavailable', 'SYSTEMROOT is required for Windows MCP isolation.');
         const temp = join(this.#options.privateHome, 'temp');
