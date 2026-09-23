@@ -268,7 +268,7 @@ export async function resolveSystemKeychainCredential(reference: string): Promis
   }
   const service = reference.slice('keychain:'.length);
   if (process.platform !== 'darwin') {
-    throw new Error('Enterprise WeChat system Keychain resolution is unavailable on this platform.');
+    throw new Error('Enterprise WeChat credential could not be resolved from the system Keychain.');
   }
   try {
     const { stdout } = await execFileAsync('/usr/bin/security', [
