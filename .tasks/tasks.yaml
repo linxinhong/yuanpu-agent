@@ -931,7 +931,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-030
     title: "修复 SEA 更新回退后的用户提示"
-    status: in_progress
+    status: done
     goal: "修复 TASK-021 的 D21-01：已安全回退的不兼容 Runtime 更新应在打包 App 中明确告知用户。"
     scope:
       in: ["Runtime 更新回退事件到受信任渲染进程的最小桥接", "可关闭的用户可见提示", "隔离打包版回归探针"]
@@ -956,10 +956,14 @@ tasks:
       owner: "codex-d21sep23-12136-12136"
       attempts: 0
       claimed_at: "2026-09-23T12:10:24.852Z"
-      completed_at: null
+      completed_at: "2026-09-23T12:25:50.906Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-030"
       branch: "task/task-030-runtime-recovery-notice"
-      evidence: []
+      evidence:
+        - {type: "assertion", check: "packaged App protocol-incompatibility notice and rollback", status: "passed", summary: "Integrated product source main 90e5787, independently rebuilt in TASK-021 branch ed13cde on macOS arm64. Four-launch isolated packaged App probe passed: protocol-999 candidate rolled back, fixed user-visible notice was dismissible, original schedule remained, and Runtime children stopped. Runner 1790166220699941000.json; evidence commit 197f713."}
+        - {type: "assertion", check: "normal startup and generic failure data boundary", status: "passed", summary: "Same isolated packaged probe: normal startup had no recovery notice; generic activation failure displayed only fixed copy, excluding a synthetic diagnostic marker and temporary path; restored task remained available. No live bot or personal App data was used."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Passed on integrated main 90e5787 with Node 24.15.0 and pnpm 11.22.0; runner 1790165973173983000.json."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-030.md documents the error path, fixed-category trusted IPC, exact verification and unresolved cross-platform/signing boundaries. TASK-021 remains in progress."}
       follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
