@@ -36,3 +36,5 @@
 - 正式 App 在 `main` `3b9e23f` 收到同一配对私聊的两条不同平台消息；只读 SQLite 关系查询证实两条各执行一次 `im` Agent run（均 `succeeded`），两条 outbound 均 `accepted` 且无失败码。用户确认至少一条回复在企业微信可见。V19-06 单用户正式 App 收发通过；两条消息不是重复回调，不能据此证明平台重放去重。未读取正文、原始 userid、摘要或密钥。TASK-019 仍需 App 重启恢复与真实原生通知展示/点击，保持 in_progress。
 - SIGINT 正常关闭后 Runtime 与开发端口均消失，SQLite 两条记录保留；同一 App 重开显示 Runtime 已连接。第三条不同平台私聊消息在重启后入站，新增一次成功 run 与 `accepted` outbound，累计三条消息/三次 run，仍是同一认证 sender 与会话；用户可见性尚待确认。执行中断/等待授权恢复及原生通知显示/点击未覆盖，不能 complete。
 - 用户确认“重启后已回复”，补齐至少一条重启后私聊回复的可见性；随后只读库中累计四条不同平台消息、四个成功 IM run、四条 `accepted` outbound，同一 sender/会话。正常退出/重启、持久记录、重连收发已通过；执行中关闭与系统通知用户可见性仍待验收。
+- 新增隔离真实 Runtime HTTP/SQLite 的运行中退出测试：模型服务悬停时 SIGTERM，持久 run 为 `result_unknown`/`possible`；重开 Runtime 可查询且不重跑模型。focused 与完整 `pnpm check` 通过（runner `1790154133738838000.json`、`1790154280381299000.json`）。这是受控 Runtime 验证，不是用户真实 IM 运行中断的现场证据。
+- 第五条真实私聊 run 与回复都成功，但用户没看到 macOS 通知。开发版 Electron 为 ad-hoc 签名且严格校验失败；同二进制原生通知探针返回 `supported=true, failed_event`。Electron 官方文档要求 macOS 通知使用有效签名，因此需签名包再验证展示与点击；当前原因属高概率环境推断，不冒称已证明正式 App 宿主回执。TASK-019 仍 in_progress。
