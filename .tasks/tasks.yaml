@@ -977,7 +977,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-026
     title: "补齐计划到已绑定 IM 的投递"
-    status: ready
+    status: in_progress
     goal: "修复 D19-01，使本机计划能向同一用户明确绑定的企业微信私聊投递结果，并与系统提醒独立记录成败。"
     scope:
       in: ["计划 channel 目标的授权与可撤销持久绑定","Runtime 对调度投递适配器和现有渠道发送能力的装配","计划结果的接受、失败、未知状态及重启恢复测试"]
@@ -1001,11 +1001,11 @@ tasks:
     investigation_hints: ["D19-01 复现在 apps/runtime/test/task-019-channel-delivery-probe.mjs；apps/runtime/src/index.ts 的 schedulerCaller.authorizeDelivery 当前只接受 desktop/none，PersistentScheduler.open 未传 delivery；协议在 packages/yuanpu-protocol/src/agent.ts，调度口在 packages/yuanpu-runtime/src/scheduler/service.ts","预检 packages/yuanpu-runtime/src/channels/router.ts 与 store.ts：入站回复 routeId 是 inboundId，配对表只留 sender 摘要，不能直接当作跨重启的主动发送目标；从明确授权的稳定绑定定义开始，追踪受影响调用方","验证阶梯：先跑 scheduler/channel 邻近测试，再使 TASK-019 HTTP 探针由 400 变为受控成功并覆盖未绑定/解绑/错连接、失败/未知及 SQLite 重开；最后 pnpm check。真实企业微信单私聊显示由独立 TASK-019 复验，不在本实现卡冒称完成","对新增目标持久化和发送幂等语义做独立安全/数据边界复核，重点检查泄漏、误投递与回滚兼容"]
     escalation_conditions: ["现有 SecretStore/数据边界无法安全持久化已授权目标时，先提出具体契约冲突，不用硬编码 userid 或扩大消息目标","若官方平台不支持该主动发送或需新增授权范围，记录限制并交由架构决策，不假定成功"]
     result:
-      owner: null
+      owner: "codex-t026sep23-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T03:07:49.391Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-026"
+      branch: "task/task-026-scheduled-im-delivery"
       evidence: []
       follow_up_candidates: []
