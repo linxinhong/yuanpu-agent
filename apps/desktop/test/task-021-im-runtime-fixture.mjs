@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   ChannelRouter, PersistentAgentService, digestChannelValue, openYuanpuMetadataDatabase,
 } from '../../../packages/yuanpu-runtime/dist/index.mjs';
+import { getDesktopPrivateImRunSummary } from '../../runtime/src/runtime-host.ts';
 
 // This is a test-only Runtime replacement. It never resolves Keychain or starts the WeCom SDK.
 const home = process.env.YUANPU_HOME;
@@ -70,10 +71,24 @@ const server = createServer(async (request, response) => {
   }
   if (request.url?.startsWith('/v1/agent/runs/')) {
     if (request.headers.authorization !== `Bearer ${token}`) { response.writeHead(401).end(); return; }
-    const runId = decodeURIComponent(request.url.slice('/v1/agent/runs/'.length));
+    // Production's generic desktop/scheduler run query does not authorize IM runs.
+    response.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"not found"}');
+    return;
+  }
+  if (request.url?.startsWith('/fixture/run/')) {
+    const runId = decodeURIComponent(request.url.slice('/fixture/run/'.length));
     const run = metadata.agentRuns.get(runId);
     response.writeHead(run ? 200 : 404, { 'content-type': 'application/json' })
       .end(JSON.stringify(run ?? { error: 'not found' }));
+    return;
+  }
+  if (request.url?.startsWith('/v1/im/private-runs/')) {
+    if (request.headers.authorization !== `Bearer ${token}`) { response.writeHead(401).end(); return; }
+    const runId = decodeURIComponent(request.url.slice('/v1/im/private-runs/'.length));
+    const document = JSON.parse(readFileSync(join(home, 'app', 'connections', 'wecom.json'), 'utf8'));
+    const summary = getDesktopPrivateImRunSummary(runId, metadata, document, join(home, 'workspace'));
+    response.writeHead(summary ? 200 : 404, { 'content-type': 'application/json' })
+      .end(JSON.stringify(summary ?? { error: 'not found' }));
     return;
   }
   if (request.url === '/v1/host/events') {

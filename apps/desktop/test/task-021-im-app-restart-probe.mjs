@@ -18,6 +18,8 @@ const home = join(root, 'home');
 const appRoot = join(root, 'apps', 'desktop');
 const workspace = join(home, 'workspace');
 const userData = join(root, 'user-data');
+const connectionDocument = join(home, 'app', 'connections', 'wecom.json');
+const navigationTarget = join(home, 'fixture-navigation.json');
 const apps = [];
 
 async function eventually(check, message, timeoutMs = 20_000) {
@@ -124,6 +126,14 @@ async function stop(app) {
   app.renderer.close();
   await eventually(() => !alive(app.runtimePid), 'Runtime child survived App quit.');
 }
+async function navigate(app, run) {
+  await writeFile(navigationTarget, JSON.stringify({
+    runId: run.runId,
+    conversationId: run.context.conversation.conversationId,
+  }));
+  app.child.kill('SIGUSR1');
+  return eventually(async () => app.renderer.evaluate(`document.querySelector('.located-run-card')?.innerText`), 'IM run detail did not mount.');
+}
 function databaseFacts() {
   const db = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'), { readOnly: true });
   try {
@@ -137,6 +147,7 @@ function databaseFacts() {
 }
 try {
   await mkdir(join(home, 'workflows'), { recursive: true });
+  await mkdir(dirname(connectionDocument), { recursive: true });
   await mkdir(workspace, { recursive: true });
   await mkdir(appRoot, { recursive: true });
   await mkdir(userData, { recursive: true });
@@ -144,11 +155,21 @@ try {
   await writeFile(join(root, 'apps', 'runtime', 'dist', 'index.cjs'), `import(${JSON.stringify(new URL(`file://${fixtureRuntime}`).href)});`);
   await writeFile(join(appRoot, 'package.json'), JSON.stringify({ name: 'task-021-im-app-fixture', version: '0.1.0', main: 'entry.cjs' }));
   await writeFile(join(appRoot, 'entry.cjs'), `
-    const { app } = require('electron');
+    const { app, BrowserWindow } = require('electron');
+    const { readFileSync } = require('node:fs');
     app.setPath('userData', ${JSON.stringify(userData)});
     process.on('SIGUSR2', () => app.quit());
+    process.on('SIGUSR1', () => {
+      const target = JSON.parse(readFileSync(${JSON.stringify(navigationTarget)}, 'utf8'));
+      BrowserWindow.getAllWindows()[0]?.webContents.send('notifications:navigate', target);
+    });
     require(${JSON.stringify(desktopMain)});
   `);
+  const pairedDocument = {
+    schemaVersion: 1,
+    connections: [{ connectionId: 'imc_task021', pairedSenderDigests: [] }],
+  };
+  await writeFile(connectionDocument, JSON.stringify(pairedDocument));
   const rendererPort = await listen(staticServer);
   const first = await start(rendererPort);
   const firstPort = (await eventually(async () => JSON.parse(await readFile(join(home, 'fixture-port.json'), 'utf8').catch(() => 'null'))?.port, 'Fixture port missing.'));
@@ -167,19 +188,43 @@ try {
   assert.equal(replay.runId, initial.runId);
   assert.deepEqual(JSON.parse(await readFile(join(home, 'fixture-metrics.json'), 'utf8')), { executions: 1, sends: 1 });
   assert.deepEqual({ ...databaseFacts() }, { inbounds: 1, outbounds: 1, im_runs: 1, delivery_status: 'unknown', run_status: 'succeeded' });
-  const run = await second.renderer.evaluate(`window.yuanpu.getAgentRun(${JSON.stringify(initial.runId)})`);
+  const run = await (await fetch(`http://127.0.0.1:${secondPort}/fixture/run/${encodeURIComponent(initial.runId)}`)).json();
   assert.equal(run.status, 'succeeded');
   assert.equal(run.owner.entryPoint, 'im');
-  assert.equal('deliveryStatus' in run || 'outboundStatus' in run, false);
+  assert.equal(await second.renderer.evaluate(`window.yuanpu.getAgentRun(${JSON.stringify(initial.runId)}).then(() => false, () => true)`), true);
+  const senderDigest = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'), { readOnly: true });
+  const pairedDigest = senderDigest.prepare('SELECT sender_digest FROM yp_channel_inbound LIMIT 1').get().sender_digest;
+  senderDigest.close();
+  pairedDocument.connections[0].pairedSenderDigests = [pairedDigest];
+  await writeFile(connectionDocument, JSON.stringify(pairedDocument));
+  const summary = await second.renderer.evaluate(`window.yuanpu.getPrivateImRunSummary(${JSON.stringify(initial.runId)})`);
+  assert.deepEqual({ ...summary }, { runId: initial.runId, runStatus: 'succeeded', replyDeliveryStatus: 'unknown' });
+  assert.equal(JSON.stringify(summary).includes('synthetic-member'), false);
+  assert.equal(JSON.stringify(summary).includes('synthetic reply'), false);
+  assert.equal(JSON.stringify(summary).includes('http'), false);
+  pairedDocument.connections[0].pairedSenderDigests = [];
+  await writeFile(connectionDocument, JSON.stringify(pairedDocument));
+  assert.equal(await second.renderer.evaluate(`window.yuanpu.getPrivateImRunSummary(${JSON.stringify(initial.runId)}).then(() => false, () => true)`), true);
+  pairedDocument.connections[0].pairedSenderDigests = [pairedDigest];
+  await writeFile(connectionDocument, JSON.stringify(pairedDocument));
+  const detail = await navigate(second, run);
+  assert.match(detail, /运行状态\s+succeeded/);
+  assert.match(detail, /回复投递\s+投递结果未知/);
+  assert.match(detail, /不会自动重发/);
   const uiFacts = await second.renderer.evaluate(`({
     mounted: Boolean(document.querySelector('.app-shell')),
     imDeliveryLabel: document.body.innerText.includes('投递结果未知'),
-    outboundBridge: Object.keys(window.yuanpu).some((name) => /outbound|imDelivery/i.test(name)),
+    summaryBridge: typeof window.yuanpu.getPrivateImRunSummary === 'function',
   })`);
   assert.equal(uiFacts.mounted, true);
-  assert.equal(uiFacts.outboundBridge, false);
+  assert.equal(uiFacts.imDeliveryLabel, true);
+  assert.equal(uiFacts.summaryBridge, true);
+  await second.renderer.evaluate('location.reload()');
+  await eventually(async () => second.renderer.evaluate(`Boolean(document.querySelector('.app-shell'))`), 'Renderer did not reload.');
+  const refreshedDetail = await navigate(second, run);
+  assert.match(refreshedDetail, /回复投递\s+投递结果未知/);
   await stop(second);
-  console.log(JSON.stringify({ status: 'passed', appLaunches: 2, outbound: 'unknown', imRuns: 1, sends: 1, agentExecutions: 1, rendererMounted: uiFacts.mounted, imDeliveryVisible: uiFacts.imDeliveryLabel, outboundBridge: uiFacts.outboundBridge, runtimeChildrenStopped: true }));
+  console.log(JSON.stringify({ status: 'passed', appLaunches: 2, outbound: 'unknown', imRuns: 1, sends: 1, agentExecutions: 1, rendererMounted: uiFacts.mounted, imDeliveryVisible: uiFacts.imDeliveryLabel, refreshRetained: true, pairedOnly: true, summarySanitized: true, runtimeChildrenStopped: true }));
 } finally {
   for (const app of apps) {
     app.renderer?.close();
