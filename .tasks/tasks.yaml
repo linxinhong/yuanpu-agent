@@ -755,7 +755,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-019
     title: "通知渠道与调度阶段验证"
-    status: blocked
+    status: in_progress
     goal: "独立证明 IM 发起、定时触发、通知和回复投递组合可用，再支撑管理页面。"
     scope:
       in: ["真实 API/数据库的通知、渠道、调度组合测试","同一获授权用户的真实企业微信私聊与 Electron 通知验证"]
