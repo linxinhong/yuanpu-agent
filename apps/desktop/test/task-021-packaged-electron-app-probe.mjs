@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-const appBundle = resolve(import.meta.dirname, '../release/mac-arm64/YuanpuAgent.app');
+const appBundle = resolve(
+  process.env.TASK_021_PACKAGED_APP_PATH || resolve(import.meta.dirname, '../release/mac-arm64/YuanpuAgent.app'),
+);
 const executable = join(appBundle, 'Contents', 'MacOS', 'YuanpuAgent');
 const bundledSea = join(appBundle, 'Contents', 'Resources', 'runtime', 'YuanpuAgentRuntime-darwin-arm64');
 const root = await mkdtemp(join(tmpdir(), 'yuanpu-task-021-packaged-app-'));
@@ -144,6 +146,8 @@ try {
   }));
   const first = await start();
   assert.equal((await evaluate(first, 'window.yuanpu.runtimeInfo()')).protocolVersion, 3);
+  assert.equal(await evaluate(first, 'window.yuanpu.runtimeRecoveryNotice().then((notice) => notice === undefined)'), true);
+  assert.equal(await evaluate(first, "document.querySelector('.runtime-recovery-notice') === null"), true);
   const input = {
     contractVersion: 1, name: 'Packaged UI fixture', prompt: 'synthetic', workspaceId: workspace,
     timing: { kind: 'once', at: '2099-01-01T00:00:00.000Z' }, timeZone: 'UTC', delivery: { kind: 'desktop' },
@@ -151,6 +155,7 @@ try {
   const created = await evaluate(first, `window.yuanpu.createSchedule(${JSON.stringify(input)})`);
   assert.equal((await evaluate(first, 'window.yuanpu.listSchedules()')).length, 1);
   await eventually(async () => evaluate(first, "Array.from(document.querySelectorAll('.nav-item')).some((button) => button.textContent.includes('定时任务'))"), 'Packaged renderer navigation did not mount.');
+  assert.equal(await evaluate(first, "document.querySelector('.runtime-recovery-notice') === null"), true);
   await evaluate(first, "Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('定时任务')).click()");
   await eventually(async () => evaluate(first, "document.body.innerText.includes('Packaged UI fixture')"), 'Schedule missing from packaged App UI.');
   await stop(first);
@@ -165,11 +170,14 @@ try {
     sha256: createHash('sha256').update(await readFile(stagedSea)).digest('hex'),
   }));
   const second = await start();
+  assert.equal(await evaluate(second, 'window.yuanpu.runtimeRecoveryNotice().then((notice) => notice === undefined)'), true);
+  assert.equal(await evaluate(second, "document.querySelector('.runtime-recovery-notice') === null"), true);
   const active = JSON.parse(await readFile(join(canonicalUserData, 'runtime', 'current.json'), 'utf8'));
   assert.equal(active.version, '0.1.0');
   assert.equal(active.executable, join(canonicalUserData, 'runtime', 'versions', '0.1.0', 'YuanpuAgentRuntime'));
   assert.equal((await evaluate(second, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
   await eventually(async () => evaluate(second, "Array.from(document.querySelectorAll('.nav-item')).some((button) => button.textContent.includes('定时任务'))"), 'Restarted packaged navigation did not mount.');
+  assert.equal(await evaluate(second, "document.querySelector('.runtime-recovery-notice') === null"), true);
   await evaluate(second, "Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('定时任务')).click()");
   await eventually(async () => evaluate(second, "document.body.innerText.includes('Packaged UI fixture')"), 'Persisted schedule missing from restarted packaged UI.');
   await new Promise((done) => setTimeout(done, 2_500));
@@ -194,8 +202,16 @@ try {
   assert.deepEqual(rolledBack, active);
   assert.equal((await evaluate(third, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
   assert.equal(third.diagnostics.join('').includes('Runtime protocol is incompatible'), true);
-  const visibleIncompatibilityNotice = await evaluate(third,
-    "document.body.innerText.includes('协议不兼容') || document.body.innerText.includes('incompatible')");
+  assert.equal(await evaluate(third,
+    "window.yuanpu.runtimeRecoveryNotice().then((notice) => notice?.kind === 'incompatible_protocol')"), true);
+  const visibleIncompatibilityNotice = await eventually(async () => evaluate(third,
+    "(() => { const notice = document.querySelector('.runtime-recovery-notice'); return Boolean(notice && notice.innerText.includes('Runtime 协议不兼容') && notice.innerText.includes('已恢复上一版本') && notice.getClientRects().length > 0 && getComputedStyle(notice).visibility === 'visible'); })()"),
+  'Recovered incompatible Runtime notice was not visible in packaged UI.');
+  assert.equal(await evaluate(third,
+    `!document.querySelector('.runtime-recovery-notice').innerText.includes('999') && !document.querySelector('.runtime-recovery-notice').innerText.includes(${JSON.stringify(root)})`), true);
+  await evaluate(third, "document.querySelector('.runtime-recovery-notice button[aria-label=\"关闭 Runtime 更新提示\"]').click()");
+  await eventually(async () => evaluate(third, "document.querySelector('.runtime-recovery-notice') === null"),
+    'Runtime recovery notice could not be dismissed.');
   await stop(third);
   console.log(JSON.stringify({
     status: 'passed', packagedAppLaunches: 3, persistedScheduleVisible: true,
