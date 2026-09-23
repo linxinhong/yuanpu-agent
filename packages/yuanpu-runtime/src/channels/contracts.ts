@@ -25,10 +25,14 @@ export type ChannelDeliveryResult =
   | { status: 'failed'; code: string }
   | { status: 'unknown'; code: string };
 
+export type ChannelProactiveResult = ChannelDeliveryResult | { status: 'deferred' };
+
 export interface ChannelTransport {
   connect(onMessage: (message: NormalizedChannelMessage) => Promise<void>): void;
   ready(): Promise<void>;
   reply(route: ChannelReplyRoute, outboundId: string, content: string): Promise<ChannelDeliveryResult>;
+  sendProactive?(recipientId: string, content: string): Promise<ChannelProactiveResult>;
+  isReady?(): boolean;
   close(): Promise<void> | void;
 }
 

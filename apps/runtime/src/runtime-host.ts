@@ -25,6 +25,12 @@ export interface RuntimeCleanupResources {
 
 export async function cleanupRuntimeResources(resources: RuntimeCleanupResources): Promise<void> {
   const failures: unknown[] = [];
+  const [schedulerResult] = await Promise.allSettled([
+    Promise.resolve().then(() => resources.closeScheduler()),
+  ]);
+  if (schedulerResult?.status === 'rejected') failures.push(schedulerResult.reason);
+
+  // Scheduled delivery consumes an active channel, so stop new deliveries first.
   const channelResults = await Promise.allSettled([
     ...(resources.closeChannels
       ? [Promise.resolve().then(() => resources.closeChannels!())]
@@ -33,11 +39,6 @@ export async function cleanupRuntimeResources(resources: RuntimeCleanupResources
   failures.push(...channelResults
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map((result) => result.reason));
-
-  const [schedulerResult] = await Promise.allSettled([
-    Promise.resolve().then(() => resources.closeScheduler()),
-  ]);
-  if (schedulerResult?.status === 'rejected') failures.push(schedulerResult.reason);
 
   const closeResults = await Promise.allSettled([
     Promise.resolve().then(() => resources.closeNotificationRouter()),

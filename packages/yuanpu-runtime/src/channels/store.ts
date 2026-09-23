@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
 import type { ChannelConversationType } from './contracts.js';
@@ -31,6 +32,18 @@ export interface ChannelOutboundRecord {
   failureCode?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PrivateContactSummary {
+  contactId: string;
+  connectionId: string;
+  lastSeenAt: string;
+  boundRouteId?: string;
+}
+
+export interface BoundPrivateTarget {
+  connectionId: string;
+  recipientId: string;
 }
 
 interface InboundRow {
@@ -141,9 +154,98 @@ export class ChannelStore {
 
   unpair(provider: string, connectionId: string, senderDigest: string): void {
     this.database.prepare(`
+      DELETE FROM yp_channel_private_contacts
+      WHERE provider = ? AND connection_id = ? AND sender_digest = ?
+    `).run(provider, connectionId, senderDigest);
+    this.database.prepare(`
       DELETE FROM yp_channel_pairings
       WHERE provider = ? AND connection_id = ? AND sender_digest = ?
     `).run(provider, connectionId, senderDigest);
+  }
+
+  observePrivateSender(input: {
+    provider: string;
+    connectionId: string;
+    senderDigest: string;
+    recipientId: string;
+    now: string;
+  }): void {
+    this.database.prepare(`
+      INSERT INTO yp_channel_private_contacts(
+        contact_id, provider, connection_id, sender_digest, recipient_id, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider, connection_id, sender_digest)
+      DO UPDATE SET recipient_id = excluded.recipient_id, last_seen_at = excluded.last_seen_at
+    `).run(randomUUID(), input.provider, input.connectionId, input.senderDigest, input.recipientId, input.now);
+  }
+
+  listPrivateContacts(provider: string): PrivateContactSummary[] {
+    const rows = this.database.prepare(`
+      SELECT c.contact_id, c.connection_id, c.last_seen_at, c.bound_target_id
+      FROM yp_channel_private_contacts c
+      JOIN yp_channel_pairings p
+        ON p.provider = c.provider AND p.connection_id = c.connection_id
+        AND p.sender_digest = c.sender_digest
+      WHERE c.provider = ? AND c.recipient_id IS NOT NULL
+      ORDER BY c.last_seen_at DESC
+    `).all(provider) as Array<{
+      contact_id: string;
+      connection_id: string;
+      last_seen_at: string;
+      bound_target_id: string | null;
+    }>;
+    return rows.map((row) => ({
+      contactId: row.contact_id,
+      connectionId: row.connection_id,
+      lastSeenAt: row.last_seen_at,
+      ...(row.bound_target_id ? { boundRouteId: row.bound_target_id } : {}),
+    }));
+  }
+
+  bindPrivateContact(contactId: string, connectionId: string): string | undefined {
+    const row = this.database.prepare(`
+      SELECT c.bound_target_id, c.recipient_id
+      FROM yp_channel_private_contacts c
+      JOIN yp_channel_pairings p
+        ON p.provider = c.provider AND p.connection_id = c.connection_id
+        AND p.sender_digest = c.sender_digest
+      WHERE c.contact_id = ? AND c.provider = 'wecom' AND c.connection_id = ?
+    `).get(contactId, connectionId) as { bound_target_id: string | null; recipient_id: string | null } | undefined;
+    if (!row?.recipient_id) return undefined;
+    if (row.bound_target_id) return row.bound_target_id;
+    const targetId = `imtarget:${randomUUID()}`;
+    const updated = this.database.prepare(`
+      UPDATE yp_channel_private_contacts SET bound_target_id = ?
+      WHERE contact_id = ? AND connection_id = ? AND recipient_id IS NOT NULL AND bound_target_id IS NULL
+    `).run(targetId, contactId, connectionId);
+    return updated.changes === 1 ? targetId : undefined;
+  }
+
+  getBoundPrivateTarget(targetId: string, connectionId: string): BoundPrivateTarget | undefined {
+    const row = this.database.prepare(`
+      SELECT c.connection_id, c.recipient_id
+      FROM yp_channel_private_contacts c
+      JOIN yp_channel_pairings p
+        ON p.provider = c.provider AND p.connection_id = c.connection_id
+        AND p.sender_digest = c.sender_digest
+      WHERE c.bound_target_id = ? AND c.provider = 'wecom' AND c.connection_id = ?
+        AND c.recipient_id IS NOT NULL
+    `).get(targetId, connectionId) as { connection_id: string; recipient_id: string } | undefined;
+    return row ? { connectionId: row.connection_id, recipientId: row.recipient_id } : undefined;
+  }
+
+  revokePrivateTarget(targetId: string): string | undefined {
+    const row = this.database.prepare(`
+      SELECT connection_id FROM yp_channel_private_contacts
+      WHERE bound_target_id = ? AND provider = 'wecom'
+    `).get(targetId) as { connection_id: string } | undefined;
+    if (!row) return undefined;
+    this.database.prepare(`
+      UPDATE yp_channel_private_contacts
+      SET bound_target_id = NULL, recipient_id = NULL
+      WHERE bound_target_id = ? AND provider = 'wecom'
+    `).run(targetId);
+    return row.connection_id;
   }
 
   isPaired(provider: string, connectionId: string, senderDigest: string): boolean {

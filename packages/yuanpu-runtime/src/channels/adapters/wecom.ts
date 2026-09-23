@@ -2,6 +2,7 @@ import { WSClient } from '@wecom/aibot-node-sdk';
 
 import type {
   ChannelDeliveryResult,
+  ChannelProactiveResult,
   ChannelReplyRoute,
   ChannelTransport,
   NormalizedChannelMessage,
@@ -35,11 +36,16 @@ interface WecomClientLike {
   on(event: 'message', handler: (frame: WecomFrame) => void): unknown;
   on(event: 'error', handler: (error: Error) => void): unknown;
   on(event: 'authenticated', handler: () => void): unknown;
+  on(event: 'disconnected', handler: () => void): unknown;
   replyStream(
     frame: { headers: { req_id: string } },
     streamId: string,
     content: string,
     finish: boolean,
+  ): Promise<{ errcode?: number }>;
+  sendMessage(
+    recipientId: string,
+    body: { msgtype: 'markdown'; markdown: { content: string } },
   ): Promise<{ errcode?: number }>;
   readonly isConnected: boolean;
 }
@@ -141,6 +147,7 @@ export class WecomSdkTransport implements ChannelTransport {
   readonly #log: RedactedChannelLogSink;
   #started = false;
   #closed = false;
+  #authenticated = false;
   readonly #inboundTasks = new Set<Promise<void>>();
   readonly #readyPromise: Promise<void>;
   readonly #resolveReady: () => void;
@@ -185,12 +192,20 @@ export class WecomSdkTransport implements ChannelTransport {
     this.#client.on('error', () => {
       this.#log({ level: 'error', event: 'wecom.transport_error' });
     });
-    this.#client.on('authenticated', () => this.#resolveReady());
+    this.#client.on('authenticated', () => {
+      this.#authenticated = true;
+      this.#resolveReady();
+    });
+    this.#client.on('disconnected', () => { this.#authenticated = false; });
     this.#client.connect();
   }
 
   ready(): Promise<void> {
     return this.#readyPromise;
+  }
+
+  isReady(): boolean {
+    return !this.#closed && this.#authenticated && this.#client.isConnected;
   }
 
   async reply(
@@ -226,9 +241,36 @@ export class WecomSdkTransport implements ChannelTransport {
     }
   }
 
+  async sendProactive(recipientId: string, content: string): Promise<ChannelProactiveResult> {
+    if (this.#closed) return { status: 'failed', code: 'transport_closed' };
+    if (!this.isReady()) return { status: 'deferred' };
+    try {
+      const receipt = await this.#client.sendMessage(recipientId, {
+        msgtype: 'markdown',
+        markdown: { content },
+      });
+      if (receipt.errcode === 0) return { status: 'accepted' };
+      if (typeof receipt.errcode === 'number') {
+        return { status: 'failed', code: `provider_${receipt.errcode}` };
+      }
+      return { status: 'unknown', code: 'malformed_receipt' };
+    } catch (error) {
+      if (
+        error
+        && typeof error === 'object'
+        && 'errcode' in error
+        && typeof error.errcode === 'number'
+      ) {
+        return { status: 'failed', code: `provider_${error.errcode}` };
+      }
+      return { status: 'unknown', code: 'transport_uncertain' };
+    }
+  }
+
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#authenticated = false;
     this.#resolveReady();
     if (this.#started) this.#client.disconnect();
     await Promise.allSettled([...this.#inboundTasks]);

@@ -26,6 +26,7 @@ class FixtureTransport {
   constructor(results = []) {
     this.results = [...results];
     this.replies = [];
+    this.sends = [];
     this.closed = false;
   }
 
@@ -38,6 +39,11 @@ class FixtureTransport {
   async reply(route, outboundId, content) {
     this.replies.push({ route, outboundId, content });
     return this.results.shift() ?? { status: 'accepted' };
+  }
+
+  async sendProactive(recipientId, content) {
+    this.sends.push({ recipientId, content });
+    return { status: 'accepted' };
   }
 
   close() {
@@ -650,4 +656,91 @@ test('refuses to reuse persisted pairings after changing provider account or cre
   }
   await service.close();
   database.close();
+});
+
+test('binds only an observed paired private sender and revokes the opaque scheduled route', async () => {
+  const context = await fixture();
+  try {
+    assert.equal(context.database.channels.listPrivateContacts('wecom').length, 0);
+    await context.router.handleInbound(message({ senderId: 'unpaired-member' }));
+    assert.equal(context.database.channels.listPrivateContacts('wecom').length, 0);
+    await context.router.handleInbound(message());
+    const [contact] = context.database.channels.listPrivateContacts('wecom');
+    assert.equal(contact.connectionId, 'imc_fixture');
+    assert.equal(JSON.stringify(contact).includes('member-fixture-a'), false);
+    const routeId = context.router.bindScheduledContact(contact.contactId);
+    assert.match(routeId, /^imtarget:/);
+    assert.equal(context.router.canDeliverScheduled(routeId), true);
+    assert.deepEqual(await context.router.sendScheduled(routeId, 'scheduled output', new AbortController().signal), {
+      status: 'accepted',
+    });
+    assert.deepEqual(context.transport.sends, [{ recipientId: 'member-fixture-a', content: 'scheduled output' }]);
+    assert.equal(context.database.channels.revokePrivateTarget(routeId), 'imc_fixture');
+    await context.router.waitForScheduledTarget(routeId);
+    assert.equal(context.router.canDeliverScheduled(routeId), false);
+    assert.deepEqual(await context.router.sendScheduled(routeId, 'must not send', new AbortController().signal), {
+      status: 'failed', code: 'target_unavailable',
+    });
+    assert.equal(context.transport.sends.length, 1);
+    assert.equal(context.database.channels.listPrivateContacts('wecom').length, 0);
+  } finally {
+    await context.router.close();
+    await context.service.close();
+    context.database.close();
+  }
+});
+
+test('scheduled private target survives SQLite reopen but not unpair or wrong connection', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-channel-target-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  const contextOne = await fixture({ database: openYuanpuMetadataDatabase(path) });
+  await contextOne.router.handleInbound(message());
+  const [{ contactId }] = contextOne.database.channels.listPrivateContacts('wecom');
+  const routeId = contextOne.router.bindScheduledContact(contactId);
+  await contextOne.router.close();
+  await contextOne.service.close();
+  contextOne.database.close();
+
+  const reopened = openYuanpuMetadataDatabase(path);
+  assert.deepEqual(reopened.channels.getBoundPrivateTarget(routeId, 'imc_fixture'), {
+    connectionId: 'imc_fixture', recipientId: 'member-fixture-a',
+  });
+  assert.equal(reopened.channels.getBoundPrivateTarget(routeId, 'another-connection'), undefined);
+  reopened.channels.unpair('wecom', 'imc_fixture', digestChannelValue('imc_fixture', 'sender', 'member-fixture-a'));
+  assert.equal(reopened.channels.getBoundPrivateTarget(routeId, 'imc_fixture'), undefined);
+  reopened.close();
+});
+
+test('revocation waits for a send already started and blocks later sends', async () => {
+  const gate = deferred();
+  const transport = new FixtureTransport();
+  transport.sendProactive = async (recipientId, content) => {
+    transport.sends.push({ recipientId, content });
+    return gate.promise;
+  };
+  const context = await fixture({ transport });
+  try {
+    await context.router.handleInbound(message());
+    const [{ contactId }] = context.database.channels.listPrivateContacts('wecom');
+    const routeId = context.router.bindScheduledContact(contactId);
+    const sending = context.router.sendScheduled(routeId, 'already started', new AbortController().signal);
+    assert.equal(context.database.channels.revokePrivateTarget(routeId), 'imc_fixture');
+    let revoked = false;
+    const waiting = context.router.waitForScheduledTarget(routeId).then(() => { revoked = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(revoked, false);
+    assert.deepEqual(await context.router.sendScheduled(routeId, 'late send', new AbortController().signal), {
+      status: 'failed', code: 'target_unavailable',
+    });
+    gate.resolve({ status: 'accepted' });
+    await sending;
+    await waiting;
+    assert.equal(revoked, true);
+    assert.equal(transport.sends.length, 1);
+  } finally {
+    await context.router.close();
+    await context.service.close();
+    context.database.close();
+  }
 });

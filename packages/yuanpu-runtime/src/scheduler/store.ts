@@ -402,6 +402,14 @@ export class SchedulerStore {
     `).run(status, error ?? null, now, deliveryId);
   }
 
+  deferDelivery(deliveryId: string, now: string): void {
+    this.database.prepare(`
+      UPDATE yp_delivery_attempts
+      SET status = 'pending', attempts = attempts - 1, last_error = NULL, updated_at = ?
+      WHERE delivery_id = ? AND status = 'delivering' AND attempts > 0
+    `).run(now, deliveryId);
+  }
+
   markDeliveryUnknown(deliveryId: string, now: string): void {
     this.database.prepare(`
       UPDATE yp_delivery_attempts

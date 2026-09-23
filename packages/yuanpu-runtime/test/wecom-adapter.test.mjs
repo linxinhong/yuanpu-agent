@@ -11,6 +11,7 @@ class FixtureClient {
   connected = false;
   disconnected = false;
   replies = [];
+  sends = [];
   result = { errcode: 0 };
 
   on(event, handler) {
@@ -34,6 +35,12 @@ class FixtureClient {
 
   async replyStream(frame, streamId, content, finish) {
     this.replies.push({ frame, streamId, content, finish });
+    if (this.result instanceof Error || (this.result && this.result.throw)) throw this.result.throw;
+    return this.result;
+  }
+
+  async sendMessage(recipientId, body) {
+    this.sends.push({ recipientId, body });
     if (this.result instanceof Error || (this.result && this.result.throw)) throw this.result.throw;
     return this.result;
   }
@@ -164,4 +171,40 @@ test('tracks an asynchronous inbound failure and reports only a redacted event b
   assert.equal(logs.some((record) => record.event === 'wecom.inbound_failed'), true);
   assert.equal(JSON.stringify(logs).includes('fixture-sensitive-inbound-failure'), false);
   assert.equal(JSON.stringify(logs).includes('fixture-private-content'), false);
+});
+
+test('proactive private delivery uses userid and distinguishes provider rejection from uncertain ack', async () => {
+  const client = new FixtureClient();
+  const transport = new WecomSdkTransport({
+    connectionId: 'imc_fixture', botId: 'bot-fixture', secret: 'secret-fixture',
+    clientFactory: () => client,
+  });
+  transport.connect(() => undefined);
+  assert.deepEqual(await transport.sendProactive('member-fixture', 'scheduled output'), {
+    status: 'deferred',
+  });
+  client.emit('authenticated');
+  assert.deepEqual(await transport.sendProactive('member-fixture', 'scheduled output'), {
+    status: 'accepted',
+  });
+  assert.deepEqual(client.sends[0], {
+    recipientId: 'member-fixture',
+    body: { msgtype: 'markdown', markdown: { content: 'scheduled output' } },
+  });
+  client.result = { errcode: 93006 };
+  assert.deepEqual(await transport.sendProactive('member-fixture', 'scheduled output'), {
+    status: 'failed', code: 'provider_93006',
+  });
+  client.result = { throw: new Error('ack timeout after frame write') };
+  assert.deepEqual(await transport.sendProactive('member-fixture', 'scheduled output'), {
+    status: 'unknown', code: 'transport_uncertain',
+  });
+  client.emit('disconnected');
+  assert.deepEqual(await transport.sendProactive('member-fixture', 'scheduled output'), {
+    status: 'deferred',
+  });
+  await transport.close();
+  assert.deepEqual(await transport.sendProactive('member-fixture', 'scheduled output'), {
+    status: 'failed', code: 'transport_closed',
+  });
 });

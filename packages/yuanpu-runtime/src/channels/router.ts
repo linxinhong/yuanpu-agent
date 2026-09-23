@@ -12,6 +12,7 @@ import {
   contentDigest,
   digestChannelValue,
   type ChannelConnectionConfig,
+  type ChannelProactiveResult,
   type ChannelInboundReceipt,
   type ChannelTransport,
   type NormalizedChannelMessage,
@@ -47,6 +48,7 @@ export class ChannelRouter {
   readonly #watching = new Set<string>();
   readonly #watchingPromises = new Set<Promise<void>>();
   readonly #inboundPromises = new Set<Promise<void>>();
+  readonly #scheduledSends = new Map<string, Set<Promise<ChannelProactiveResult>>>();
   readonly #watchAbort = new AbortController();
   #recoveryPromise: Promise<void> = Promise.resolve();
   #closed = false;
@@ -82,6 +84,51 @@ export class ChannelRouter {
     });
     this.#recoveryPromise = this.#transport.ready().then(() => this.#recoverAfterReady());
     this.#trackInbound(this.#recoveryPromise);
+  }
+
+  get connectionId(): string {
+    return this.#config.connectionId;
+  }
+
+  bindScheduledContact(contactId: string): string | undefined {
+    if (this.#closed) return undefined;
+    return this.#store.bindPrivateContact(contactId, this.#config.connectionId);
+  }
+
+  canDeliverScheduled(targetId: string): boolean {
+    return !this.#closed && Boolean(this.#store.getBoundPrivateTarget(targetId, this.#config.connectionId));
+  }
+
+  sendScheduled(targetId: string, content: string, signal: AbortSignal): Promise<ChannelProactiveResult> {
+    const target = this.#closed || signal.aborted
+      ? undefined
+      : this.#store.getBoundPrivateTarget(targetId, this.#config.connectionId);
+    if (!target) return Promise.resolve({ status: 'failed', code: 'target_unavailable' });
+    if (!this.#transport.sendProactive) {
+      return Promise.resolve({ status: 'failed', code: 'proactive_unavailable' });
+    }
+    if (this.#transport.isReady?.() === false) return Promise.resolve({ status: 'deferred' });
+    let sending: Promise<ChannelProactiveResult>;
+    try {
+      sending = this.#transport.sendProactive(target.recipientId, content);
+    } catch {
+      return Promise.resolve({ status: 'unknown', code: 'transport_uncertain' });
+    }
+    const tracked = sending.catch((): ChannelProactiveResult => ({
+      status: 'unknown', code: 'transport_uncertain',
+    })).finally(() => {
+      const pending = this.#scheduledSends.get(targetId);
+      pending?.delete(tracked);
+      if (pending?.size === 0) this.#scheduledSends.delete(targetId);
+    });
+    const pending = this.#scheduledSends.get(targetId) ?? new Set<Promise<ChannelProactiveResult>>();
+    pending.add(tracked);
+    this.#scheduledSends.set(targetId, pending);
+    return tracked;
+  }
+
+  async waitForScheduledTarget(targetId: string): Promise<void> {
+    await Promise.allSettled([...this.#scheduledSends.get(targetId) ?? []]);
   }
 
   async handleInbound(message: NormalizedChannelMessage): Promise<ChannelInboundReceipt> {
@@ -156,6 +203,15 @@ export class ChannelRouter {
     ) {
       return { accepted: false, code: 'invalid_message' };
     }
+    if (message.conversationType === 'single') {
+      this.#store.observePrivateSender({
+        provider: 'wecom',
+        connectionId: this.#config.connectionId,
+        senderDigest,
+        recipientId: message.senderId,
+        now: this.#now().toISOString(),
+      });
+    }
     const caller = this.#caller(accepted.record.conversationDigest);
     if (accepted.record.action === 'cancel') {
       const requestedRunId = await this.#cancelPersistedInbound(accepted.record, caller);
@@ -181,6 +237,7 @@ export class ChannelRouter {
     await Promise.allSettled([...this.#inboundPromises]);
     this.#store.markDeliveringUnknown('wecom', this.#config.connectionId, this.#now().toISOString());
     await Promise.allSettled([...this.#watchingPromises]);
+    await Promise.allSettled([...this.#scheduledSends.values()].flatMap((pending) => [...pending]));
   }
 
   #caller(conversationDigest: string): AuthenticatedAgentCaller {

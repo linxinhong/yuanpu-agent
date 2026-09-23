@@ -8,7 +8,7 @@ import { SchedulerStore } from '../scheduler/store.js';
 
 export * from './agent-run-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 4;
+export const YUANPU_METADATA_SCHEMA_VERSION = 5;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -247,6 +247,26 @@ const migrations: readonly Migration[] = [{
 
     CREATE INDEX yp_channel_outbound_status
       ON yp_channel_outbound(status, updated_at);
+  `,
+}, {
+  version: 5,
+  sql: `
+    CREATE TABLE yp_channel_private_contacts (
+      contact_id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      sender_digest TEXT NOT NULL,
+      recipient_id TEXT,
+      bound_target_id TEXT UNIQUE,
+      last_seen_at TEXT NOT NULL,
+      UNIQUE (provider, connection_id, sender_digest),
+      FOREIGN KEY (provider, connection_id, sender_digest)
+        REFERENCES yp_channel_pairings(provider, connection_id, sender_digest),
+      CHECK (bound_target_id IS NULL OR recipient_id IS NOT NULL)
+    ) STRICT;
+
+    CREATE INDEX yp_channel_private_contacts_bound_target
+      ON yp_channel_private_contacts(bound_target_id);
   `,
 }];
 

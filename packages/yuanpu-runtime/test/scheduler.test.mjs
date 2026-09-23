@@ -543,6 +543,112 @@ test('shutdown marks an in-flight delivery unknown and restart retries only with
   metadata.close();
 });
 
+test('a non-idempotent proactive send with uncertain receipt stays unknown after restart', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-unknown-send-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  let now = new Date('2026-09-22T00:00:30.000Z');
+  let sends = 0;
+  let metadata = openYuanpuMetadataDatabase(path);
+  let agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: { async execute() { return { kind: 'completed', output: { message: 'output', tools: [] } }; } },
+    now: () => now,
+  });
+  const delivery = {
+    supports: () => true,
+    supportsIdempotency: () => false,
+    async deliver() { sends += 1; return { status: 'unknown', code: 'transport_uncertain' }; },
+  };
+  let scheduler = await PersistentScheduler.open({
+    store: metadata.schedules, agent, caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true, delivery,
+    now: () => now, scanIntervalMs: 60_000,
+  });
+  const schedule = scheduler.create(scheduleInput({
+    timing: { kind: 'once', at: '2026-09-22T00:01:00.000Z' },
+    delivery: { kind: 'channel', routeId: 'opaque-fixture' },
+  }));
+  now = new Date('2026-09-22T00:01:00.000Z');
+  await scheduler.tick();
+  await eventually(() => scheduler.history(schedule.scheduleId)[0]?.deliveryStatus === 'result_unknown');
+  assert.equal(sends, 1);
+  await scheduler.close();
+  await agent.close();
+  metadata.close();
+
+  metadata = openYuanpuMetadataDatabase(path);
+  agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: { async execute() { throw new Error('must not rerun Agent'); } },
+    now: () => now,
+  });
+  scheduler = await PersistentScheduler.open({
+    store: metadata.schedules, agent, caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true, delivery,
+    now: () => now, scanIntervalMs: 60_000,
+  });
+  await scheduler.tick();
+  assert.equal(sends, 1);
+  assert.equal(scheduler.history(schedule.scheduleId)[0].deliveryStatus, 'result_unknown');
+  await scheduler.close();
+  await agent.close();
+  metadata.close();
+});
+
+test('an unauthenticated channel defers a pending send without consuming an attempt', async () => {
+  const metadata = openYuanpuMetadataDatabase(':memory:');
+  let now = new Date('2026-09-22T00:00:30.000Z');
+  let executions = 0;
+  let ready = false;
+  let sends = 0;
+  const agent = await PersistentAgentService.open({
+    store: metadata.agentRuns,
+    executor: { async execute() {
+      executions += 1;
+      return { kind: 'completed', output: { message: 'output', tools: [] } };
+    } },
+    now: () => now,
+  });
+  const scheduler = await PersistentScheduler.open({
+    store: metadata.schedules, agent, caller: schedulerCaller,
+    authorizeWorkspace: schedulerCaller.authorizeWorkspace,
+    authorizeDelivery: () => true,
+    delivery: {
+      supports: () => true,
+      supportsIdempotency: () => false,
+      async deliver() {
+        if (!ready) return { status: 'deferred' };
+        sends += 1;
+        return { status: 'accepted' };
+      },
+    },
+    now: () => now, scanIntervalMs: 60_000,
+  });
+  try {
+    const schedule = scheduler.create(scheduleInput({
+      timing: { kind: 'once', at: '2026-09-22T00:01:00.000Z' },
+      delivery: { kind: 'channel', routeId: 'opaque-fixture' },
+    }));
+    now = new Date('2026-09-22T00:01:00.000Z');
+    await scheduler.tick();
+    await eventually(() => scheduler.history(schedule.scheduleId)[0]?.deliveryStatus === 'pending');
+    assert.equal(scheduler.history(schedule.scheduleId)[0].deliveryAttempts, 0);
+    assert.equal(executions, 1);
+    ready = true;
+    await scheduler.tick();
+    await eventually(() => scheduler.history(schedule.scheduleId)[0]?.deliveryStatus === 'delivered');
+    assert.equal(sends, 1);
+    assert.equal(executions, 1);
+  } finally {
+    await scheduler.close();
+    await agent.close();
+    metadata.close();
+  }
+});
+
 test('close racing an awaited run lookup cannot start a delivery afterwards', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-scheduler-close-race-'));
   context.after(() => rm(root, { recursive: true, force: true }));

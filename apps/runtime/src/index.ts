@@ -52,6 +52,7 @@ import { promisify } from 'node:util';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun } from './runtime-host.js';
+import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
 import { closeWecomChannels, startConfiguredWecomChannels } from './wecom-channel.js';
 
 declare const __APP_VERSION__: string;
@@ -525,6 +526,8 @@ async function serve(): Promise<void> {
     authorizeConversation: (conversation) => conversation.namespace === 'desktop',
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
+  const wecomChannels: ChannelRouter[] = [];
+  const scheduledChannelDelivery = createScheduledImDelivery(wecomChannels);
   const schedulerCaller: AuthenticatedAgentCaller = {
     entryPoint: 'scheduler',
     identity: {
@@ -535,7 +538,9 @@ async function serve(): Promise<void> {
     },
     authorizeWorkspace: (workspaceId) => workspaceId === home.config.workingDirectory,
     authorizeConversation: (conversation) => conversation.namespace === 'scheduler',
-    authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
+    authorizeDelivery: (delivery) => delivery.kind === 'desktop'
+      || delivery.kind === 'none'
+      || scheduledChannelDelivery.supports(delivery),
   };
   const scheduler = await PersistentScheduler.open({
     store: metadata.schedules,
@@ -543,8 +548,9 @@ async function serve(): Promise<void> {
     caller: schedulerCaller,
     authorizeWorkspace: schedulerCaller.authorizeWorkspace,
     authorizeDelivery: schedulerCaller.authorizeDelivery,
+    delivery: scheduledChannelDelivery,
+    deferInitialTick: true,
   });
-  const wecomChannels: ChannelRouter[] = [];
   const activatePythonArtifact = async (entrypoint: string, installPath: string, version: string) => {
     const previousSource = pythonSource;
     process.env.YUANPU_PYTHON_MCP_EXECUTABLE = entrypoint;
@@ -792,19 +798,15 @@ async function serve(): Promise<void> {
         return;
       }
 
+      if (await handleScheduledImHttp({
+        request, response, url,
+        channelStore: metadata.channels,
+        channels: wecomChannels,
+        scheduler,
+        readJsonBody,
+      })) return;
       if (url.pathname === RUNTIME_ROUTES.schedules && request.method === 'GET') {
         response.end(JSON.stringify(scheduler.list()));
-        return;
-      }
-      if (url.pathname === RUNTIME_ROUTES.schedules && request.method === 'POST') {
-        try {
-          const schedule = scheduler.create(await readJsonBody(request));
-          response.statusCode = 201;
-          response.end(JSON.stringify(schedule));
-        } catch (error) {
-          response.statusCode = 400;
-          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
-        }
         return;
       }
       const schedulePath = url.pathname.startsWith(`${RUNTIME_ROUTES.schedules}/`)
@@ -1359,6 +1361,7 @@ async function serve(): Promise<void> {
         else if (record.level === 'info') console.info(message);
       },
     }));
+    await scheduler.tick();
   } catch (error) {
     parentMonitor?.dispose();
     await cleanup();

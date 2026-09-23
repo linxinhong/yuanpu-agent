@@ -76,9 +76,9 @@ test('cleanup continues after scheduler rejection and aggregates all close failu
     }),
     (error) => {
       assert.equal(error instanceof AggregateError, true);
-      assert.deepEqual(error.errors, [channelFailure, schedulerFailure, agentFailure]);
+      assert.deepEqual(error.errors, [schedulerFailure, channelFailure, agentFailure]);
       return true;
     },
   );
-  assert.deepEqual(calls, ['channels', 'scheduler', 'notification', 'agent', 'python', 'metadata']);
+  assert.deepEqual(calls, ['scheduler', 'channels', 'notification', 'agent', 'python', 'metadata']);
 });

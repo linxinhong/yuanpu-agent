@@ -16,6 +16,7 @@ export const RUNTIME_ROUTES = {
   hostEventReceipts: '/v1/host/events/receipts',
   notificationTargetValidation: '/v1/notifications/targets/validate',
   schedules: '/v1/schedules',
+  channelScheduleTargets: '/v1/channels/schedule-targets',
   localSkills: '/v1/skills/local',
   plugins: '/v1/plugins',
   pluginSearch: '/v1/plugins/search',

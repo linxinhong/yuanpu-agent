@@ -26,7 +26,7 @@ export interface ScheduledDeliveryAdapter {
     target: AgentDeliveryTarget;
     output: AgentRunOutput;
     signal: AbortSignal;
-  }): Promise<void>;
+  }): Promise<void | { status: 'accepted' | 'failed' | 'unknown' | 'deferred'; code?: string }>;
 }
 
 export interface PersistentSchedulerOptions {
@@ -40,6 +40,7 @@ export interface PersistentSchedulerOptions {
   createId?: () => string;
   scanIntervalMs?: number;
   maximumDeliveryAttempts?: number;
+  deferInitialTick?: boolean;
 }
 
 const DEFAULT_MAXIMUM_LATENESS_MS = 24 * 60 * 60_000;
@@ -169,7 +170,7 @@ export class PersistentScheduler {
   static async open(options: PersistentSchedulerOptions): Promise<PersistentScheduler> {
     const scheduler = new PersistentScheduler(options);
     scheduler.#store.recoverDeliveries(scheduler.#now().toISOString());
-    await scheduler.tick();
+    if (!options.deferInitialTick) await scheduler.tick();
     return scheduler;
   }
 
@@ -444,14 +445,24 @@ export class PersistentScheduler {
       this.#deliveryControllers.set(claimed.deliveryId, controller);
       try {
         if (!this.#delivery?.supports(claimed.target)) throw new Error('No delivery adapter accepts this target.');
-        await this.#delivery.deliver({
+        const result = await this.#delivery.deliver({
           deliveryId: claimed.deliveryId,
           idempotencyKey: claimed.idempotencyKey,
           target: claimed.target,
           output: run.output,
           signal: controller.signal,
         });
-        this.#store.finishDelivery(claimed.deliveryId, 'delivered', this.#now().toISOString());
+        if (result?.status === 'deferred') {
+          this.#store.deferDelivery(claimed.deliveryId, this.#now().toISOString());
+        } else if (result?.status === 'unknown') {
+          this.#store.markDeliveryUnknown(claimed.deliveryId, this.#now().toISOString());
+        } else if (result?.status === 'failed') {
+          this.#store.finishDelivery(
+            claimed.deliveryId, 'failed', this.#now().toISOString(), result.code ?? 'delivery_failed',
+          );
+        } else {
+          this.#store.finishDelivery(claimed.deliveryId, 'delivered', this.#now().toISOString());
+        }
       } catch (error) {
         if (controller.signal.aborted) {
           this.#store.markDeliveryUnknown(claimed.deliveryId, this.#now().toISOString());
