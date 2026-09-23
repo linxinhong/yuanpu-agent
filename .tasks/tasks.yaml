@@ -1001,7 +1001,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-033
     title: "区分企业微信运行与回复投递状态"
-    status: ready
+    status: in_progress
     goal: "修复 TASK-021 的 D21-02：App 查看企业微信运行结果时，应同时看见独立的回复投递状态，尤其不能把 Agent 成功误读为已投递。"
     scope:
       in: ["按运行 ID 查询持久化 IM outbound 的最小可信接口", "现有运行详情中单独呈现回复投递结果与未知状态", "隔离 App 重启后的浏览器/进程回归"]
@@ -1023,12 +1023,12 @@ tasks:
     investigation_hints: [".tasks/verification/TASK-021/results.md 的 D21-02；apps/desktop/test/task-021-im-app-restart-probe.mjs", "packages/yuanpu-runtime/src/channels/store.ts 的 outboundByRun；apps/runtime/src/index.ts 的授权 run 查询；apps/desktop/src/{main,preload}.ts；apps/app/src/main.tsx 的 locatedRun 详情", "先明确现有本地 App 授权边界和状态契约，再做最小接口和现有页面行为；真实企微只在另行授权的 021 验收中复核"]
     escalation_conditions: ["若必须放宽 IM 数据授权或更改恢复/重试语义，先说明契约变化"]
     result:
-      owner: null
+      owner: "codex-task021-followup-20260923-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T13:51:45.138Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-032"
+      branch: "task/task-033-im-delivery-status"
       evidence: []
       follow_up_candidates: []
   - id: TASK-031
