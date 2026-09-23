@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -137,7 +138,10 @@ test('an unexpected MCP root exit terminates its process group', async () => {
   const stages = process.platform === 'win32'
     ? (await readFile(windowsDiagnosticFile, 'utf8')).trim().split(/\r?\n/u).slice(-12).join('\n')
     : '';
-  assert.throws(() => process.kill(childPid, 0), stages);
+  const tasklist = process.platform === 'win32'
+    ? execFileSync('tasklist', ['/FI', `PID eq ${childPid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' })
+    : '';
+  assert.throws(() => process.kill(childPid, 0), `${stages}\ntasklist=${tasklist}`);
   await source.close();
 });
 
