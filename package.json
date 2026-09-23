@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm run build:pi && pnpm -r --filter '!@earendil-works/*' run build",
+    "build": "pnpm run build:pi && pnpm -r --filter \"@yuanpu-agent/*\" --filter \"!@yuanpu-agent/monorepo\" run build",
     "build:app": "pnpm --filter @yuanpu-agent/app... run build",
     "build:desktop": "pnpm --filter @yuanpu-agent/desktop... run build",
     "build:python-artifact": "node apps/python-capabilities/scripts/build-artifact.mjs",
@@ -27,9 +27,9 @@
     "start:catalog": "pnpm --filter @yuanpu-agent/catalog-server run start",
     "sync:pi": "node scripts/sync-pi-packages.mjs",
     "test:jev-evidence": "node --test scripts/verification/test/*.test.mjs",
-    "test": "node --test apps/python-capabilities/scripts/*.test.mjs scripts/verification/test/*.test.mjs && pnpm -r --filter '!@earendil-works/*' --if-present run test",
+    "test": "node --test apps/python-capabilities/scripts/*.test.mjs scripts/verification/test/*.test.mjs && pnpm -r --filter \"@yuanpu-agent/*\" --filter \"!@yuanpu-agent/monorepo\" --if-present run test",
     "typecheck": "pnpm run build:pi && pnpm run typecheck:yuanpu",
-    "typecheck:yuanpu": "pnpm -r --filter '!@earendil-works/*' run typecheck"
+    "typecheck:yuanpu": "pnpm -r --filter \"@yuanpu-agent/*\" --filter \"!@yuanpu-agent/monorepo\" run typecheck"
   },
   "engines": {
     "node": ">=24.15.0 <25"
