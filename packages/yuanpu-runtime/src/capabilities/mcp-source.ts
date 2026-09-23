@@ -54,6 +54,7 @@ function Trace-McpStage([string]$stage) {
 Trace-McpStage 'start'
 Add-Type @'
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -99,6 +100,20 @@ public static class YuanpuJob {
     public uint ActiveProcesses;
     public uint TotalTerminatedProcesses;
   }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct ProcessEntry {
+    public uint Size;
+    public uint Usage;
+    public uint ProcessId;
+    public UIntPtr DefaultHeapId;
+    public uint ModuleId;
+    public uint Threads;
+    public uint ParentProcessId;
+    public int BasePriority;
+    public uint Flags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+    public string Executable;
+  }
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
   public static extern IntPtr CreateJobObject(IntPtr securityAttributes, string name);
   [DllImport("kernel32.dll")]
@@ -115,6 +130,14 @@ public static class YuanpuJob {
   public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
   [DllImport("kernel32.dll")]
   public static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")]
+  public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern bool Process32FirstW(IntPtr snapshot, ref ProcessEntry entry);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern bool Process32NextW(IntPtr snapshot, ref ProcessEntry entry);
+  [DllImport("kernel32.dll")]
+  public static extern bool TerminateProcess(IntPtr process, uint exitCode);
   public static bool HasKillOnClose(IntPtr job) {
     uint size = (uint)Marshal.SizeOf(typeof(ExtendedLimits));
     IntPtr info = Marshal.AllocHGlobal((int)size);
@@ -142,6 +165,53 @@ public static class YuanpuJob {
     } finally {
       Marshal.FreeHGlobal(info);
     }
+  }
+  public static int TerminateDescendants(uint rootPid) {
+    IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
+    if (snapshot == new IntPtr(-1)) throw new InvalidOperationException("Process snapshot failed");
+    var children = new Dictionary<uint, List<uint>>();
+    try {
+      ProcessEntry entry = new ProcessEntry();
+      entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
+      if (Process32FirstW(snapshot, ref entry)) {
+        do {
+          List<uint> siblings;
+          if (!children.TryGetValue(entry.ParentProcessId, out siblings)) {
+            siblings = new List<uint>();
+            children.Add(entry.ParentProcessId, siblings);
+          }
+          siblings.Add(entry.ProcessId);
+          entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
+        } while (Process32NextW(snapshot, ref entry));
+      }
+    } finally {
+      CloseHandle(snapshot);
+    }
+    var queue = new Queue<uint>();
+    var seen = new HashSet<uint>();
+    var descendants = new List<uint>();
+    queue.Enqueue(rootPid);
+    seen.Add(rootPid);
+    while (queue.Count > 0) {
+      List<uint> direct;
+      if (!children.TryGetValue(queue.Dequeue(), out direct)) continue;
+      foreach (uint pid in direct) {
+        if (!seen.Add(pid)) continue;
+        descendants.Add(pid);
+        queue.Enqueue(pid);
+      }
+    }
+    int terminated = 0;
+    for (int i = descendants.Count - 1; i >= 0; i--) {
+      IntPtr process = OpenProcess(1, false, descendants[i]);
+      if (process == IntPtr.Zero) continue;
+      try {
+        if (TerminateProcess(process, 1)) terminated++;
+      } finally {
+        CloseHandle(process);
+      }
+    }
+    return terminated;
   }
 }
 '@
@@ -178,6 +248,7 @@ try {
   Trace-McpStage ("active-processes-" + [YuanpuJob]::ActiveProcessCount($job))
   if (-not [YuanpuJob]::TerminateJobObject($job, 1)) { throw 'TerminateJobObject failed' }
   Trace-McpStage 'job-terminated'
+  Trace-McpStage ("escaped-descendants-terminated-" + [YuanpuJob]::TerminateDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
 } catch {
   Trace-McpStage ('wait-error-' + $_.Exception.GetType().Name)
   throw
@@ -266,7 +337,8 @@ class ProcessGroupStdioTransport implements Transport {
         const groupId = this.#groupId;
         this.#groupId = undefined;
         if (groupId) {
-          void this.#terminateWindowsSupervisor().then(() => terminateProcessGroup(groupId)).finally(() => this.onclose?.());
+          void (this.#supervisor ? this.#waitWindowsSupervisor() : terminateProcessGroup(groupId))
+            .finally(() => this.onclose?.());
         } else {
           this.onclose?.();
         }
@@ -317,10 +389,22 @@ class ProcessGroupStdioTransport implements Transport {
     });
   }
 
-  async #terminateWindowsSupervisor(): Promise<void> {
-    const supervisorPid = this.#supervisor?.pid;
+  async #waitWindowsSupervisor(): Promise<void> {
+    const supervisor = this.#supervisor;
+    if (!supervisor) return;
+    if (supervisor.exitCode === null && supervisor.signalCode === null) {
+      await new Promise<void>((resolveExit) => {
+        const timeout = setTimeout(resolveExit, 3_000);
+        supervisor.once('exit', () => {
+          clearTimeout(timeout);
+          resolveExit();
+        });
+      });
+    }
+    if (supervisor.exitCode === null && supervisor.signalCode === null && supervisor.pid) {
+      await terminateProcessGroup(supervisor.pid);
+    }
     this.#supervisor = undefined;
-    if (supervisorPid) await terminateProcessGroup(supervisorPid);
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
@@ -336,8 +420,8 @@ class ProcessGroupStdioTransport implements Transport {
     this.#closing = (async () => {
       const groupId = this.#groupId;
       this.#groupId = undefined;
-      await this.#terminateWindowsSupervisor();
       if (groupId) await terminateProcessGroup(groupId);
+      await this.#waitWindowsSupervisor();
       this.#process = undefined;
       this.#readBuffer.clear();
     })();
