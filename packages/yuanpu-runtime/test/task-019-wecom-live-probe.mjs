@@ -15,7 +15,7 @@ import {
 const botId = process.env.WECOM_BOT_ID;
 const secret = process.env.WECOM_BOT_SECRET;
 const testUserId = process.env.WECOM_TEST_USER_ID;
-if (!botId || !secret || !testUserId) {
+if (!botId || !secret) {
   console.log(JSON.stringify({ status: 'missing_variables' }));
   process.exitCode = 1;
 } else {
@@ -26,6 +26,9 @@ if (!botId || !secret || !testUserId) {
   const database = openYuanpuMetadataDatabase(databasePath);
   let executions = 0;
   let matched = 0;
+  let inboundSeen = 0;
+  let privateTextSeen = 0;
+  let pinnedSenderId = testUserId;
   let deliveryResult;
   let signalReply;
   const replyObserved = new Promise((resolve) => { signalReply = resolve; });
@@ -54,12 +57,20 @@ if (!botId || !secret || !testUserId) {
     const transport = {
       connect(handler) {
         sdk.connect(async (message) => {
+          inboundSeen += 1;
+          if (message.conversationType === 'single' && message.messageType === 'text') {
+            privateTextSeen += 1;
+          }
           if (
-            message.senderId !== testUserId
+            (pinnedSenderId && message.senderId !== pinnedSenderId)
+            || matched !== 0
             || message.conversationType !== 'single'
             || message.messageType !== 'text'
             || message.text?.trim() !== challenge
           ) return;
+          pinnedSenderId = message.senderId;
+          database.channels.pair('wecom', connectionId,
+            digestChannelValue(connectionId, 'sender', pinnedSenderId), new Date().toISOString());
           matched += 1;
           await handler(message);
         });
@@ -80,7 +91,8 @@ if (!botId || !secret || !testUserId) {
         credentialBindingDigest: digestChannelValue(connectionId, 'credential-reference', 'temporary-env-probe'),
         workspaceId: '/task-019-live-probe',
         acceptedMessageTypes: ['text'],
-        pairedSenderDigests: [digestChannelValue(connectionId, 'sender', testUserId)],
+        pairedSenderDigests: testUserId
+          ? [digestChannelValue(connectionId, 'sender', testUserId)] : [],
         groupEnabled: false,
         groupAllowlistDigests: [],
       },
@@ -100,7 +112,7 @@ if (!botId || !secret || !testUserId) {
       console.log(JSON.stringify({ status: 'ready', challenge }));
       const replied = await Promise.race([
         replyObserved.then(() => true),
-        new Promise((resolve) => setTimeout(() => resolve(false), 120_000)),
+        new Promise((resolve) => setTimeout(() => resolve(false), 240_000)),
       ]);
       await agent.waitForIdle();
       const inspection = new DatabaseSync(databasePath, { readOnly: true });
@@ -113,11 +125,14 @@ if (!botId || !secret || !testUserId) {
       inspection.close();
       console.log(JSON.stringify({
         status: replied ? 'reply_attempted' : 'message_timeout',
+        inboundSeen,
+        privateTextSeen,
         matched,
         executions,
         runCount,
         outboundStatuses: outbound.map((row) => row.status),
         providerReceipt: deliveryResult?.status ?? null,
+        sdkEvents,
       }));
       if (!replied || matched !== 1 || executions !== 1 || runCount !== 1
         || outbound.length !== 1 || outbound[0].status !== 'accepted') process.exitCode = 1;
