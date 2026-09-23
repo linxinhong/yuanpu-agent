@@ -1023,7 +1023,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-027
     title: "隔离企业微信连接启动失败"
-    status: in_progress
+    status: done
     goal: "可选企业微信连接的配置或凭据失败不阻断桌面 App 与本地 Runtime 启动，连接本身保持关闭并可诊断。"
     scope:
       in: ["Runtime 启动时的企业微信连接失败隔离","无凭据泄漏的诊断事件","无效配置与有效连接的回归测试"]
@@ -1045,8 +1045,13 @@ tasks:
       owner: "codex-t027sep23-12136"
       attempts: 0
       claimed_at: "2026-09-23T05:39:36.315Z"
-      completed_at: null
+      completed_at: "2026-09-23T05:50:39.324Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-027"
       branch: "task/task-027-wecom-startup-isolation"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated optional WeCom startup isolation", status: "passed", summary: "Implementation f5beed0 and task memory fb065bf were fast-forward integrated to main fb065bf. Runtime catches only the optional WeCom startup boundary, logs a sanitized category and continues core startup; strict connection validation and rollback are retained."}
+        - {type: "verification", check: "malformed config and unavailable credential", status: "passed", summary: "At integrated main fb065bf, isolated Runtime child tests for malformed JSON, legacy unknown field and missing Keychain credential each reached ready and returned authenticated health 200, with sanitized stderr and no provider identity or secret. The pre-fix test was red. Existing valid/unsafe config tests and multi-connection rollback passed."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 full build, typecheck and tests passed on main fb065bf: runtime-kit 122/122 and Runtime 20/20, including startup degradation and rollback."}
+        - {type: "verification", check: "Electron window after integration", status: "passed", summary: "Restarted the main Electron dev App after integration. Computer Use observed the Yuanpu Agent window at 127.0.0.1:5173 and '本地 Runtime 已连接'. This used the now-valid local config; invalid-config App behavior is established by isolated Runtime readiness tests, not a second live Electron window."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-027.md records the trigger, boundary, tested revision, commands and remaining TASK-019 verification limits."}
       follow_up_candidates: []
