@@ -148,6 +148,7 @@ export class WecomSdkTransport implements ChannelTransport {
   #started = false;
   #closed = false;
   #authenticated = false;
+  #authenticationFailed = false;
   readonly #inboundTasks = new Set<Promise<void>>();
   readonly #readyPromise: Promise<void>;
   readonly #resolveReady: () => void;
@@ -189,11 +190,15 @@ export class WecomSdkTransport implements ChannelTransport {
         .finally(() => this.#inboundTasks.delete(task));
       this.#inboundTasks.add(task);
     });
-    this.#client.on('error', () => {
+    this.#client.on('error', (error) => {
+      if (error.name === 'WSAuthFailureError' || /authentication failed|auth failure/i.test(error.message)) {
+        this.#authenticationFailed = true;
+      }
       this.#log({ level: 'error', event: 'wecom.transport_error' });
     });
     this.#client.on('authenticated', () => {
       this.#authenticated = true;
+      this.#authenticationFailed = false;
       this.#resolveReady();
     });
     this.#client.on('disconnected', () => { this.#authenticated = false; });
@@ -206,6 +211,10 @@ export class WecomSdkTransport implements ChannelTransport {
 
   isReady(): boolean {
     return !this.#closed && this.#authenticated && this.#client.isConnected;
+  }
+
+  connectionIssue(): 'authentication_failed' | undefined {
+    return this.#authenticationFailed ? 'authentication_failed' : undefined;
   }
 
   async reply(

@@ -107,7 +107,27 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('runtime:info', trustedHandler(() => runtime.info()));
   ipcMain.handle('runtime:greeting', trustedHandler((name: string) => runtime.greeting(name)));
   ipcMain.handle('runtime:chat', trustedHandler((message: string) => runtime.chat(message)));
+  ipcMain.handle('runtime:chat:submit', trustedHandler((message: string) => runtime.submitDesktopMessage(message)));
   ipcMain.handle('agent:runs:get', trustedHandler((runId: string) => runtime.getAgentRun(runId)));
+  ipcMain.handle('agent:runs:cancel', trustedHandler((runId: string) => runtime.cancelAgentRun(runId)));
+  ipcMain.handle('schedules:list', trustedHandler(() => runtime.listSchedules()));
+  ipcMain.handle('schedules:create', trustedHandler((input) => runtime.createSchedule(input)));
+  ipcMain.handle('schedules:preview', trustedHandler((input) => runtime.previewSchedule(input)));
+  ipcMain.handle('schedules:update', trustedHandler((scheduleId, input) => runtime.updateSchedule(scheduleId, input)));
+  ipcMain.handle('schedules:enabled', trustedHandler((scheduleId, enabled) => (
+    runtime.setScheduleEnabled(scheduleId, enabled)
+  )));
+  ipcMain.handle('schedules:history', trustedHandler((scheduleId, limit) => (
+    runtime.getScheduleHistory(scheduleId, limit)
+  )));
+  ipcMain.handle('schedules:contacts:list', trustedHandler(() => runtime.listSchedulePrivateContacts()));
+  ipcMain.handle('schedules:contacts:bind', trustedHandler((contactId) => runtime.bindSchedulePrivateContact(contactId)));
+  ipcMain.handle('schedules:targets:revoke', trustedHandler((routeId) => (
+    runtime.revokeSchedulePrivateTarget(routeId)
+  )));
+  ipcMain.handle('connections:wecom:list', trustedHandler(() => runtime.listWecomConnections()));
+  ipcMain.handle('connections:wecom:test', trustedHandler((connectionId) => runtime.testWecomConnection(connectionId)));
+  ipcMain.handle('connections:wecom:save', trustedHandler((input) => runtime.saveWecomConnection(input)));
   ipcMain.handle('runtime:update', trustedHandler(() => runtime.checkForUpdate()));
   ipcMain.handle('plugins:search', trustedHandler((query: string) => runtime.searchPlugins(query)));
   ipcMain.handle('plugins:list', trustedHandler(() => runtime.listPlugins()));

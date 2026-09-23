@@ -22,6 +22,15 @@ import {
   type NotificationNavigationTarget,
   type NotificationTargetValidation,
   type AgentRunRecord,
+  type AgentRunCancellationReceipt,
+  type AgentRunReceipt,
+  type ScheduleHistoryRecord,
+  type ScheduleInput,
+  type SchedulePrivateContact,
+  type ScheduleRecord,
+  type WecomConnectionList,
+  type WecomConnectionSummary,
+  type WecomConnectionConfigInput,
 } from '@yuanpu-agent/protocol';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
@@ -410,7 +419,7 @@ export class RuntimeManager {
       throw new Error([body.error || `Runtime request failed with HTTP ${response.status}`, body.hint]
         .filter(Boolean).join(' '));
     }
-    return (await response.json()) as T;
+    return response.status === 204 ? undefined as T : await response.json() as T;
   }
 
   info(): Promise<RuntimeInfo> {
@@ -439,6 +448,110 @@ export class RuntimeManager {
       throw new Error('runId must be a non-empty string of at most 200 characters.');
     }
     return this.request(`${RUNTIME_ROUTES.agentRuns}/${encodeURIComponent(runId)}`);
+  }
+
+  cancelAgentRun(runId: string): Promise<AgentRunCancellationReceipt> {
+    if (typeof runId !== 'string' || runId.length < 1 || runId.length > 200) {
+      throw new Error('runId must be a non-empty string of at most 200 characters.');
+    }
+    return this.request(`${RUNTIME_ROUTES.agentRuns}/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+    });
+  }
+
+  listSchedules(): Promise<ScheduleRecord[]> {
+    return this.request(RUNTIME_ROUTES.schedules);
+  }
+
+  createSchedule(input: ScheduleInput): Promise<ScheduleRecord> {
+    return this.request(RUNTIME_ROUTES.schedules, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  previewSchedule(input: ScheduleInput): Promise<{ nextTriggerAt?: string }> {
+    return this.request(`${RUNTIME_ROUTES.schedules}/preview`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  updateSchedule(scheduleId: string, input: ScheduleInput): Promise<ScheduleRecord> {
+    return this.request(`${RUNTIME_ROUTES.schedules}/${encodeURIComponent(this.validScheduleId(scheduleId))}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  setScheduleEnabled(scheduleId: string, enabled: boolean): Promise<ScheduleRecord> {
+    if (typeof enabled !== 'boolean') throw new Error('enabled must be a boolean.');
+    return this.request(
+      `${RUNTIME_ROUTES.schedules}/${encodeURIComponent(this.validScheduleId(scheduleId))}/${enabled ? 'enable' : 'disable'}`,
+      { method: 'POST' },
+    );
+  }
+
+  getScheduleHistory(scheduleId: string, limit = 50): Promise<ScheduleHistoryRecord[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw new Error('limit must be an integer from 1 to 200.');
+    }
+    return this.request(`${RUNTIME_ROUTES.schedules}/${encodeURIComponent(this.validScheduleId(scheduleId))}/history?limit=${limit}`);
+  }
+
+  listSchedulePrivateContacts(): Promise<SchedulePrivateContact[]> {
+    return this.request(RUNTIME_ROUTES.channelScheduleTargets);
+  }
+
+  bindSchedulePrivateContact(contactId: string): Promise<{ routeId: string }> {
+    if (typeof contactId !== 'string' || contactId.length < 1 || contactId.length > 200) {
+      throw new Error('contactId must be a non-empty string of at most 200 characters.');
+    }
+    return this.request(RUNTIME_ROUTES.channelScheduleTargets, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ contactId }),
+    });
+  }
+
+  async revokeSchedulePrivateTarget(routeId: string): Promise<void> {
+    if (typeof routeId !== 'string' || routeId.length < 1 || routeId.length > 200) {
+      throw new Error('routeId must be a non-empty string of at most 200 characters.');
+    }
+    await this.request(`${RUNTIME_ROUTES.channelScheduleTargets}/${encodeURIComponent(routeId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  private validScheduleId(scheduleId: string): string {
+    if (typeof scheduleId !== 'string' || scheduleId.length < 1 || scheduleId.length > 200) {
+      throw new Error('scheduleId must be a non-empty string of at most 200 characters.');
+    }
+    return scheduleId;
+  }
+
+  listWecomConnections(): Promise<WecomConnectionList> {
+    return this.request(RUNTIME_ROUTES.wecomConnections);
+  }
+
+  testWecomConnection(connectionId: string): Promise<WecomConnectionSummary> {
+    if (typeof connectionId !== 'string' || !/^[A-Za-z0-9._-]{1,128}$/.test(connectionId)) {
+      throw new Error('Invalid Enterprise WeChat connectionId.');
+    }
+    return this.request(`${RUNTIME_ROUTES.wecomConnections}/${encodeURIComponent(connectionId)}/test`, {
+      method: 'POST',
+    });
+  }
+
+  saveWecomConnection(input: WecomConnectionConfigInput): Promise<WecomConnectionSummary> {
+    return this.request(RUNTIME_ROUTES.wecomConnections, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
   }
 
   listCapabilityApprovals(): Promise<CapabilityApprovalSummary[]> {
@@ -476,6 +589,17 @@ export class RuntimeManager {
 
   chat(message: string): Promise<ChatResponse> {
     return this.request(RUNTIME_ROUTES.chat, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  submitDesktopMessage(message: string): Promise<AgentRunReceipt> {
+    if (typeof message !== 'string' || !message.trim()) {
+      throw new Error('A non-empty message is required.');
+    }
+    return this.request(RUNTIME_ROUTES.chatSubmit, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message }),

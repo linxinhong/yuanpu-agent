@@ -100,6 +100,9 @@ test('each schedule revision fires once and default overlap policy skips a concu
     metadata.close();
   });
 
+  assert.deepEqual(scheduler.preview(scheduleInput()), { nextTriggerAt: '2026-09-22T00:01:00.000Z' });
+  assert.deepEqual(scheduler.list(), []);
+  assert.throws(() => scheduler.preview(scheduleInput({ timeZone: 'Invalid/Zone' })), /time zone/i);
   const created = scheduler.create(scheduleInput());
   assert.equal(created.revision, 1);
   assert.equal(created.nextTriggerAt, '2026-09-22T00:01:00.000Z');

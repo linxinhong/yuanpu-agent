@@ -33,6 +33,7 @@ export interface ChannelTransport {
   reply(route: ChannelReplyRoute, outboundId: string, content: string): Promise<ChannelDeliveryResult>;
   sendProactive?(recipientId: string, content: string): Promise<ChannelProactiveResult>;
   isReady?(): boolean;
+  connectionIssue?(): 'authentication_failed' | undefined;
   close(): Promise<void> | void;
 }
 

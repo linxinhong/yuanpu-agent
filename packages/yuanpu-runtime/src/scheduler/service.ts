@@ -248,6 +248,13 @@ export class PersistentScheduler {
     return updated;
   }
 
+  preview(value: unknown): { nextTriggerAt?: string } {
+    this.#assertOpen();
+    const input = this.#validateInput(value);
+    const next = input.enabled ? firstOccurrence(input.timing, input.timeZone, this.#now()) : undefined;
+    return next ? { nextTriggerAt: next.toISOString() } : {};
+  }
+
   setEnabled(scheduleId: string, enabled: boolean): ScheduleRecord {
     const existing = this.#store.get(scheduleId);
     if (!existing) throw new Error('Schedule not found.');

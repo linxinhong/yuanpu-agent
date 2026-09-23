@@ -90,6 +90,14 @@ export class ChannelRouter {
     return this.#config.connectionId;
   }
 
+  isReady(): boolean {
+    return !this.#closed && this.#transport.isReady?.() === true;
+  }
+
+  connectionIssue(): 'authentication_failed' | undefined {
+    return this.#closed ? undefined : this.#transport.connectionIssue?.();
+  }
+
   bindScheduledContact(contactId: string): string | undefined {
     if (this.#closed) return undefined;
     return this.#store.bindPrivateContact(contactId, this.#config.connectionId);

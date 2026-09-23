@@ -40,6 +40,8 @@ import {
   type HostEventReceipt,
   type NotificationNavigationTarget,
   type NotificationTargetValidation,
+  type WecomConnectionSummary,
+  type WecomConnectionConfigInput,
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
@@ -55,7 +57,11 @@ import { cleanupRuntimeResources, getDesktopNavigableRun } from './runtime-host.
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
 import {
   closeWecomChannels,
+  configuredWecomDocument,
+  listWecomConnectionSummaries,
+  readWecomConnectionDocument,
   startConfiguredWecomChannels,
+  writeWecomConnectionDocument,
   writeWecomDiagnostic,
 } from './wecom-channel.js';
 
@@ -528,6 +534,63 @@ async function serve(): Promise<void> {
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
   const wecomChannels: ChannelRouter[] = [];
+  let wecomStartupDiagnostic: WecomConnectionSummary['diagnostic'] | undefined;
+  let wecomReconfiguring = false;
+  const wecomDiagnosticFor = (error: unknown): WecomConnectionSummary['diagnostic'] => {
+    const message = error instanceof Error ? error.message : '';
+    return message === 'Enterprise WeChat connection configuration is invalid.'
+      || message === 'Enabled Enterprise WeChat connection is incomplete or unsafe.'
+      ? 'configuration_invalid'
+      : message === 'Enterprise WeChat credential could not be resolved from the system Keychain.'
+        ? 'credential_unavailable'
+        : message.startsWith('Enterprise WeChat authentication failed.')
+          ? 'authentication_failed'
+        : 'connection_unavailable';
+  };
+  const reloadWecomChannels = async () => {
+    await closeWecomChannels(wecomChannels);
+    wecomChannels.splice(0);
+    try {
+      wecomChannels.push(...await startConfiguredWecomChannels({
+        appPath: home.appPath,
+        workspaceId: home.config.workingDirectory,
+        store: metadata.channels,
+        agent: agentService,
+        log: writeWecomDiagnostic,
+      }));
+      wecomStartupDiagnostic = undefined;
+    } catch (error) {
+      wecomStartupDiagnostic = wecomDiagnosticFor(error);
+      throw error;
+    }
+  };
+  const replaceWecomConnection = async (connectionId: string, waitForAuthentication: boolean) => {
+    const previousRouter = wecomChannels.find((channel) => channel.connectionId === connectionId);
+    if (previousRouter) {
+      await previousRouter.close();
+      wecomChannels.splice(wecomChannels.indexOf(previousRouter), 1);
+    }
+    const started = await startConfiguredWecomChannels({
+      appPath: home.appPath,
+      workspaceId: home.config.workingDirectory,
+      store: metadata.channels,
+      agent: agentService,
+      connectionIds: [connectionId],
+      log: writeWecomDiagnostic,
+    });
+    wecomChannels.push(...started);
+    if (!waitForAuthentication || started.length === 0) return;
+    const channel = started[0]!;
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      if (channel.isReady()) return;
+      if (channel.connectionIssue() === 'authentication_failed') {
+        throw new Error('Enterprise WeChat authentication failed. Check the Bot ID and Keychain credential.');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('Enterprise WeChat authentication did not complete within 12 seconds.');
+  };
   const scheduledChannelDelivery = createScheduledImDelivery(wecomChannels);
   const schedulerCaller: AuthenticatedAgentCaller = {
     entryPoint: 'scheduler',
@@ -599,6 +662,24 @@ async function serve(): Promise<void> {
     throw new Error('Agent run is not available to the desktop caller.');
   };
 
+  const submitDesktopMessage = async (request: IncomingMessage) => {
+    const body = await readJsonBody(request);
+    if (!isRecord(body) || typeof body.message !== 'string' || !body.message.trim()) {
+      return { error: 'A non-empty message is required.' } as const;
+    }
+    const submission = await agentService.submit(desktopCaller, {
+      contractVersion: AGENT_CONTRACT_VERSION,
+      entryPoint: 'desktop',
+      identity: desktopCaller.identity,
+      workspaceId: home.config.workingDirectory,
+      conversation: { namespace: 'desktop', conversationId: 'default' },
+      input: { type: 'text', text: body.message.trim() },
+      idempotencyKey: randomUUID(),
+      delivery: { kind: 'desktop' },
+    });
+    return submission.accepted ? { receipt: submission } as const : { error: submission.message } as const;
+  };
+
   let shuttingDown = false;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -626,9 +707,85 @@ async function serve(): Promise<void> {
             piVersion: PI_UPSTREAM_VERSION,
             mcpTools: piCapabilityTools.map((tool) => tool.name),
             configRoot: home.root,
+            workingDirectory: home.config.workingDirectory,
             notificationsEnabled: home.config.notifications?.enabled ?? true,
           }),
         );
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.wecomConnections && request.method === 'GET') {
+        response.end(JSON.stringify(await listWecomConnectionSummaries(
+          home.appPath, wecomChannels, wecomStartupDiagnostic,
+        )));
+        return;
+      }
+      const wecomTestPath = url.pathname.startsWith(`${RUNTIME_ROUTES.wecomConnections}/`)
+        ? url.pathname.slice(RUNTIME_ROUTES.wecomConnections.length + 1).split('/')
+        : undefined;
+      if (wecomTestPath?.length === 2 && wecomTestPath[1] === 'test' && request.method === 'POST') {
+        const connectionId = decodeURIComponent(wecomTestPath[0]!);
+        const list = await listWecomConnectionSummaries(home.appPath, wecomChannels, wecomStartupDiagnostic);
+        const connection = list.connections.find((item) => item.connectionId === connectionId);
+        if (!connection) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Connection not found.' }));
+          return;
+        }
+        if (!connection.enabled || connection.status === 'connected') {
+          response.end(JSON.stringify(connection));
+          return;
+        }
+        if (wecomReconfiguring) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ error: 'Connection update is already in progress.' }));
+          return;
+        }
+        wecomReconfiguring = true;
+        try {
+          await replaceWecomConnection(connectionId, true);
+          const checked = await listWecomConnectionSummaries(home.appPath, wecomChannels, wecomStartupDiagnostic);
+          response.end(JSON.stringify(checked.connections.find((item) => item.connectionId === connectionId)));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: `Connection test failed (${wecomDiagnosticFor(error)}).` }));
+        } finally {
+          wecomReconfiguring = false;
+        }
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.wecomConnections && request.method === 'POST') {
+        if (wecomReconfiguring) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ error: 'Connection update is already in progress.' }));
+          return;
+        }
+        wecomReconfiguring = true;
+        try {
+          const input = await readJsonBody(request) as WecomConnectionConfigInput;
+          const previous = await readWecomConnectionDocument(home.appPath);
+          const next = configuredWecomDocument(previous, input);
+          await writeWecomConnectionDocument(home.appPath, next);
+          try {
+            const before = previous.connections.find((connection) => connection.connectionId === input.connectionId);
+            const after = next.connections.find((connection) => connection.connectionId === input.connectionId)!;
+            if (after.enabled || Boolean(before?.enabled)) {
+              await replaceWecomConnection(input.connectionId, after.enabled);
+            }
+          } catch (activationError) {
+            await writeWecomConnectionDocument(home.appPath, previous);
+            await replaceWecomConnection(input.connectionId, false).catch(() => undefined);
+            throw new Error(`Connection could not be activated (${wecomDiagnosticFor(activationError)}); previous configuration was restored.`);
+          }
+          const list = await listWecomConnectionSummaries(home.appPath, wecomChannels, wecomStartupDiagnostic);
+          response.statusCode = 200;
+          response.end(JSON.stringify(list.connections.find((item) => item.connectionId === input.connectionId)));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        } finally {
+          wecomReconfiguring = false;
+        }
         return;
       }
 
@@ -739,24 +896,20 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.chat && request.method === 'POST') {
-        const body = await readJsonBody(request) as { message?: unknown };
-        if (typeof body.message !== 'string' || !body.message.trim()) {
+        const result = await submitDesktopMessage(request);
+        if ('error' in result) {
           response.statusCode = 400;
-          response.end(JSON.stringify({ error: 'A non-empty message is required.' }));
+          response.end(JSON.stringify({ error: result.error }));
           return;
         }
-        const submission = await agentService.submit(desktopCaller, {
-          contractVersion: AGENT_CONTRACT_VERSION,
-          entryPoint: 'desktop',
-          identity: desktopCaller.identity,
-          workspaceId: home.config.workingDirectory,
-          conversation: { namespace: 'desktop', conversationId: 'default' },
-          input: { type: 'text', text: body.message.trim() },
-          idempotencyKey: randomUUID(),
-          delivery: { kind: 'desktop' },
-        });
-        if (!submission.accepted) throw new Error(submission.message);
-        response.end(JSON.stringify(await waitForDesktopRun(submission.runId)));
+        response.end(JSON.stringify(await waitForDesktopRun(result.receipt.runId)));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.chatSubmit && request.method === 'POST') {
+        const result = await submitDesktopMessage(request);
+        response.statusCode = 'error' in result ? 400 : 202;
+        response.end(JSON.stringify('error' in result ? { error: result.error } : result.receipt));
         return;
       }
 
@@ -790,9 +943,12 @@ async function serve(): Promise<void> {
         return;
       }
       if (agentRunPath?.length === 2 && agentRunPath[1] === 'cancel' && request.method === 'POST') {
+        const runId = decodeURIComponent(agentRunPath[0]!);
+        const run = await getDesktopNavigableRun(agentService, runId, desktopCaller, schedulerCaller);
+        const caller = run?.owner.entryPoint === 'scheduler' ? schedulerCaller : desktopCaller;
         const receipt = await agentService.cancel(
-          desktopCaller,
-          decodeURIComponent(agentRunPath[0]!),
+          caller,
+          runId,
         );
         response.statusCode = receipt.result === 'not_found' ? 404 : 200;
         response.end(JSON.stringify(receipt));
@@ -808,6 +964,15 @@ async function serve(): Promise<void> {
       })) return;
       if (url.pathname === RUNTIME_ROUTES.schedules && request.method === 'GET') {
         response.end(JSON.stringify(scheduler.list()));
+        return;
+      }
+      if (url.pathname === `${RUNTIME_ROUTES.schedules}/preview` && request.method === 'POST') {
+        try {
+          response.end(JSON.stringify(scheduler.preview(await readJsonBody(request))));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
         return;
       }
       const schedulePath = url.pathname.startsWith(`${RUNTIME_ROUTES.schedules}/`)
@@ -1351,22 +1516,9 @@ async function serve(): Promise<void> {
   try {
     parentMonitor = installParentProcessMonitor(parentPid, shutdown);
     try {
-      wecomChannels.push(...await startConfiguredWecomChannels({
-        appPath: home.appPath,
-        workspaceId: home.config.workingDirectory,
-        store: metadata.channels,
-        agent: agentService,
-        log: writeWecomDiagnostic,
-      }));
+      await reloadWecomChannels();
     } catch (error) {
-      const message = error instanceof Error ? error.message : '';
-      const event = message === 'Enterprise WeChat connection configuration is invalid.'
-        || message === 'Enabled Enterprise WeChat connection is incomplete or unsafe.'
-        ? 'configuration_invalid'
-        : message === 'Enterprise WeChat credential could not be resolved from the system Keychain.'
-          ? 'credential_unavailable'
-          : 'connection_unavailable';
-      console.warn(`[wecom] ${event}`);
+      console.warn(`[wecom] ${wecomDiagnosticFor(error)}`);
     }
     await scheduler.tick();
   } catch (error) {

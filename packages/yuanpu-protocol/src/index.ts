@@ -1,7 +1,13 @@
 export const PROTOCOL_VERSION = 3;
 
 import type { NotificationNavigationTarget } from './host-events.js';
-import type { AgentRunRecord } from './agent.js';
+import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord } from './agent.js';
+import type {
+  ScheduleHistoryRecord,
+  ScheduleInput,
+  SchedulePrivateContact,
+  ScheduleRecord,
+} from './scheduler.js';
 
 export * from './agent.js';
 export * from './host-events.js';
@@ -11,12 +17,14 @@ export const RUNTIME_ROUTES = {
   health: '/v1/health',
   greeting: '/v1/greeting',
   chat: '/v1/chat',
+  chatSubmit: '/v1/chat/submit',
   agentRuns: '/v1/agent/runs',
   hostEvents: '/v1/host/events',
   hostEventReceipts: '/v1/host/events/receipts',
   notificationTargetValidation: '/v1/notifications/targets/validate',
   schedules: '/v1/schedules',
   channelScheduleTargets: '/v1/channels/schedule-targets',
+  wecomConnections: '/v1/connections/wecom',
   localSkills: '/v1/skills/local',
   plugins: '/v1/plugins',
   pluginSearch: '/v1/plugins/search',
@@ -39,11 +47,34 @@ export interface RuntimeInfo {
   piVersion: string;
   mcpTools: readonly string[];
   configRoot: string;
+  workingDirectory?: string;
   notificationsEnabled: boolean;
 }
 
 export interface RuntimeGreeting {
   message: string;
+}
+
+/** Deliberately excludes bot ID, credential reference, secret and sender digests. */
+export interface WecomConnectionSummary {
+  connectionId: string;
+  enabled: boolean;
+  pairedSenderCount: number;
+  groupEnabled: boolean;
+  status: 'disabled' | 'connected' | 'connecting' | 'unavailable' | 'invalid_configuration';
+  diagnostic?: 'configuration_invalid' | 'credential_unavailable' | 'connection_unavailable' | 'authentication_failed';
+}
+
+export interface WecomConnectionList {
+  status: 'ok' | 'invalid_configuration';
+  connections: WecomConnectionSummary[];
+}
+
+export interface WecomConnectionConfigInput {
+  connectionId: string;
+  enabled: boolean;
+  /** Required only when creating a connection. Never returned by a management response. */
+  botId?: string;
 }
 
 export interface ChatToolEvent {
@@ -213,7 +244,21 @@ export interface DesktopBridge {
   runtimeInfo(): Promise<RuntimeInfo>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
+  submitDesktopMessage(message: string): Promise<AgentRunReceipt>;
   getAgentRun(runId: string): Promise<AgentRunRecord>;
+  cancelAgentRun(runId: string): Promise<AgentRunCancellationReceipt>;
+  listSchedules(): Promise<ScheduleRecord[]>;
+  createSchedule(input: ScheduleInput): Promise<ScheduleRecord>;
+  previewSchedule(input: ScheduleInput): Promise<{ nextTriggerAt?: string }>;
+  updateSchedule(scheduleId: string, input: ScheduleInput): Promise<ScheduleRecord>;
+  setScheduleEnabled(scheduleId: string, enabled: boolean): Promise<ScheduleRecord>;
+  getScheduleHistory(scheduleId: string, limit?: number): Promise<ScheduleHistoryRecord[]>;
+  listSchedulePrivateContacts(): Promise<SchedulePrivateContact[]>;
+  bindSchedulePrivateContact(contactId: string): Promise<{ routeId: string }>;
+  revokeSchedulePrivateTarget(routeId: string): Promise<void>;
+  listWecomConnections(): Promise<WecomConnectionList>;
+  testWecomConnection(connectionId: string): Promise<WecomConnectionSummary>;
+  saveWecomConnection(input: WecomConnectionConfigInput): Promise<WecomConnectionSummary>;
   checkRuntimeUpdate(): Promise<RuntimeUpdateState>;
   checkDesktopUpdate(): Promise<void>;
   searchPlugins(query: string): Promise<PluginSearchResult[]>;

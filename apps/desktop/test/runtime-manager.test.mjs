@@ -64,6 +64,23 @@ test('loads a validated notification run target through the authenticated Runtim
   assert.throws(() => manager.getAgentRun(''), /runId must be a non-empty string/);
 });
 
+test('management bridge uses authenticated schedule routes and handles empty revoke responses', async (context) => {
+  const { manager } = await createManager(context, 'management');
+  assert.equal((await manager.listSchedules())[0].scheduleId, 'schedule-fixture');
+  assert.equal((await manager.previewSchedule({})).nextTriggerAt, '2026-09-23T01:00:00.000Z');
+  assert.equal((await manager.listWecomConnections()).connections[0].status, 'connected');
+  assert.equal((await manager.testWecomConnection('test')).status, 'connected');
+  assert.equal((await manager.saveWecomConnection({ connectionId: 'test', enabled: false })).status, 'disabled');
+  assert.equal((await manager.submitDesktopMessage('fixture message')).runId, 'run-fixture');
+  assert.equal((await manager.listSchedulePrivateContacts())[0].contactId, 'contact-fixture');
+  assert.equal((await manager.getScheduleHistory('schedule-fixture', 3))[0].runId, 'run-fixture');
+  assert.equal((await manager.setScheduleEnabled('schedule-fixture', false)).enabled, false);
+  assert.equal((await manager.cancelAgentRun('run-fixture')).result, 'already_terminal');
+  await manager.revokeSchedulePrivateTarget('route-fixture');
+  assert.throws(() => manager.getScheduleHistory('schedule-fixture', 201), /limit must be an integer/);
+  assert.throws(() => manager.cancelAgentRun(''), /runId must be a non-empty string/);
+});
+
 test('stop cancels a start that has not spawned its Runtime yet', async (context) => {
   const { manager, eventFile } = await createManager(context, 'healthy');
   const starting = manager.start().then(

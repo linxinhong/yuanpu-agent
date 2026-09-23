@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -101,6 +101,61 @@ test('optional Enterprise WeChat startup failure does not prevent Runtime readin
       assert.doesNotMatch(stderr, /fixture-bot|bot-secret/);
     });
   }
+});
+
+test('connection management preserves the previous config when an enabled credential is unavailable', async (context) => {
+  const home = await mkdtemp(join(tmpdir(), 'yuanpu-connection-management-'));
+  const token = randomBytes(32).toString('hex');
+  const connectionId = `imc_${randomUUID()}`;
+  const approvalPublicKey = generateKeyPairSync('ed25519').publicKey
+    .export({ type: 'spki', format: 'der' }).toString('base64');
+  const child = spawn(process.execPath, ['dist/index.cjs', '--serve', '--port', '0'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, YUANPU_HOME: home, YUANPU_PYTHON_MCP_EXECUTABLE: '', YUANPU_PYTHON_MCP_ROOT: '' },
+  });
+  child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
+  context.after(async () => {
+    child.kill();
+    await rm(home, { recursive: true, force: true });
+  });
+  const ready = await new Promise((resolve, reject) => {
+    let stdout = '';
+    const timeout = setTimeout(() => reject(new Error('Runtime did not become ready')), 5_000);
+    child.once('error', reject);
+    child.once('exit', (code) => reject(new Error(`Runtime exited before ready: ${code}`)));
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      const newline = stdout.indexOf('\n');
+      if (newline < 0) return;
+      clearTimeout(timeout);
+      resolve(JSON.parse(stdout.slice(0, newline)));
+    });
+  });
+  const root = `http://${ready.host}:${ready.port}`;
+  const send = async (path, method = 'GET', body) => fetch(`${root}${path}`, {
+    method,
+    headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const created = await send('/v1/connections/wecom', 'POST', {
+    connectionId, botId: 'fixture-bot', enabled: false,
+  });
+  assert.equal(created.status, 200);
+  const createdBody = await created.text();
+  assert.doesNotMatch(createdBody, /fixture-bot|bot-secret/);
+  assert.equal(JSON.parse(createdBody).status, 'disabled');
+  const checked = await send(`/v1/connections/wecom/${connectionId}/test`, 'POST');
+  assert.equal((await checked.json()).status, 'disabled');
+  const failed = await send('/v1/connections/wecom', 'POST', { connectionId, enabled: true });
+  assert.equal(failed.status, 400);
+  assert.match((await failed.json()).error, /previous configuration was restored/);
+  const persisted = JSON.parse(await readFile(join(home, 'app', 'connections', 'wecom.json'), 'utf8'));
+  assert.equal(persisted.connections[0].enabled, false);
+  const listed = await send('/v1/connections/wecom');
+  assert.equal((await listed.json()).connections[0].status, 'disabled');
+  assert.equal((await send('/v1/chat/submit', 'POST', { message: '' })).status, 400);
+  assert.equal((await send('/v1/health')).status, 200);
 });
 
 test('runtime server exposes its protocol and greeting', async (context) => {
@@ -456,6 +511,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     piVersion: '0.86.1',
     mcpTools: ['search_capabilities', 'execute_capability'],
     configRoot: home,
+    workingDirectory: runtimeConfig.workingDirectory,
     notificationsEnabled: true,
   });
   assert.deepEqual(greeting, { message: 'Hello, Integration!' });

@@ -59,6 +59,56 @@ const server = createServer((request, response) => {
     }));
     return;
   }
+  if (mode === 'management') {
+    const reply = (status, body) => {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(body));
+    };
+    if (request.url === '/v1/schedules' && request.method === 'GET') {
+      reply(200, [{ scheduleId: 'schedule-fixture', enabled: true }]);
+      return;
+    }
+    if (request.url === '/v1/schedules/preview' && request.method === 'POST') {
+      reply(200, { nextTriggerAt: '2026-09-23T01:00:00.000Z' });
+      return;
+    }
+    if (request.url === '/v1/connections/wecom' && request.method === 'GET') {
+      reply(200, { status: 'ok', connections: [{ connectionId: 'test', enabled: true, status: 'connected' }] });
+      return;
+    }
+    if (request.url === '/v1/connections/wecom' && request.method === 'POST') {
+      reply(200, { connectionId: 'test', enabled: false, status: 'disabled', pairedSenderCount: 0, groupEnabled: false });
+      return;
+    }
+    if (request.url === '/v1/chat/submit' && request.method === 'POST') {
+      reply(202, { accepted: true, runId: 'run-fixture', status: 'queued', duplicate: false });
+      return;
+    }
+    if (request.url === '/v1/connections/wecom/test/test' && request.method === 'POST') {
+      reply(200, { connectionId: 'test', enabled: true, status: 'connected' });
+      return;
+    }
+    if (request.url === '/v1/channels/schedule-targets' && request.method === 'GET') {
+      reply(200, [{ contactId: 'contact-fixture', connectionId: 'test', lastSeenAt: '2026-09-23T00:00:00Z' }]);
+      return;
+    }
+    if (request.url === '/v1/schedules/schedule-fixture/history?limit=3' && request.method === 'GET') {
+      reply(200, [{ triggerKey: 'trigger-fixture', runId: 'run-fixture' }]);
+      return;
+    }
+    if (request.url === '/v1/agent/runs/run-fixture/cancel' && request.method === 'POST') {
+      reply(200, { runId: 'run-fixture', result: 'already_terminal', status: 'succeeded' });
+      return;
+    }
+    if (request.url === '/v1/schedules/schedule-fixture/disable' && request.method === 'POST') {
+      reply(200, { scheduleId: 'schedule-fixture', enabled: false });
+      return;
+    }
+    if (request.url === '/v1/channels/schedule-targets/route-fixture' && request.method === 'DELETE') {
+      response.writeHead(204).end();
+      return;
+    }
+  }
   response.writeHead(404).end();
 });
 

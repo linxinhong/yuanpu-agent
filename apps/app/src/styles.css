@@ -90,6 +90,8 @@ button { color: inherit; }
   line-height: 1;
 }
 .nav-item.active .plugin-icon { color: #89dda0; }
+.connection-icon, .schedule-icon { display: grid; width: 18px; height: 18px; place-items: center; border: 1.5px solid currentColor; border-radius: 50%; color: #a7b5ab; font-size: 13px; line-height: 1; }
+.nav-item.active .connection-icon, .nav-item.active .schedule-icon { color: #89dda0; }
 
 .sidebar-footer { display: grid; gap: 7px; margin-top: auto; border-top: 1px solid #202c25; padding: 16px 7px 2px; }
 .footer-label { color: #829087; font-size: 11px; }
@@ -118,6 +120,8 @@ button { color: inherit; }
 .runtime-state strong { display: block; font-size: 13px; font-weight: 620; }
 .runtime-state span { display: block; margin-top: 4px; color: #69776e; font-size: 11px; }
 .runtime-meta { display: flex; align-items: center; gap: 12px; color: #87948c; font-size: 12px; }
+.runtime-link { border: 0; padding: 5px; color: #8cdb9f; background: transparent; cursor: pointer; font-size: 11px; }
+.runtime-link:disabled { cursor: not-allowed; opacity: .45; }
 .mcp-count { border-left: 1px solid #324037; padding-left: 12px; }
 
 .conversation { min-height: 0; overflow-y: auto; scrollbar-color: #34433a transparent; }
@@ -317,6 +321,13 @@ button { color: inherit; }
 .approval-heading strong { color: #eee4be; font-size: 13px; }
 .approval-card p { margin: 10px 0 0; color: #aaa17d; font-size: 11px; line-height: 1.55; }
 .approval-card code { color: #d8c977; }
+.located-run-card { width: min(720px, 100%); align-self: center; border: 1px solid #385844; border-radius: 14px; padding: 18px; background: #112018; }
+.located-run-card .approval-heading span { color: #14301d; background: #85dba0; }
+.located-run-card dl { display: grid; gap: 0; margin: 14px 0; border-top: 1px solid #2d4735; }
+.located-run-card dl div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 10px; border-bottom: 1px solid #2d4735; padding: 9px 0; font-size: 11px; }
+.located-run-card dt { color: #879c8a; }
+.located-run-card dd { margin: 0; color: #d4e6d9; overflow-wrap: anywhere; }
+.located-run-card p { max-height: 180px; overflow: auto; color: #c8dfce; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 
 .plugin-config-panel { grid-template-rows: 64px minmax(0, 1fr); }
 .config-topbar { display: flex; align-items: center; border-bottom: 1px solid #253229; padding: 0 28px; }
@@ -375,8 +386,15 @@ button { color: inherit; }
 .config-actions button:disabled { cursor: not-allowed; opacity: .4; }
 
 @media (max-width: 780px) {
-  .app-shell { grid-template-columns: 1fr; padding: 8px; }
-  .sidebar { display: none; }
+  .app-shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 8px; }
+  .sidebar { display: block; padding: 6px; border-radius: 11px; }
+  .brand, .sidebar-footer { display: none; }
+  .sidebar-nav { display: flex; gap: 2px; overflow-x: auto; }
+  .nav-item { justify-content: center; gap: 6px; min-width: 0; padding: 8px 5px; border-left: 0; border-bottom: 2px solid transparent; border-radius: 7px; }
+  .nav-item.active { border-left: 0; border-bottom-color: #77d891; }
+  .nav-item strong { font-size: 11px; white-space: nowrap; }
+  .nav-item small { display: none; }
+  .connection-icon, .schedule-icon, .plugin-icon, .conversation-icon { flex: 0 0 auto; }
   .plugin-header { min-height: 88px; padding: 0 20px; }
   .plugin-content { padding: 20px; }
   .plugin-card { grid-template-columns: 1fr; }

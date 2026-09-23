@@ -73,3 +73,11 @@ export interface ScheduleHistoryRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+/** An observed private contact; never exposes its provider user ID. */
+export interface SchedulePrivateContact {
+  contactId: string;
+  connectionId: string;
+  lastSeenAt: string;
+  boundRouteId?: string;
+}

@@ -19,6 +19,8 @@ import type {
   AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 
+import { ConnectionManagement, ScheduleManagement } from './management.js';
+
 import './styles.css';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
@@ -28,7 +30,7 @@ type ChatMessage = {
   text: string;
   tools?: ToolState[];
 };
-type AppView = 'chat' | 'skills';
+type AppView = 'chat' | 'skills' | 'connections' | 'schedules';
 type SkillTab = 'marketplace' | 'installed' | 'local' | 'updates';
 
 const initialMessages: ChatMessage[] = [{
@@ -821,9 +823,13 @@ function SkillPage({ active }: { active: boolean }) {
 function ChatPanel({
   active,
   navigationTarget,
+  onReturnToSchedules,
+  scheduleOrigin,
 }: {
   active: boolean;
   navigationTarget?: NotificationNavigationTarget;
+  onReturnToSchedules: () => void;
+  scheduleOrigin: boolean;
 }) {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
@@ -832,6 +838,9 @@ function ChatPanel({
   const [approvals, setApprovals] = useState<CapabilityApprovalSummary[]>([]);
   const [approvalBusy, setApprovalBusy] = useState<string>();
   const [locatedRun, setLocatedRun] = useState<AgentRunRecord | 'loading' | 'error'>();
+  const [activeRunId, setActiveRunId] = useState<string>();
+  const [activeRunStatus, setActiveRunStatus] = useState<AgentRunRecord['status']>();
+  const [cancelBusy, setCancelBusy] = useState(false);
   const nextId = useRef(2);
   const conversation = useRef<HTMLDivElement>(null);
   const desktop = window.yuanpu;
@@ -873,8 +882,23 @@ function ChatPanel({
   }, [desktop, navigationTarget?.runId]);
 
   useEffect(() => {
+    if (!desktop || !active || !navigationTarget?.runId || !locatedRun || typeof locatedRun === 'string') return;
+    if (['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(locatedRun.status)) return;
+    const timer = window.setInterval(() => {
+      void desktop.getAgentRun(navigationTarget.runId!).then(setLocatedRun).catch(() => setLocatedRun('error'));
+    }, 1_200);
+    return () => window.clearInterval(timer);
+  }, [desktop, active, navigationTarget?.runId, locatedRun]);
+
+  useEffect(() => {
     conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'smooth' });
   }, [messages, busy]);
+
+  useEffect(() => {
+    if (navigationTarget?.runId && locatedRun && typeof locatedRun !== 'string') {
+      conversation.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [navigationTarget?.runId, locatedRun]);
 
   async function sendMessage() {
     const text = input.trim();
@@ -883,26 +907,60 @@ function ChatPanel({
     setInput('');
     setBusy(true);
     try {
-      const result = desktop
-        ? await desktop.chat(text)
-        : {
+      if (!desktop) {
+        const result = {
             message: '这是浏览器预览回复。通过 Electron 启动后，消息会交给 Pi coding-agent。',
             tools: text.toLowerCase().includes('echo')
               ? [{ name: 'yuanpu.echo', status: 'completed' as const }]
               : [],
           };
-      setMessages((current) => [...current, {
-        id: nextId.current++,
-        role: 'assistant',
-        text: result.message,
-        tools: result.tools,
-      }]);
+        setMessages((current) => [...current, { id: nextId.current++, role: 'assistant', text: result.message, tools: result.tools }]);
+      } else {
+        const receipt = await desktop.submitDesktopMessage(text);
+        setActiveRunId(receipt.runId);
+        let terminal = false;
+        while (!terminal) {
+          const run = await desktop.getAgentRun(receipt.runId);
+          setActiveRunStatus(run.status);
+          terminal = ['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(run.status);
+          if (terminal) {
+            setMessages((current) => [...current, {
+              id: nextId.current++,
+              role: run.status === 'succeeded' ? 'assistant' : 'error',
+              text: run.status === 'succeeded'
+                ? run.output?.message ?? '任务已完成；可在运行记录中查看结果。'
+                : run.failure?.message ?? `任务结束：${run.status}`,
+              tools: run.output?.tools.map((tool) => ({ name: tool.name, status: tool.status })),
+            }]);
+          } else {
+            await new Promise((resolveWait) => window.setTimeout(resolveWait, 900));
+          }
+        }
+      }
     } catch (error) {
       setMessages((current) => [...current, { id: nextId.current++, role: 'error', text: formatError(error) }]);
       setInput(text);
     } finally {
       await refreshApprovals().catch(() => []);
+      setActiveRunId(undefined);
+      setActiveRunStatus(undefined);
       setBusy(false);
+    }
+  }
+
+  async function cancelRun(runId: string) {
+    if (!desktop || cancelBusy || !window.confirm('取消这个正在执行的任务？已经发生的外部操作无法撤销。')) return;
+    setCancelBusy(true);
+    try {
+      const receipt = await desktop.cancelAgentRun(runId);
+      if (receipt.result === 'not_found') throw new Error('任务不可用或无权取消。');
+      if (navigationTarget?.runId === runId) {
+        setLocatedRun(await desktop.getAgentRun(runId));
+      }
+    } catch (error) {
+      setMessages((current) => [...current, { id: nextId.current++, role: 'error', text: `取消失败：${formatError(error)}` }]);
+    } finally {
+      setCancelBusy(false);
     }
   }
 
@@ -968,15 +1026,32 @@ function ChatPanel({
                 : locatedRun === 'error'
                   ? '任务记录不可用'
                   : locatedRun
-                    ? `已定位任务 ${locatedRun.runId} · ${locatedRun.status} · 会话 ${locatedRun.context.conversation.conversationId}`
+                    ? `${locatedRun.owner.entryPoint === 'scheduler' ? '定时任务' : locatedRun.owner.entryPoint === 'im' ? '企业微信' : '桌面'} · ${locatedRun.status} · 会话 ${locatedRun.context.conversation.conversationId}`
                     : `已定位会话 ${navigationTarget.conversationId}`}
             </span>
+          )}
+          {scheduleOrigin && <button type="button" className="runtime-link" onClick={onReturnToSchedules}>返回定时任务</button>}
+          {locatedRun && typeof locatedRun !== 'string' && ['queued', 'running', 'waiting_approval'].includes(locatedRun.status) && locatedRun.owner.entryPoint !== 'im' && (
+            <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(locatedRun.runId)}>取消运行</button>
           )}
         </div>
       </header>
 
       <div className="conversation" ref={conversation} aria-live="polite">
         <div className="conversation-inner">
+          {locatedRun && typeof locatedRun !== 'string' && (
+            <article className="located-run-card">
+              <div className="approval-heading"><span>运行详情</span><strong>{locatedRun.owner.entryPoint === 'scheduler' ? '定时任务' : locatedRun.owner.entryPoint === 'im' ? '企业微信会话' : '桌面对话'}</strong></div>
+              <dl>
+                <div><dt>运行状态</dt><dd>{locatedRun.status}</dd></div>
+                <div><dt>会话</dt><dd>{locatedRun.context.conversation.conversationId}</dd></div>
+                <div><dt>工作区</dt><dd>{locatedRun.context.workspaceId}</dd></div>
+              </dl>
+              {locatedRun.output?.message && <p>{locatedRun.output.message}</p>}
+              {locatedRun.failure && <p role="alert">{locatedRun.failure.message}</p>}
+              {scheduleOrigin && <button type="button" className="runtime-link" onClick={onReturnToSchedules}>返回关联定时任务</button>}
+            </article>
+          )}
           {messages.map((message) => (
             <article key={message.id} className={`message ${message.role}`}>
               <div className="message-label">
@@ -1018,7 +1093,7 @@ function ChatPanel({
           {busy && (
             <article className="message assistant pending">
               <div className="message-label">YuanpuAgent</div>
-              <div className="thinking"><span /><span /><span /> Pi 正在处理</div>
+              <div className="thinking"><span /><span /><span /> {activeRunStatus === 'waiting_approval' ? '等待授权' : 'Pi 正在处理'}{activeRunId && <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(activeRunId)}>取消任务</button>}</div>
             </article>
           )}
         </div>
@@ -1046,6 +1121,7 @@ function App() {
   const [view, setView] = useState<AppView>('chat');
   const [configRoot, setConfigRoot] = useState('~/.yuanpu');
   const [notificationTarget, setNotificationTarget] = useState<NotificationNavigationTarget>();
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string>();
 
   useEffect(() => {
     void window.yuanpu?.runtimeInfo()
@@ -1055,6 +1131,7 @@ function App() {
 
   useEffect(() => window.yuanpu?.onNotificationNavigation((target) => {
     setNotificationTarget(target);
+    setSelectedScheduleId(undefined);
     setView('chat');
   }), []);
 
@@ -1085,6 +1162,24 @@ function App() {
             <span className="plugin-icon" aria-hidden="true">+</span>
             <span><strong>技能</strong><small>扩展工作能力</small></span>
           </button>
+          <button
+            className={`nav-item ${view === 'connections' ? 'active' : ''}`}
+            type="button"
+            aria-current={view === 'connections' ? 'page' : undefined}
+            onClick={() => setView('connections')}
+          >
+            <span className="connection-icon" aria-hidden="true">◇</span>
+            <span><strong>连接</strong><small>连接数据与服务</small></span>
+          </button>
+          <button
+            className={`nav-item ${view === 'schedules' ? 'active' : ''}`}
+            type="button"
+            aria-current={view === 'schedules' ? 'page' : undefined}
+            onClick={() => setView('schedules')}
+          >
+            <span className="schedule-icon" aria-hidden="true">◷</span>
+            <span><strong>定时任务</strong><small>自动执行的任务</small></span>
+          </button>
         </nav>
 
         <div className="sidebar-footer">
@@ -1094,8 +1189,18 @@ function App() {
         </div>
       </aside>
 
-      <ChatPanel active={view === 'chat'} navigationTarget={notificationTarget} />
+      <ChatPanel active={view === 'chat'} navigationTarget={notificationTarget} scheduleOrigin={Boolean(selectedScheduleId)} onReturnToSchedules={() => setView('schedules')} />
       <SkillPage active={view === 'skills'} />
+      <ConnectionManagement active={view === 'connections'} />
+      <ScheduleManagement
+        active={view === 'schedules'}
+        requestedScheduleId={selectedScheduleId}
+        onOpenRun={(runId, conversationId, scheduleId) => {
+          setSelectedScheduleId(scheduleId);
+          setNotificationTarget({ runId, conversationId });
+          setView('chat');
+        }}
+      />
     </main>
   );
 }

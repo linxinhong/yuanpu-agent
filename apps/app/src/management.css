@@ -1,0 +1,109 @@
+.management-panel { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid #26352c; border-radius: 18px; background: rgba(15, 21, 18, .96); }
+.management-header { display: flex; min-height: 108px; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #253229; padding: 20px 26px; }
+.management-header h1 { margin: 0; color: #eff5f0; font-size: 25px; letter-spacing: -.025em; }
+.management-header p { margin: 8px 0 0; color: #87948b; font-size: 12px; line-height: 1.5; }
+.management-header-actions, .management-title-row, .management-actions, .management-editor-actions { display: flex; align-items: center; gap: 10px; }
+.management-body { display: grid; grid-template-columns: minmax(270px, 32%) minmax(0, 1fr); gap: 16px; min-height: 0; padding: 16px; }
+.management-list, .management-detail { min-width: 0; min-height: 0; overflow: auto; border: 1px solid #2d4134; border-radius: 14px; background: #101814; scrollbar-color: #34433a transparent; }
+.management-list { padding: 16px 10px; }
+.management-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 8px 15px; }
+.management-list-heading strong { color: #edf3ee; font-size: 14px; }
+.management-list-heading strong span { color: #8da197; font-weight: 500; }
+.management-list-heading button { border: 0; padding: 4px; color: #87988c; background: transparent; cursor: pointer; font-size: 11px; }
+.management-items { display: grid; gap: 6px; }
+.management-item { display: grid; width: 100%; gap: 7px; border: 1px solid transparent; border-left: 3px solid transparent; border-radius: 10px; padding: 15px 13px; color: #95a39a; background: transparent; cursor: pointer; text-align: left; }
+.management-item:hover { border-color: #304738; background: #142019; }
+.management-item.selected { border-color: #375b43; border-left-color: #79d992; background: #1a2b20; }
+.management-item-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.management-item-title strong { min-width: 0; overflow: hidden; color: #e8f1e9; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.management-item > span:not(.management-item-title), .management-item small { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.management-item small { color: #a0b0a3; }
+.management-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #9ead9f; font-size: 11px; white-space: nowrap; }
+.management-status::before { display: block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ''; }
+.management-status.good { color: #83d99a; }
+.management-status.warn { color: #e1b762; }
+.management-status.bad { color: #e28e8e; }
+.management-status.muted { color: #8b998f; }
+.management-detail { padding: 20px; }
+.management-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.management-detail-heading > div:first-child { min-width: 0; }
+.management-detail-heading h2 { min-width: 0; overflow-wrap: anywhere; margin: 0; color: #edf4ee; font-size: 21px; }
+.management-detail-heading p { margin: 9px 0 0; color: #99a89d; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.management-actions { flex: 0 0 auto; }
+.management-detail button, .management-editor-actions button { border: 1px solid #405247; border-radius: 9px; padding: 9px 13px; color: #d2ded5; background: #162019; cursor: pointer; font-size: 11px; }
+.management-detail button:hover, .management-editor-actions button:hover { border-color: #6c9a76; }
+.management-detail .management-mobile-back { display: none; }
+.management-detail button:disabled, .management-editor-actions button:disabled { cursor: not-allowed; opacity: .42; }
+.management-header .management-primary, .management-detail .management-primary { border: 1px solid #4d8c5e; border-radius: 10px; padding: 11px 17px; color: #eaf7ed; background: #1b3825; cursor: pointer; font-size: 12px; font-weight: 700; }
+.management-header .management-primary:hover, .management-detail .management-primary:hover { background: #244c31; }
+.management-detail .management-primary:disabled { opacity: .42; }
+.management-facts { display: grid; gap: 0; margin: 24px 0; border: 1px solid #314336; border-radius: 12px; padding: 0 18px; }
+.management-facts > div { display: grid; grid-template-columns: 94px minmax(0, 1fr); gap: 12px; border-bottom: 1px solid #29382f; padding: 14px 0; font-size: 12px; }
+.management-facts > div:last-child { border: 0; }
+.management-facts dt { color: #87988d; }
+.management-facts dd { margin: 0; color: #dce7df; overflow-wrap: anywhere; white-space: pre-wrap; }
+.management-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 26px 0 11px; }
+.management-section-title h3 { margin: 0; color: #e8f0e9; font-size: 15px; }
+.management-section-title span { color: #87968a; font-size: 10px; }
+.management-history { display: grid; gap: 8px; }
+.management-run { display: grid; grid-template-columns: minmax(100px, 1.2fr) minmax(85px, 1fr) minmax(85px, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #2e4034; border-radius: 10px; padding: 13px; background: #121c16; }
+.management-run > div { display: grid; gap: 5px; min-width: 0; }
+.management-run time { color: #dbe7dd; font-size: 11px; }
+.management-run small, .management-run > div > span:first-child { color: #829187; font-size: 10px; }
+.management-run p { grid-column: 1 / -1; margin: 0; color: #e2a1a1; font-size: 11px; }
+.management-run p.management-run-output { max-height: 120px; overflow: auto; color: #a9bdac; line-height: 1.55; white-space: pre-wrap; }
+.management-run button { white-space: nowrap; }
+.management-empty { display: grid; gap: 9px; border: 1px dashed #324339; border-radius: 11px; margin: 10px 0; padding: 28px 14px; color: #8a9a8d; font-size: 12px; line-height: 1.5; text-align: center; }
+.management-empty strong { color: #c9d9cd; font-size: 13px; }
+.management-alert, .management-success, .management-preview, .management-note { border: 1px solid #604141; border-radius: 10px; margin: 15px 0; padding: 12px 14px; color: #eab5b5; background: #241719; font-size: 11px; line-height: 1.6; }
+.management-alert button { margin-left: 10px; }
+.management-success, .management-preview { border-color: #355d40; color: #a8e6b7; background: #14261a; }
+.management-note { border-color: #66552c; color: #ccb879; background: #211d13; }
+.management-editor { display: grid; gap: 16px; }
+.management-form { display: grid; gap: 16px; margin-top: 8px; }
+.management-form label { display: grid; gap: 7px; color: #a8b9ac; font-size: 11px; }
+.management-form input, .management-form textarea, .management-form select { width: 100%; min-width: 0; border: 1px solid #394f40; border-radius: 8px; padding: 10px 11px; color: #e7f0e9; outline: none; background: #0d1711; font-size: 12px; }
+.management-form input:focus, .management-form textarea:focus, .management-form select:focus { border-color: #75bd87; }
+.management-form textarea { resize: vertical; line-height: 1.6; }
+.management-form label small { color: #788b7d; font-size: 10px; line-height: 1.5; }
+.management-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.management-form .management-check { display: flex; align-items: center; gap: 9px; }
+.management-check input { width: auto; accent-color: #77ca8d; }
+.management-targets { display: grid; gap: 10px; border: 1px solid #334b3a; border-radius: 10px; padding: 14px; }
+.management-targets > strong { color: #cce1d0; font-size: 11px; }
+.management-targets > p { margin: 0; color: #9dad9d; font-size: 11px; line-height: 1.5; }
+.management-targets > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid #29392e; padding-top: 9px; color: #9fb0a2; font-size: 11px; }
+.management-targets button.chosen { border-color: #569368; color: #91dea5; }
+.management-editor-actions { justify-content: flex-end; border-top: 1px solid #2c3e32; padding-top: 16px; }
+.management-panel.view-hidden { display: none; }
+button:focus-visible, .management-panel input:focus-visible, .management-panel select:focus-visible, .management-panel textarea:focus-visible { outline: 2px solid #8de3a1; outline-offset: 2px; }
+
+@media (max-width: 1180px) {
+  .management-body { grid-template-columns: minmax(240px, 33%) minmax(0, 1fr); gap: 10px; padding: 10px; }
+  .management-detail { padding: 16px; }
+  .management-run { grid-template-columns: 1fr 1fr; }
+  .management-run button { justify-self: start; }
+}
+
+@media (max-width: 900px) {
+  .management-body { grid-template-columns: 1fr; overflow: auto; }
+  .management-list { overflow: visible; }
+  .management-detail { overflow: visible; }
+  .management-items { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+}
+
+@media (max-width: 780px) {
+  .management-panel { border-radius: 11px; }
+  .management-header { min-height: 78px; padding: 14px; }
+  .management-header h1 { font-size: 19px; }
+  .management-header p { display: none; }
+  .management-header-actions { gap: 7px; }
+  .management-header .management-primary { padding: 9px; }
+  .management-body { padding: 8px; }
+  .management-body:not(.mobile-detail-open) .management-detail { display: none; }
+  .management-body.mobile-detail-open .management-list { display: none; }
+  .management-detail .management-mobile-back { display: inline-flex; margin: 0 0 15px; }
+  .management-detail-heading { flex-direction: column; }
+  .management-form-grid { grid-template-columns: 1fr; }
+  .management-facts > div { grid-template-columns: 80px minmax(0, 1fr); }
+}

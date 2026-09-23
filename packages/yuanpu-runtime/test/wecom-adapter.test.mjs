@@ -208,3 +208,19 @@ test('proactive private delivery uses userid and distinguishes provider rejectio
     status: 'failed', code: 'transport_closed',
   });
 });
+
+test('reports authentication failure without exposing SDK error contents and clears it on success', async () => {
+  const client = new FixtureClient();
+  const logs = [];
+  const transport = new WecomSdkTransport({
+    connectionId: 'imc_fixture', botId: 'bot-fixture', secret: 'secret-fixture',
+    log: (record) => logs.push(record), clientFactory: () => client,
+  });
+  transport.connect(() => undefined);
+  client.emit('error', new Error('Authentication failed: fixture-sensitive-detail'));
+  assert.equal(transport.connectionIssue(), 'authentication_failed');
+  assert.equal(JSON.stringify(logs).includes('fixture-sensitive-detail'), false);
+  client.emit('authenticated');
+  assert.equal(transport.connectionIssue(), undefined);
+  await transport.close();
+});

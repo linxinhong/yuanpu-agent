@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -12,6 +13,11 @@ import {
   type ChannelTransport,
   type RedactedChannelLogSink,
 } from '@yuanpu-agent/runtime-kit';
+import type {
+  WecomConnectionConfigInput,
+  WecomConnectionList,
+  WecomConnectionSummary,
+} from '@yuanpu-agent/protocol';
 
 const execFileAsync = promisify(execFile);
 const digestPattern = /^[a-f0-9]{64}$/;
@@ -31,9 +37,68 @@ interface PersistedWecomConnection {
   acceptedMessageTypes?: string[];
 }
 
-interface PersistedWecomDocument {
+export interface PersistedWecomDocument {
   schemaVersion: 1;
   connections: PersistedWecomConnection[];
+}
+
+export function configuredWecomDocument(
+  document: PersistedWecomDocument,
+  input: WecomConnectionConfigInput,
+): PersistedWecomDocument {
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || Object.keys(input).some((key) => !['connectionId', 'enabled', 'botId'].includes(key))
+    || typeof input.connectionId !== 'string'
+    || !/^[A-Za-z0-9._-]{1,128}$/.test(input.connectionId)
+    || typeof input.enabled !== 'boolean'
+    || (input.botId !== undefined && (typeof input.botId !== 'string' || !input.botId.trim() || input.botId.length > 256))) {
+    throw new Error('Invalid Enterprise WeChat connection configuration.');
+  }
+  const existing = document.connections.find((connection) => connection.connectionId === input.connectionId);
+  if (existing && input.botId !== undefined) {
+    throw new Error('An existing bot ID cannot be changed; create a new connection instead.');
+  }
+  if (!existing && !input.botId) {
+    throw new Error('Bot ID is required for a new connection.');
+  }
+  const updated: PersistedWecomConnection = existing
+    ? { ...existing, enabled: input.enabled }
+    : {
+        enabled: input.enabled,
+        provider: 'wecom',
+        connectionId: input.connectionId,
+        providerAccountRef: input.botId!.trim(),
+        credentialRefs: { botSecret: `keychain:yuanpu/im/${input.connectionId}/bot-secret` },
+        directMessagePolicy: 'paired-only',
+        groupPolicy: 'allowlist-paired-sender-and-provider-at-mention',
+        groupEnabled: false,
+        pairedSenderDigests: [],
+        groupAllowlistDigests: [],
+        acceptedMessageTypes: ['text'],
+      };
+  const next = {
+    schemaVersion: 1 as const,
+    connections: existing
+      ? document.connections.map((connection) => connection.connectionId === input.connectionId ? updated : connection)
+      : [...document.connections, updated],
+  };
+  return parseDocument(next);
+}
+
+export async function writeWecomConnectionDocument(
+  appPath: string,
+  document: PersistedWecomDocument,
+): Promise<void> {
+  const validated = parseDocument(document);
+  const directory = join(appPath, 'connections');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const temporary = join(directory, `.wecom-${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, `${JSON.stringify(validated, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+    await rename(temporary, join(directory, 'wecom.json'));
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 export interface StartConfiguredWecomChannelOptions {
@@ -41,6 +106,7 @@ export interface StartConfiguredWecomChannelOptions {
   workspaceId: string;
   store: ChannelStore;
   agent: AgentService;
+  connectionIds?: readonly string[];
   resolveCredential?: (reference: string) => Promise<string>;
   createTransport?: (input: {
     connectionId: string;
@@ -163,6 +229,39 @@ export async function readWecomConnectionDocument(appPath: string): Promise<Pers
   }
 }
 
+export async function listWecomConnectionSummaries(
+  appPath: string,
+  channels: readonly ChannelRouter[],
+  diagnostic?: WecomConnectionSummary['diagnostic'],
+): Promise<WecomConnectionList> {
+  let document: PersistedWecomDocument;
+  try {
+    document = await readWecomConnectionDocument(appPath);
+  } catch {
+    return { status: 'invalid_configuration', connections: [] };
+  }
+  return {
+    status: 'ok',
+    connections: document.connections.map((connection) => {
+      const channel = channels.find((candidate) => candidate.connectionId === connection.connectionId);
+      const status = !connection.enabled
+        ? 'disabled'
+        : !channel
+          ? 'unavailable'
+          : channel.isReady() ? 'connected' : channel.connectionIssue() ? 'unavailable' : 'connecting';
+      return {
+        connectionId: connection.connectionId,
+        enabled: connection.enabled,
+        pairedSenderCount: connection.pairedSenderDigests?.length ?? 0,
+        groupEnabled: connection.groupEnabled ?? false,
+        status,
+        ...(status === 'unavailable' && (channel?.connectionIssue() ?? diagnostic)
+          ? { diagnostic: channel?.connectionIssue() ?? diagnostic } : {}),
+      } satisfies WecomConnectionSummary;
+    }),
+  };
+}
+
 export async function resolveSystemKeychainCredential(reference: string): Promise<string> {
   if (!credentialRefPattern.test(reference)) {
     throw new Error('Enterprise WeChat credential reference is invalid.');
@@ -197,6 +296,7 @@ export async function startConfiguredWecomChannels(
   const routers: ChannelRouter[] = [];
   try {
     for (const connection of document.connections) {
+      if (options.connectionIds && !options.connectionIds.includes(connection.connectionId)) continue;
       if (!connection.enabled) continue;
       if (
         !connection.providerAccountRef

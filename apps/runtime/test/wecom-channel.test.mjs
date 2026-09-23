@@ -1,13 +1,73 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  configuredWecomDocument,
+  listWecomConnectionSummaries,
   readWecomConnectionDocument,
   startConfiguredWecomChannels,
+  writeWecomConnectionDocument,
 } from '../src/wecom-channel.ts';
+
+test('management updates preserve pairing and write only strict Keychain references', async () => {
+  await withConfig(enabledConnection(), async (appPath) => {
+    const original = await readWecomConnectionDocument(appPath);
+    const disabled = configuredWecomDocument(original, { connectionId: 'imc_fixture', enabled: false });
+    assert.equal(disabled.connections[0].providerAccountRef, 'bot-fixture');
+    assert.deepEqual(disabled.connections[0].pairedSenderDigests, ['a'.repeat(64)]);
+    assert.throws(() => configuredWecomDocument(original, {
+      connectionId: 'imc_fixture', enabled: true, botId: 'different-bot',
+    }), /cannot be changed/);
+    const newConnection = configuredWecomDocument(disabled, {
+      connectionId: 'new_fixture', enabled: false, botId: 'new-bot',
+    });
+    await writeWecomConnectionDocument(appPath, newConnection);
+    const persisted = await readWecomConnectionDocument(appPath);
+    assert.equal(persisted.connections.length, 2);
+    assert.equal(persisted.connections[1].credentialRefs.botSecret, 'keychain:yuanpu/im/new_fixture/bot-secret');
+    assert.equal(persisted.connections[1].groupEnabled, false);
+    assert.equal((await stat(join(appPath, 'connections', 'wecom.json'))).mode & 0o777, 0o600);
+    assert.throws(() => configuredWecomDocument(persisted, {
+      connectionId: 'new_fixture', enabled: true, secret: 'fixture-plaintext',
+    }), /Invalid Enterprise WeChat connection configuration/);
+  });
+});
+
+test('connection summaries expose live readiness without account or credential values', async () => {
+  await withConfig(enabledConnection(), async (appPath) => {
+    const disconnected = await listWecomConnectionSummaries(appPath, [], 'credential_unavailable');
+    assert.deepEqual(disconnected, {
+      status: 'ok',
+      connections: [{
+        connectionId: 'imc_fixture',
+        enabled: true,
+        pairedSenderCount: 1,
+        groupEnabled: false,
+        status: 'unavailable',
+        diagnostic: 'credential_unavailable',
+      }],
+    });
+    assert.equal(JSON.stringify(disconnected).includes('bot-fixture'), false);
+    assert.equal(JSON.stringify(disconnected).includes('bot-secret'), false);
+    const connected = await listWecomConnectionSummaries(appPath, [
+      { connectionId: 'imc_fixture', isReady: () => true },
+    ]);
+    assert.equal(connected.connections[0].status, 'connected');
+    const failed = await listWecomConnectionSummaries(appPath, [
+      { connectionId: 'imc_fixture', isReady: () => false, connectionIssue: () => 'authentication_failed' },
+    ]);
+    assert.equal(failed.connections[0].status, 'unavailable');
+    assert.equal(failed.connections[0].diagnostic, 'authentication_failed');
+  });
+  await withConfig({ schemaVersion: 2, connections: [] }, async (appPath) => {
+    assert.deepEqual(await listWecomConnectionSummaries(appPath, []), {
+      status: 'invalid_configuration', connections: [],
+    });
+  });
+});
 
 async function withConfig(document, run) {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-wecom-config-'));
@@ -137,6 +197,31 @@ test('enabled config resolves only the Keychain reference at runtime and closes 
     assert.equal(transport.connected, true);
     await routers[0].close();
     assert.equal(transport.closed, true);
+  });
+});
+
+test('targeted startup leaves unrelated enabled connections untouched', async () => {
+  const document = enabledConnection();
+  document.connections.push({
+    ...document.connections[0],
+    connectionId: 'imc_other',
+    providerAccountRef: 'other-bot-fixture',
+    credentialRefs: { botSecret: 'keychain:yuanpu/im/imc_other/bot-secret' },
+  });
+  await withConfig(document, async (appPath) => {
+    const started = [];
+    const routers = await startConfiguredWecomChannels({
+      appPath, workspaceId: '/fixture-workspace', store: store(), agent: agent(),
+      connectionIds: ['imc_other'],
+      resolveCredential: async () => 'fixture-secret',
+      createTransport: ({ connectionId }) => {
+        started.push(connectionId);
+        return { connect() {}, ready: async () => {}, reply: async () => ({ status: 'accepted' }), close() {} };
+      },
+    });
+    assert.deepEqual(started, ['imc_other']);
+    assert.deepEqual(routers.map((router) => router.connectionId), ['imc_other']);
+    await routers[0].close();
   });
 });
 
