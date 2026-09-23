@@ -967,7 +967,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
-    status: in_progress
+    status: done
     goal: "验证从当前 Pi 0.86.1 镜像升级到官方 v0.87.1 对 Yuanpu 构建、Runtime、SEA 与关键业务入口的兼容性，为是否正式升级提供证据。"
     scope:
       in: ["以官方 v0.87.1 tag 和精确 commit 制作隔离同步候选", "对比 Pi 公共接口与 Yuanpu 适配边界", "在候选树执行构建、类型、单测、SEA 与受控入口烟测并记录差异"]
@@ -990,10 +990,14 @@ tasks:
       owner: "codex-d21sep23-12136-12136"
       attempts: 0
       claimed_at: "2026-09-23T12:26:07.216Z"
-      completed_at: null
+      completed_at: "2026-09-23T12:44:04.153Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-030"
       branch: "task/task-031-pi-0871-isolated-test"
-      evidence: []
+      evidence:
+        - {type: "assertion", check: "official tag and isolated candidate provenance", status: "passed", summary: "Official v0.87.1 tag f07218c was cloned without changing ../pi. Candidate da8e488's 12 mirrored Pi package trees and shared build files were independently compared with the tag; Runtime dependency resolved to local Pi 0.87.1. Candidate was not merged into main, which remains 0.86.1."}
+        - {type: "assertion", check: "candidate compatibility on macOS arm64", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0: Pi and Runtime builds, focused Pi/Agent/scheduler/IM tests, pnpm check, native build/smoke, desktop package and isolated four-launch packaged App probe all exited 0. Runner IDs and source/fixture limits are in .tasks/verification/TASK-031/results.md. Build-time ignored model-data hydration changed the runner fingerprint; it is not claimed as a tracked version diff."}
+        - {type: "assertion", check: "upgrade recommendation and limits", status: "passed", summary: "The report identifies the required future Runtime dependency pin and PI_UPSTREAM_VERSION metadata changes, and leaves live provider/WeCom, real-data migration, Windows/Linux and production signing unverified. No formal Pi upgrade was performed. Independent read-only reviewer checked provenance, runner outcomes and claim boundaries."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-031.md and .tasks/verification/TASK-031/results.md on main 345ecdb; candidate source remains separate at da8e488."}
       follow_up_candidates: []
   - id: TASK-023
     title: "确定微信 ClawBot 适配架构与安全边界"
