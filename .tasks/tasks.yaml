@@ -967,7 +967,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-032
     title: "修复非 macOS 企业微信凭据诊断"
-    status: in_progress
+    status: done
     goal: "修复 TASK-021 在 Linux CI 发现的 Keychain 不可用错误分类，使可选企业微信插件失败时仍能打开 Runtime，且诊断准确。"
     scope:
       in: ["非 macOS 系统 Keychain 不可用时的脱敏诊断分类", "覆盖原失败路径的 Runtime 回归测试"]
@@ -990,10 +990,14 @@ tasks:
       owner: "codex-task021-followup-20260923-12136"
       attempts: 0
       claimed_at: "2026-09-23T13:43:36.414Z"
-      completed_at: null
+      completed_at: "2026-09-23T13:51:26.845Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-032"
       branch: "task/task-032-keychain-diagnostic"
-      evidence: []
+      evidence:
+        - {type: "assertion", check: "Linux unavailable Keychain classification and Runtime readiness", status: "passed", summary: "Integrated main 56c6b77 on ubuntu-24.04: GitHub CI run 35869667122 passed full pnpm check including apps/runtime/test/runtime.test.mjs. The previously failing unavailable-Keychain scenario now classifies credential_unavailable while Runtime becomes ready and health responds 200; its test also asserts no fixture Bot ID or secret reference in stderr. Source repair ea0ca3a."}
+        - {type: "assertion", check: "macOS existing Keychain and config diagnostics", status: "passed", summary: "On macOS arm64 at task branch ea0ca3a, Node 24.15.0/pnpm 11.22.0 focused Runtime and WeCom tests passed (runner 1790171167167651000.json). Full pnpm check passed (runner 1790171103095862000.json). Non-macOS mapping uses the same sanitized credential-unavailable error as the preexisting macOS missing-Keychain path; configuration-invalid cases remain covered by the same suite."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Passed on task branch ea0ca3a on macOS arm64 and on integrated main 56c6b77 in ubuntu-24.04 GitHub CI run 35869667122. No personal .env, Keychain entry or real WeCom session was accessed."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-032.md at main 1f748f7 records cause, repair, Linux CI and remaining cross-platform/secret-storage boundaries."}
       follow_up_candidates: []
   - id: TASK-033
     title: "区分企业微信运行与回复投递状态"
