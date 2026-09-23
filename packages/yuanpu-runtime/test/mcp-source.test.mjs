@@ -63,7 +63,10 @@ test('real Python MCP discovery and execution preserve structured results and er
   const stages = process.platform === 'win32'
     ? await readFile(windowsDiagnosticFile, 'utf8').catch(() => 'no supervisor stage')
     : '';
-  assert.ok(echo, `${JSON.stringify(search)}; stages=${stages}`);
+  const childStderr = process.platform === 'win32'
+    ? await readFile(`${windowsDiagnosticFile}.stderr`, 'utf8').catch(() => 'no child stderr')
+    : '';
+  assert.ok(echo, `${JSON.stringify(search)}; stages=${stages}; child stderr=${childStderr}`);
   const result = await server.execute({ name: echo.name, arguments: { text: '源谱' } });
   assert.deepEqual(result.structuredContent, { text: '源谱', length: 2 });
   assert.equal(result.content[0].type, 'text');

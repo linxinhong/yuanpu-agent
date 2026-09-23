@@ -48,7 +48,7 @@ const WINDOWS_JOB_SUPERVISOR = String.raw`
 $ErrorActionPreference = 'Stop'
 function Trace-McpStage([string]$stage) {
   if ($env:YUANPU_MCP_DIAGNOSTIC_FILE) {
-    [IO.File]::AppendAllText($env:YUANPU_MCP_DIAGNOSTIC_FILE, $stage + [Environment]::NewLine)
+    [IO.File]::AppendAllText($env:YUANPU_MCP_DIAGNOSTIC_FILE, [DateTime]::UtcNow.ToString('o') + ' ' + $stage + [Environment]::NewLine)
   }
 }
 Trace-McpStage 'start'
@@ -134,7 +134,11 @@ try {
   if (-not $process.Start()) { throw 'MCP child failed to start' }
   Trace-McpStage 'child-started'
   $stdout = $process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
-  $stderr = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+  $stderrTarget = [IO.Stream]::Null
+  if ($env:YUANPU_MCP_DIAGNOSTIC_FILE) {
+    $stderrTarget = [IO.File]::Open($env:YUANPU_MCP_DIAGNOSTIC_FILE + '.stderr', [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+  }
+  $stderr = $process.StandardError.BaseStream.CopyToAsync($stderrTarget)
   $stdin = [Console]::OpenStandardInput().CopyToAsync($process.StandardInput.BaseStream)
   Trace-McpStage 'streams-started'
   $process.WaitForExit()
