@@ -9,4 +9,5 @@
 - `getAgentRun` 的原桌面/定时任务身份授权不放宽。IM 使用单独的最小只读摘要；已授权目标的通知导航验证可定位同一私聊运行，但原生通知展示/点击仍属于 TASK-029。
 - 本机验证：macOS arm64，Node 24.15.0 / pnpm 11.22.0；`pnpm check` 在 `193fe5a` 通过（runner `1790172504403108000.json`），聚焦运行授权测试通过（`1790172477269261000.json`）。`pnpm` 自动添加的空 lockfile checksum 已清理。
 - 独立验证：TASK-021 分支合入该修复后，test-only Runtime + 正式 Electron main/preload/React + SQLite 的双启动探针通过（runner `1790172599019589000.json`；证据提交 `1de5775`）。一次 Agent/一次发送、重启后 outbound `unknown`、页面分列显示、重导航保持、撤销配对拒绝、Runtime 子进程清理。其独立 `pnpm check` 也通过（`1790172530489632000.json`）。
+- 集成复验：`main` `e16cfef` 同时包含产品修复和独立探针；[Linux CI run 35872482174](https://github.com/linxinhong/yuanpu-agent/actions/runs/35872482174) 的完整 `pnpm check` 通过。该 CI 不运行 Electron 图形化业务旅程。
 - 限制：探针的 Runtime/发送端受控，不能替代正式 Runtime/真实企业微信会话。其他投递状态尚未逐一在打包 App 中操作；真正较新 SEA、Windows/Linux 可执行旅程和生产签名仍是 TASK-021 的未验证项。今后若改 IM 配对或本地凭据存储，须重验该只读授权边界。
