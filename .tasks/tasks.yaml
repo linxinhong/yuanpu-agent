@@ -755,7 +755,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-019
     title: "通知渠道与调度阶段验证"
-    status: ready
+    status: in_progress
     goal: "独立证明 IM 发起、定时触发、通知和回复投递组合可用，再支撑管理页面。"
     scope:
       in: ["真实 API/数据库的通知、渠道、调度组合测试","真实首发 IM 与 Electron 通知验证"]
@@ -781,12 +781,12 @@ tasks:
     investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节","先本机 API/数据库故障注入，再真实 Electron/IM；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
-      owner: null
+      owner: "codex-t019sep23"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T01:15:07.407Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-019"
+      branch: "task/task-019-stage-verification"
       evidence: []
       follow_up_candidates: []
   - id: TASK-020
