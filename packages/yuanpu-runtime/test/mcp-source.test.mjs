@@ -41,7 +41,6 @@ function pythonSource(overrides = {}) {
       PATH: dirname(pythonExecutable),
       PYTHONPATH: join(pythonRoot, 'src'),
       PYTHONUNBUFFERED: '1',
-      ...(process.platform === 'win32' ? { YUANPU_MCP_DIRECT_TEST: '1' } : {}),
       ...(process.platform === 'win32' ? { YUANPU_MCP_DIAGNOSTIC_FILE: windowsDiagnosticFile } : {}),
       YUANPU_MCP_TEST_FIXTURES: '1',
       ...(process.platform === 'win32' && process.env.SYSTEMROOT
@@ -168,7 +167,7 @@ test('a persisted approval is consumed before a real dispatch crash and is never
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
     (error) => error instanceof CapabilityError && error.failure.error === 'result_unknown',
   );
-  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
+  assert.equal((await readFile(markerPath, 'utf8')).replace(/\r\n/gu, '\n'), 'executed\n');
   const persisted = JSON.parse(await readFile(approvalPath, 'utf8'));
   assert.equal(persisted.records[0].status, 'consumed');
 
@@ -178,7 +177,7 @@ test('a persisted approval is consumed before a real dispatch crash and is never
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
     (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
   );
-  assert.equal(await readFile(markerPath, 'utf8'), 'executed\n');
+  assert.equal((await readFile(markerPath, 'utf8')).replace(/\r\n/gu, '\n'), 'executed\n');
 });
 
 test('untrusted MCP annotations cannot downgrade host approval policy', async (context) => {
