@@ -777,7 +777,7 @@ tasks:
         expect: "以事件序列和数据库事实区分执行失败、投递失败、投递未知及通知 submitted；身份映射、执行次数和合法状态转换由代码断言，疑似串话或重复执行必须回查本地原始证据"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-015","TASK-016","TASK-018","TASK-026"]
+    dependencies: ["TASK-015","TASK-016","TASK-018","TASK-026","TASK-027"]
     risk_level: L3
     recommended_model: "gpt-5.6 sol"
     investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节；2026-09-23 个人助手范围决策见第 7 节","先本机 API/数据库故障注入，再用一位授权用户做真实企业微信单私聊、重连/重启和 Electron；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done；历史双 sender fixture 可保留为额外隔离回归"]
@@ -1020,4 +1020,33 @@ tasks:
         - {type: "command", check: "pnpm check", status: "passed", summary: "Passed on integrated main revision 2ef87e0 with Node 24.15.0 and pnpm 11.22.0 after branch revision 67a2e18 also passed."}
         - {type: "command", check: "pnpm build:native and pnpm smoke:native", status: "passed", summary: "Passed on branch revision 67a2e18 (same implementation tree integrated as 2ef87e0) on darwin-arm64; final records 1790135059055664000.json and 1790135071213067000.json."}
         - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-026.md and docs/adr/0002-scheduled-im-targets.md. Real WeCom display and Electron click acceptance remain with independent TASK-019; this implementation card does not claim them."}
+      follow_up_candidates: []
+  - id: TASK-027
+    title: "隔离企业微信连接启动失败"
+    status: ready
+    goal: "可选企业微信连接的配置或凭据失败不阻断桌面 App 与本地 Runtime 启动，连接本身保持关闭并可诊断。"
+    scope:
+      in: ["Runtime 启动时的企业微信连接失败隔离","无凭据泄漏的诊断事件","无效配置与有效连接的回归测试"]
+      out: ["放宽企业微信配置和凭据校验","自动启用或修复用户连接","TASK-019 的真实平台与系统通知验收"]
+    constraints: ["失败时不启动部分不安全连接，也不输出 Bot ID、Secret 或原始成员标识","其他 Runtime 服务照常就绪；App 退出仍清理所有已启动连接"]
+    acceptance:
+      - type: assertion
+        expect: "企业微信配置文件含未知字段或格式无效时，Runtime 仍报告 ready，桌面 App 可打开；企业微信连接不启动，错误以脱敏状态可诊断"
+      - type: assertion
+        expect: "启用连接但凭据解析失败时保持同样降级；有效配置仍启动连接，原有严格校验和安全回滚不变"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-018"]
+    risk_level: L2
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["apps/runtime/src/index.ts 在 server.listen 前直接 await startConfiguredWecomChannels；apps/runtime/src/wecom-channel.ts 的 readWecomConnectionDocument 对未知字段抛错；apps/runtime/test/wecom-channel.test.mjs 与真实 Runtime 启动测试可作最近回归入口","先用隔离 YUANPU_HOME 重现无效配置仍能健康启动，再测凭据失败、有效连接与清理；不使用用户真实凭据"]
+    escalation_conditions: ["若现有健康/状态契约无法表达连接降级，记录最小接口缺口，不以静默吞错替代诊断"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
       follow_up_candidates: []
