@@ -56,7 +56,7 @@ test('real Python MCP discovery and execution preserve structured results and er
   const server = createYuanpuMcpServer([source]);
   const search = await server.search({ query: 'echo' });
   const echo = search.matches.find((match) => match.originalName === 'yuanpu_echo_text');
-  assert.ok(echo);
+  assert.ok(echo, JSON.stringify(search));
   const result = await server.execute({ name: echo.name, arguments: { text: '源谱' } });
   assert.deepEqual(result.structuredContent, { text: '源谱', length: 2 });
   assert.equal(result.content[0].type, 'text');
@@ -221,7 +221,7 @@ test('a real unresponsive process does not hide a healthy Python MCP source', as
   const server = createYuanpuMcpServer(
     [unresponsive, healthy],
     undefined,
-    { discoveryTimeoutMs: 2_000 },
+    { discoveryTimeoutMs: process.platform === 'win32' ? 15_000 : 2_000 },
   );
   const result = await server.search({ query: 'echo', limit: 20 });
   assert.equal(
@@ -259,7 +259,7 @@ test('tool discovery timeout terminates the initialized MCP process', async () =
     sourceInstanceId: 'test.hanging-list-tools',
     command: process.execPath,
     args: [fixture],
-    initializationTimeoutMs: 1_000,
+    initializationTimeoutMs: process.platform === 'win32' ? 15_000 : 1_000,
     discoveryTimeoutMs: 100,
   });
   const discovery = source.list({});

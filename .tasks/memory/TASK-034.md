@@ -2,9 +2,13 @@
 
 关键词：Runtime Bundle、Desktop Bundle、Windows pnpm、workspace build、开发临时签名、trust root。
 
-- 记录：2026-09-23；实施者：codex-task021-followup-20260923；基线 `f331581`，源提交 `d7a19b2`；源于 App 多入口与升级完整业务验收（TASK-021）的三平台矩阵复验。
+- 记录：2026-09-23；实施者：codex-task021-followup-20260923；基线 `f331581`，源提交 `d7a19b2`、`4a07d6f`、`dce4505`；源于 App 多入口与升级完整业务验收（TASK-021）的三平台矩阵复验。
 - 原始失败：`main` `e16cfef` 的 [Runtime Bundle run 35872575801](https://github.com/linxinhong/yuanpu-agent/actions/runs/35872575801) 三平台在 managed MCP 测试前缺 `@yuanpu-agent/protocol/dist`；[Desktop Bundle run 35872590465](https://github.com/linxinhong/yuanpu-agent/actions/runs/35872590465) Windows 在模型数据补全处 `spawnSync pnpm ENOENT`，macOS/Linux 因 CI 空 `YUANPU_ARTIFACT_SIGNING_KEY_ID` 错误阻断开发制品。
 - 修复入口：`.github/workflows/runtime-bundle.yml` 在 Runtime 测试前执行完整 workspace build；`scripts/hydrate-pi-model-data.mjs` 优先用当前 pnpm 的 JS CLI 经 Node 启动，Windows 缺该路径时用系统命令解释器；`apps/python-capabilities/scripts/signing-key-id.mjs` 将空/空白 ID 视为未配置，但仅在无生产信任根时回退开发临时 ID。
 - 安全边界：存在生产 trust root/签名密钥而 Key ID 缺失仍报错；没有改变签名、校验、artifact trust policy，也没有新增密钥值或修改 Pi 上游。
 - 本机验证：macOS arm64 Node 24.15.0/pnpm 11.22.0；签名 ID 聚焦测试通过（runner `1790173162948117000.json`），`pnpm check` 通过（`1790173169128661000.json`）。`pnpm` 的空 lockfile checksum 已清理。
-- 待复验：将该提交集成并推送 main，重新触发 Runtime Bundle 与 Desktop Bundle 三平台矩阵；必须逐项检查真实 SEA smoke、包上传及发行信任缺口。此前失败不能算平台可执行证据。
+- 首轮集成 `9f6d21a`：Runtime Bundle [35873577986](https://github.com/linxinhong/yuanpu-agent/actions/runs/35873577986) 与 Desktop Bundle [35873577511](https://github.com/linxinhong/yuanpu-agent/actions/runs/35873577511) 的 macOS/Linux 原有构建、smoke、包上传均通过；Windows 因根 `package.json` 的单引号负向 pnpm filter 在该 shell 下未选中 Yuanpu 包，Runtime 测试缺 `dist`，Desktop SEA 误将 `@yuanpu-agent/runtime-kit` 留在 bundle 外而报 `ERR_UNKNOWN_BUILTIN_MODULE`。
+- 二轮修复：`package.json` 用跨 shell 双引号的 Yuanpu 正向 selector，并明确排除 root monorepo，覆盖 build/test/typecheck。先误选 root 导致脚本递归的候选检查已中止且不计通过；最终 selector 列出 6 个产品包、无 root（runner `1790174439703356000.json`），`pnpm check` 通过（runner `1790174448692983000.json`）。已集成推送 `main` `b965347`，CI [35876084393](https://github.com/linxinhong/yuanpu-agent/actions/runs/35876084393)、Runtime Bundle [35876096889](https://github.com/linxinhong/yuanpu-agent/actions/runs/35876096889)、Desktop Bundle [35876102712](https://github.com/linxinhong/yuanpu-agent/actions/runs/35876102712) 正在复验。
+- 二轮结果：CI passed；Runtime Bundle macOS/Linux passed，Windows 进入 tests 后 113/124 passed，失败集中在 Python MCP 启动/发现、跨盘符插件路径判断及 SQLite 测试清理；Desktop Bundle macOS/Linux passed，Windows Python 制品 smoke passed，但 SEA 内 Python MCP 未发现。未把 Windows 计作通过。
+- 三轮修复：Windows 路径包含检查拒绝不同盘符返回的绝对 `relative` 路径；两个测试在关闭全部 SQLite 句柄后才删除临时目录；Runtime CapabilityRegistry Windows 默认发现窗口 15s，Windows MCP 测试的特定外层窗口与初始化窗口同步；测试与 SEA smoke 在未发现 Python 能力时输出受限失败摘要。macOS arm64 Node 24.15.0/pnpm 11.22.0 聚焦 31/31 passed（runner `1790175034114195000.json`），`pnpm check` passed（runner `1790175074785411000.json`）。
+- 待复验：将 `dce4505` 集成并推送 main，重触发三平台矩阵，核对 Windows MCP 真实原因、SEA smoke、桌面包上传及发行信任缺口；此前失败不能算 Windows 平台可执行证据。

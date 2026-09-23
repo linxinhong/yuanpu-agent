@@ -163,7 +163,7 @@ export class CapabilityRegistry implements CapabilityToolClient {
     this.#sources = new Map();
     this.#authorizer = authorizer;
     this.#options = {
-      discoveryTimeoutMs: options.discoveryTimeoutMs ?? 3_000,
+      discoveryTimeoutMs: options.discoveryTimeoutMs ?? (process.platform === 'win32' ? 15_000 : 3_000),
       discoveryCacheTtlMs: options.discoveryCacheTtlMs ?? 5_000,
     };
     for (const source of sources) {

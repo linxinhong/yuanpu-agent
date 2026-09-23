@@ -13,7 +13,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export * from './artifacts.js';
 
@@ -142,7 +142,7 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 
 function isInside(parent: string, child: string): boolean {
   const path = relative(resolve(parent), resolve(child));
-  return path !== '..' && !path.startsWith(`..${sep}`) && !path.includes(`${sep}..${sep}`);
+  return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`) && !path.includes(`${sep}..${sep}`);
 }
 
 function pluginDirectoryName(name: string, version: string, source: string): string {

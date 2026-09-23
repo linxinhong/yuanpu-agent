@@ -201,7 +201,12 @@ async function capabilitySmoke(): Promise<void> {
     }
     const matches = search.matches as Array<{ name: string; originalName: string }>;
     const match = matches.find((item) => item.originalName === 'yuanpu_echo_text');
-    if (!match) throw new Error('Python echo capability was not discovered.');
+    if (!match) {
+      const failures = 'failures' in search && Array.isArray(search.failures)
+        ? search.failures.map(({ error, message }) => ({ error, message }))
+        : [];
+      throw new Error(`Python echo capability was not discovered: ${JSON.stringify(failures)}`);
+    }
     const diagnostic = matches.find((item) => item.originalName === 'yuanpu_diagnostic_error');
     if (!diagnostic) throw new Error('Python diagnostic capability was not discovered.');
     const result = await mcp.callTool(CAPABILITY_TOOL_NAMES.execute, {

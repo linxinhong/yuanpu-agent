@@ -41,9 +41,9 @@ function message(senderId, suffix, text) {
 
 test('TASK-019: concurrent channel and schedule runs keep durable owners, routes and notification receipts separate', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-task-019-'));
-  context.after(() => rm(root, { recursive: true, force: true }));
   const databasePath = join(root, 'metadata.sqlite');
   const metadata = openYuanpuMetadataDatabase(databasePath);
+  let inspection;
   let now = new Date('2026-09-23T00:00:30.000Z');
   const executions = [];
   const notificationEvents = [];
@@ -127,7 +127,9 @@ test('TASK-019: concurrent channel and schedule runs keep durable owners, routes
     await scheduler.close();
     await agent.close();
     notifications.close();
+    inspection?.close();
     metadata.close();
+    await rm(root, { recursive: true, force: true });
   });
 
   const schedule = scheduler.create({
@@ -174,8 +176,7 @@ test('TASK-019: concurrent channel and schedule runs keep durable owners, routes
   assert.equal(metadata.channels.getOutboundForRun(second.runId).status, 'accepted');
   assert.equal(scheduler.history(schedule.scheduleId)[0].deliveryStatus, 'delivered');
 
-  const inspection = new DatabaseSync(databasePath, { readOnly: true });
-  context.after(() => inspection.close());
+  inspection = new DatabaseSync(databasePath, { readOnly: true });
   const runRows = inspection.prepare(
     'SELECT entry_point, status, subject_id FROM yp_agent_runs ORDER BY entry_point, subject_id',
   ).all();
