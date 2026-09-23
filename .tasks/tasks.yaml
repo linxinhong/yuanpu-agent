@@ -965,6 +965,36 @@ tasks:
         - {type: "command", check: "pnpm check", status: "passed", summary: "Passed on integrated main 90e5787 with Node 24.15.0 and pnpm 11.22.0; runner 1790165973173983000.json."}
         - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-030.md documents the error path, fixed-category trusted IPC, exact verification and unresolved cross-platform/signing boundaries. TASK-021 remains in progress."}
       follow_up_candidates: []
+  - id: TASK-032
+    title: "修复非 macOS 企业微信凭据诊断"
+    status: ready
+    goal: "修复 TASK-021 在 Linux CI 发现的 Keychain 不可用错误分类，使可选企业微信插件失败时仍能打开 Runtime，且诊断准确。"
+    scope:
+      in: ["非 macOS 系统 Keychain 不可用时的脱敏诊断分类", "覆盖原失败路径的 Runtime 回归测试"]
+      out: ["实现非 macOS 系统凭据存储", "修改真实企业微信配置或凭据", "在修复卡内宣称 TASK-021 整体验收通过"]
+    constraints: ["维持可选连接故障不阻断 Runtime readiness", "不输出凭据或原始错误到 UI/日志", "完成须集成并验证于 main"]
+    forbidden: ["按平台放宽或跳过原有断言来隐藏错误分类", "触碰个人 .env 或 Keychain"]
+    acceptance:
+      - type: assertion
+        expect: "Linux 上启用的企业微信连接若依赖不可用的系统 Keychain，Runtime 仍 ready/health=200，连接诊断为 credential_unavailable，日志不含凭据引用或 Bot ID"
+      - type: assertion
+        expect: "macOS 上 Keychain 条目缺失仍给出同一凭据不可用分类；其他配置无效与连接错误不被误分类"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-019"]
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["GitHub CI main 9c7712f run 35868424221 失败于 apps/runtime/test/runtime.test.mjs 的 unavailable Keychain credential", "apps/runtime/src/wecom-channel.ts 的 resolveSystemKeychainCredential；apps/runtime/src/index.ts 的 wecomDiagnosticFor", "先运行原失败用例，再在 Linux CI 复验完整 pnpm check"]
+    escalation_conditions: ["若修复需要改变非 macOS 凭据存储策略或扩展连接协议，先确认范围"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
     status: done
