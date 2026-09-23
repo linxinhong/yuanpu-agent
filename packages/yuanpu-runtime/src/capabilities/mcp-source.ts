@@ -126,21 +126,13 @@ $process = New-Object Diagnostics.Process
 $process.StartInfo.FileName = $env:YUANPU_MCP_CHILD_COMMAND
 $process.StartInfo.Arguments = $env:YUANPU_MCP_CHILD_ARGUMENTS
 $process.StartInfo.UseShellExecute = $false
-$process.StartInfo.RedirectStandardInput = $true
-$process.StartInfo.RedirectStandardOutput = $true
-$process.StartInfo.RedirectStandardError = $true
+$process.StartInfo.RedirectStandardInput = $false
+$process.StartInfo.RedirectStandardOutput = $false
+$process.StartInfo.RedirectStandardError = $false
 $process.StartInfo.CreateNoWindow = $true
 try {
   if (-not $process.Start()) { throw 'MCP child failed to start' }
   Trace-McpStage 'child-started'
-  $stdout = $process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
-  $stderrTarget = [IO.Stream]::Null
-  if ($env:YUANPU_MCP_DIAGNOSTIC_FILE) {
-    $stderrTarget = [IO.File]::Open($env:YUANPU_MCP_DIAGNOSTIC_FILE + '.stderr', [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
-  }
-  $stderr = $process.StandardError.BaseStream.CopyToAsync($stderrTarget)
-  $stdin = [Console]::OpenStandardInput().CopyToAsync($process.StandardInput.BaseStream)
-  Trace-McpStage 'streams-started'
   $process.WaitForExit()
   $exitCode = $process.ExitCode
 } finally {
