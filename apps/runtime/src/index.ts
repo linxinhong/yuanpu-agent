@@ -53,7 +53,11 @@ import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
-import { closeWecomChannels, startConfiguredWecomChannels } from './wecom-channel.js';
+import {
+  closeWecomChannels,
+  startConfiguredWecomChannels,
+  writeWecomDiagnostic,
+} from './wecom-channel.js';
 
 declare const __APP_VERSION__: string;
 
@@ -1352,12 +1356,7 @@ async function serve(): Promise<void> {
         workspaceId: home.config.workingDirectory,
         store: metadata.channels,
         agent: agentService,
-        log: (record) => {
-          const message = `[wecom] ${record.event}`;
-          if (record.level === 'error') console.error(message);
-          else if (record.level === 'warn') console.warn(message);
-          else if (record.level === 'info') console.info(message);
-        },
+        log: writeWecomDiagnostic,
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : '';

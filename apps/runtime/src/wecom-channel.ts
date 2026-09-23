@@ -51,6 +51,13 @@ export interface StartConfiguredWecomChannelOptions {
   log?: RedactedChannelLogSink;
 }
 
+/** Runtime stdout is reserved for its JSON readiness protocol. */
+export const writeWecomDiagnostic: RedactedChannelLogSink = (record) => {
+  if (record.level === 'debug') return;
+  const event = /^wecom\.[a-z_]+$/.test(record.event) ? record.event : 'wecom.sdk';
+  process.stderr.write(`[wecom] ${event}\n`);
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
