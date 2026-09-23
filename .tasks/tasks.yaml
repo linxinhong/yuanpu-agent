@@ -1059,7 +1059,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-028
     title: "隔离企业微信日志与 Runtime 就绪协议"
-    status: in_progress
+    status: done
     goal: "启用企业微信长连接时，SDK 诊断日志不得破坏 Desktop 读取 Runtime 首行 JSON 就绪信号，App 应正常启动。"
     scope:
       in: ["Runtime 企业微信日志的输出边界", "就绪握手回归测试", "正式 App 启动复验"]
@@ -1082,8 +1082,13 @@ tasks:
       owner: "codex-t028sep23-12136"
       attempts: 0
       claimed_at: "2026-09-23T06:47:22.434Z"
-      completed_at: null
+      completed_at: "2026-09-23T06:53:52.389Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-028"
       branch: "task/task-028-wecom-ready-logs"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated Runtime log isolation", status: "passed", summary: "Implementation and task memory 8a2f721 fast-forward integrated on main; WeCom diagnostics use stderr only and keep the JSON readiness stdout boundary."}
+        - {type: "verification", check: "stdout protocol regression", status: "passed", summary: "Node child-process regression first failed before implementation, then passed: info/warn/error diagnostics stay on stderr, unsafe event text is suppressed, stdout first line remains JSON ready. Adjacent WeCom tests passed."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 and pnpm 11.22.0 full build, Yuanpu typechecks and tests passed on main 8a2f721; Runtime tests 21/21."}
+        - {type: "verification", check: "real configured Electron startup", status: "passed", summary: "Using the enabled single-user local WeCom connection, development Electron, renderer and Runtime child remained running beyond one minute with no readiness JSON error. Real message and native notification acceptance remain TASK-019."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-028.md records trigger, fix boundary, commands, real startup limits and next TASK-019 checks."}
       follow_up_candidates: []
