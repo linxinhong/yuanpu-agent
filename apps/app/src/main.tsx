@@ -18,6 +18,7 @@ import type {
   NotificationNavigationTarget,
   RuntimeRecoveryNotice,
   AgentRunRecord,
+  PrivateImRunSummary,
 } from '@yuanpu-agent/protocol';
 
 import { ConnectionManagement, ScheduleManagement } from './management.js';
@@ -32,6 +33,17 @@ type ChatMessage = {
   tools?: ToolState[];
 };
 type AppView = 'chat' | 'skills' | 'connections' | 'schedules';
+
+function privateImDeliveryLabel(status: PrivateImRunSummary['replyDeliveryStatus']): string {
+  return {
+    not_created: '无回复投递记录',
+    pending: '等待投递',
+    delivering: '正在投递',
+    accepted: '企业微信已接收（未确认对方可见）',
+    failed: '投递失败',
+    unknown: '投递结果未知（不会自动重发）',
+  }[status];
+}
 type SkillTab = 'marketplace' | 'installed' | 'local' | 'updates';
 
 const initialMessages: ChatMessage[] = [{
@@ -839,6 +851,7 @@ function ChatPanel({
   const [approvals, setApprovals] = useState<CapabilityApprovalSummary[]>([]);
   const [approvalBusy, setApprovalBusy] = useState<string>();
   const [locatedRun, setLocatedRun] = useState<AgentRunRecord | 'loading' | 'error'>();
+  const [privateImSummary, setPrivateImSummary] = useState<PrivateImRunSummary | 'loading'>();
   const [activeRunId, setActiveRunId] = useState<string>();
   const [activeRunStatus, setActiveRunStatus] = useState<AgentRunRecord['status']>();
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -871,13 +884,19 @@ function ChatPanel({
     const runId = navigationTarget?.runId;
     if (!desktop || !runId) {
       setLocatedRun(undefined);
+      setPrivateImSummary(undefined);
       return;
     }
     let cancelled = false;
     setLocatedRun('loading');
+    setPrivateImSummary('loading');
     void desktop.getAgentRun(runId).then(
       (run) => { if (!cancelled) setLocatedRun(run); },
       () => { if (!cancelled) setLocatedRun('error'); },
+    );
+    void desktop.getPrivateImRunSummary(runId).then(
+      (summary) => { if (!cancelled) setPrivateImSummary(summary); },
+      () => { if (!cancelled) setPrivateImSummary(undefined); },
     );
     return () => { cancelled = true; };
   }, [desktop, navigationTarget?.runId]);
@@ -890,6 +909,15 @@ function ChatPanel({
     }, 1_200);
     return () => window.clearInterval(timer);
   }, [desktop, active, navigationTarget?.runId, locatedRun]);
+
+  useEffect(() => {
+    if (!desktop || !active || !navigationTarget?.runId || !privateImSummary || privateImSummary === 'loading') return;
+    if (!['not_created', 'pending', 'delivering'].includes(privateImSummary.replyDeliveryStatus)) return;
+    const timer = window.setInterval(() => {
+      void desktop.getPrivateImRunSummary(navigationTarget.runId!).then(setPrivateImSummary).catch(() => undefined);
+    }, 1_200);
+    return () => window.clearInterval(timer);
+  }, [desktop, active, navigationTarget?.runId, privateImSummary]);
 
   useEffect(() => {
     conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'smooth' });
@@ -1022,8 +1050,10 @@ function ChatPanel({
           <span className="mcp-count">2 个 MCP 元工具</span>
           {navigationTarget && (
             <span role="status">
-              {locatedRun === 'loading'
+              {locatedRun === 'loading' || (locatedRun === 'error' && privateImSummary === 'loading')
                 ? '正在加载任务记录…'
+                : privateImSummary && privateImSummary !== 'loading'
+                  ? `企业微信 · ${privateImSummary.runStatus} · ${privateImDeliveryLabel(privateImSummary.replyDeliveryStatus)}`
                 : locatedRun === 'error'
                   ? '任务记录不可用'
                   : locatedRun
@@ -1045,12 +1075,22 @@ function ChatPanel({
               <div className="approval-heading"><span>运行详情</span><strong>{locatedRun.owner.entryPoint === 'scheduler' ? '定时任务' : locatedRun.owner.entryPoint === 'im' ? '企业微信会话' : '桌面对话'}</strong></div>
               <dl>
                 <div><dt>运行状态</dt><dd>{locatedRun.status}</dd></div>
+                {locatedRun.owner.entryPoint === 'im' && <div><dt>回复投递</dt><dd>{privateImSummary && privateImSummary !== 'loading' ? privateImDeliveryLabel(privateImSummary.replyDeliveryStatus) : '状态暂不可用'}</dd></div>}
                 <div><dt>会话</dt><dd>{locatedRun.context.conversation.conversationId}</dd></div>
                 <div><dt>工作区</dt><dd>{locatedRun.context.workspaceId}</dd></div>
               </dl>
               {locatedRun.output?.message && <p>{locatedRun.output.message}</p>}
               {locatedRun.failure && <p role="alert">{locatedRun.failure.message}</p>}
               {scheduleOrigin && <button type="button" className="runtime-link" onClick={onReturnToSchedules}>返回关联定时任务</button>}
+            </article>
+          )}
+          {locatedRun === 'error' && privateImSummary && privateImSummary !== 'loading' && (
+            <article className="located-run-card">
+              <div className="approval-heading"><span>运行详情</span><strong>企业微信私聊</strong></div>
+              <dl>
+                <div><dt>运行状态</dt><dd>{privateImSummary.runStatus}</dd></div>
+                <div><dt>回复投递</dt><dd>{privateImDeliveryLabel(privateImSummary.replyDeliveryStatus)}</dd></div>
+              </dl>
             </article>
           )}
           {messages.map((message) => (

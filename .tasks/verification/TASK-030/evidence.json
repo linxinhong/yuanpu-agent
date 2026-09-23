@@ -1,0 +1,26 @@
+[
+  {
+    "type": "assertion",
+    "check": "packaged App protocol-incompatibility notice and rollback",
+    "status": "passed",
+    "summary": "Integrated product source main 90e5787, independently rebuilt in TASK-021 branch ed13cde on macOS arm64. Four-launch isolated packaged App probe passed: protocol-999 candidate rolled back, fixed user-visible notice was dismissible, original schedule remained, and Runtime children stopped. Runner 1790166220699941000.json; evidence commit 197f713."
+  },
+  {
+    "type": "assertion",
+    "check": "normal startup and generic failure data boundary",
+    "status": "passed",
+    "summary": "Same isolated packaged probe: normal startup had no recovery notice; generic activation failure displayed only fixed copy, excluding a synthetic diagnostic marker and temporary path; restored task remained available. No live bot or personal App data was used."
+  },
+  {
+    "type": "command",
+    "check": "pnpm check",
+    "status": "passed",
+    "summary": "Passed on integrated main 90e5787 with Node 24.15.0 and pnpm 11.22.0; runner 1790165973173983000.json."
+  },
+  {
+    "type": "memory",
+    "check": "task handoff",
+    "status": "passed",
+    "summary": "Integrated .tasks/memory/TASK-030.md documents the error path, fixed-category trusted IPC, exact verification and unresolved cross-platform/signing boundaries. TASK-021 remains in progress."
+  }
+]

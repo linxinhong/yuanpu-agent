@@ -1,8 +1,12 @@
 import type {
   AgentService,
   AuthenticatedAgentCaller,
+  ChannelInboundRoute,
+  ChannelOutboundRecord,
 } from '@yuanpu-agent/runtime-kit';
-import type { AgentRunRecord } from '@yuanpu-agent/protocol';
+import type { AgentRunRecord, PrivateImRunSummary } from '@yuanpu-agent/protocol';
+
+import type { PersistedWecomDocument } from './wecom-channel.js';
 
 export async function getDesktopNavigableRun(
   agent: Pick<AgentService, 'get'>,
@@ -12,6 +16,43 @@ export async function getDesktopNavigableRun(
 ): Promise<AgentRunRecord | undefined> {
   return await agent.get(desktopCaller, runId)
     ?? await agent.get(schedulerCaller, runId);
+}
+
+export function getDesktopPrivateImRunSummary(
+  runId: string,
+  stores: {
+    agentRuns: Pick<{ get(runId: string): AgentRunRecord | undefined }, 'get'>;
+    channels: {
+      getInboundForRun(runId: string): ChannelInboundRoute | undefined;
+      getOutboundForRun(runId: string): ChannelOutboundRecord | undefined;
+    };
+  },
+  document: PersistedWecomDocument,
+  workspaceId: string,
+): PrivateImRunSummary | undefined {
+  const run = stores.agentRuns.get(runId);
+  const inbound = stores.channels.getInboundForRun(runId);
+  if (!run || !inbound
+    || run.owner.entryPoint !== 'im'
+    || run.owner.identity.kind !== 'channel_user'
+    || run.owner.identity.authenticatedBy !== 'channel_adapter'
+    || run.owner.identity.authorityId !== inbound.connectionId
+    || run.owner.identity.subjectId !== inbound.conversationDigest
+    || run.context.workspaceId !== workspaceId
+    || !run.context.conversation.namespace.startsWith('im:wecom:')
+    || run.context.conversation.conversationId !== `single:${inbound.conversationDigest}`
+    || run.context.delivery.kind !== 'channel'
+    || run.context.delivery.routeId !== inbound.inboundId
+    || inbound.provider !== 'wecom'
+    || inbound.conversationType !== 'single'
+    || inbound.action !== 'run'
+    || !document.connections.some((connection) => connection.connectionId === inbound.connectionId
+      && connection.pairedSenderDigests?.includes(inbound.senderDigest))) return undefined;
+  return {
+    runId: run.runId,
+    runStatus: run.status,
+    replyDeliveryStatus: stores.channels.getOutboundForRun(runId)?.status ?? 'not_created',
+  };
 }
 
 export interface RuntimeCleanupResources {
