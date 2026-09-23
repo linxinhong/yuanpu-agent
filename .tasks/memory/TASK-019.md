@@ -34,3 +34,4 @@
 - 第三轮 ready 后用户确认发出新口令；探针收到一条精确私聊消息并保存一个配对摘要，启用本机连接，沿用已验证的 Keychain 凭据。原配置备份在 `~/.yuanpu/app/connections/wecom.json.task019-before-pairing.bak`；只用环境变量与 Keychain 进程内比对，不输出值、userid 或正文。
 - 首次启用连接的正式 App 被 Runtime `console.info` 在 JSON ready 前污染 stdout 阻断。独立 TASK-028 已于 `main` `3563d1d` 完成：企业微信脱敏诊断改走 stderr，focused 与完整 `pnpm check` 通过。随后本机正式 Electron 窗口显示“本地 Runtime 已连接”，App 保持运行；此时业务库仍无正式入站、outbound 或 run，已请用户发新的普通测试消息。不要把 App 已打开当作正式私聊业务通过；页面提示模型/密钥尚待配置，若后续 Agent 失败需区分于长连接入站。
 - 正式 App 在 `main` `3b9e23f` 收到同一配对私聊的两条不同平台消息；只读 SQLite 关系查询证实两条各执行一次 `im` Agent run（均 `succeeded`），两条 outbound 均 `accepted` 且无失败码。用户确认至少一条回复在企业微信可见。V19-06 单用户正式 App 收发通过；两条消息不是重复回调，不能据此证明平台重放去重。未读取正文、原始 userid、摘要或密钥。TASK-019 仍需 App 重启恢复与真实原生通知展示/点击，保持 in_progress。
+- SIGINT 正常关闭后 Runtime 与开发端口均消失，SQLite 两条记录保留；同一 App 重开显示 Runtime 已连接。第三条不同平台私聊消息在重启后入站，新增一次成功 run 与 `accepted` outbound，累计三条消息/三次 run，仍是同一认证 sender 与会话；用户可见性尚待确认。执行中断/等待授权恢复及原生通知显示/点击未覆盖，不能 complete。
