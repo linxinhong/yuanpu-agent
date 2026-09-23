@@ -777,7 +777,7 @@ tasks:
         expect: "以事件序列和数据库事实区分执行失败、投递失败、投递未知及通知 submitted；身份映射、执行次数和合法状态转换由代码断言，疑似串话或重复执行必须回查本地原始证据"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-015","TASK-016","TASK-018","TASK-026","TASK-027"]
+    dependencies: ["TASK-015","TASK-016","TASK-018","TASK-026","TASK-027","TASK-028"]
     risk_level: L3
     recommended_model: "gpt-5.6 sol"
     investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节；2026-09-23 个人助手范围决策见第 7 节","先本机 API/数据库故障注入，再用一位授权用户做真实企业微信单私聊、重连/重启和 Electron；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done；历史双 sender fixture 可保留为额外隔离回归"]
@@ -1056,4 +1056,34 @@ tasks:
         - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 full build, typecheck and tests passed on main fb065bf: runtime-kit 122/122 and Runtime 20/20, including startup degradation and rollback."}
         - {type: "verification", check: "Electron window after integration", status: "passed", summary: "Restarted the main Electron dev App after integration. Computer Use observed the Yuanpu Agent window at 127.0.0.1:5173 and '本地 Runtime 已连接'. This used the now-valid local config; invalid-config App behavior is established by isolated Runtime readiness tests, not a second live Electron window."}
         - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-027.md records the trigger, boundary, tested revision, commands and remaining TASK-019 verification limits."}
+      follow_up_candidates: []
+  - id: TASK-028
+    title: "隔离企业微信日志与 Runtime 就绪协议"
+    status: ready
+    goal: "启用企业微信长连接时，SDK 诊断日志不得破坏 Desktop 读取 Runtime 首行 JSON 就绪信号，App 应正常启动。"
+    scope:
+      in: ["Runtime 企业微信日志的输出边界", "就绪握手回归测试", "正式 App 启动复验"]
+      out: ["改变企业微信配对或凭据", "TASK-019 的真人消息与系统通知业务验收"]
+    constraints: ["stdout 首行仍为协议 JSON ready；诊断仅记录脱敏事件，不打印 Bot ID、Secret、成员标识或消息正文", "保持连接失败可降级和 App 退出清理行为"]
+    forbidden: ["吞掉 SDK 诊断以掩盖连接状态", "用模拟连接声称真人私聊验收通过"]
+    acceptance:
+      - type: assertion
+        expect: "企业微信连接在 Runtime ready 前产生 info 事件时，Desktop 仍能解析就绪信号并打开 App；诊断留在 stderr 且脱敏"
+      - type: assertion
+        expect: "无效连接配置和凭据失败仍不阻断 Runtime ready，启用连接的关闭清理与原有校验不变"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-018","TASK-027"]
+    risk_level: L2
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["apps/runtime/src/index.ts 的 startConfiguredWecomChannels log callback 使用 console.info；apps/desktop/src/runtime-manager.ts 的 launch 解析 stdout 首行；最近测试 apps/runtime/test/runtime.test.mjs", "先建立 info 事件污染 stdout 的失败测试，再修正日志输出，跑 focused 与 pnpm check；最后用已启用的本机连接重启 App 并只记录脱敏状态"]
+    escalation_conditions: ["若 stdout 还有其他非协议写入，记录具体来源并扩展同一启动边界修复，不跳过 ready 校验"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
       follow_up_candidates: []
