@@ -995,6 +995,38 @@ tasks:
       branch: "task/task-032-keychain-diagnostic"
       evidence: []
       follow_up_candidates: []
+  - id: TASK-033
+    title: "区分企业微信运行与回复投递状态"
+    status: ready
+    goal: "修复 TASK-021 的 D21-02：App 查看企业微信运行结果时，应同时看见独立的回复投递状态，尤其不能把 Agent 成功误读为已投递。"
+    scope:
+      in: ["按运行 ID 查询持久化 IM outbound 的最小可信接口", "现有运行详情中单独呈现回复投递结果与未知状态", "隔离 App 重启后的浏览器/进程回归"]
+      out: ["改变 IM 发送、幂等、重试或持久化恢复策略", "原生通知功能", "真实机器人消息内容或凭据迁移", "在修复卡内宣称 TASK-021 整体完成"]
+    constraints: ["只向已授权的本地 App 查询返回与运行关联的脱敏投递事实", "沿用 TASK-020 已接受的运行详情布局，不新增页面模式", "完成须集成并验证于 main"]
+    forbidden: ["以 Agent succeeded 或 SDK accepted 冒充用户已看到回复", "将原始 provider URL、消息正文或凭据带到 renderer", "覆盖用户既有改动"]
+    acceptance:
+      - type: assertion
+        expect: "IM 运行详情把 Agent 状态和回复投递状态作为两个独立事实；持久化 outbound=unknown 时明确显示投递结果未知，刷新及 App 重启后仍一致"
+      - type: assertion
+        expect: "只有对应授权运行能查询该 outbound；无记录、处理中、accepted、failed 等状态有准确且不泄密的呈现，定时任务已有投递详情不回归"
+      - type: assertion
+        expect: "TASK-021 的 D21-02 隔离 App/SQLite 探针在修复 revision 重跑，验证一次 Agent/一次发送、未知结果可见、Runtime 子进程清理"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-020"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: [".tasks/verification/TASK-021/results.md 的 D21-02；apps/desktop/test/task-021-im-app-restart-probe.mjs", "packages/yuanpu-runtime/src/channels/store.ts 的 outboundByRun；apps/runtime/src/index.ts 的授权 run 查询；apps/desktop/src/{main,preload}.ts；apps/app/src/main.tsx 的 locatedRun 详情", "先明确现有本地 App 授权边界和状态契约，再做最小接口和现有页面行为；真实企微只在另行授权的 021 验收中复核"]
+    escalation_conditions: ["若必须放宽 IM 数据授权或更改恢复/重试语义，先说明契约变化"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
     status: done
