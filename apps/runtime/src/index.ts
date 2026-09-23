@@ -69,7 +69,7 @@ declare const __APP_VERSION__: string;
 
 const args = process.argv.slice(2);
 const PYTHON_MCP_INITIALIZATION_TIMEOUT_MS = 15_000;
-const PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS = 20_000;
+const PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS = process.platform === 'win32' ? 90_000 : 20_000;
 const execFileAsync = promisify(execFile);
 
 interface RuntimeBootstrap {
