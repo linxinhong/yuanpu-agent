@@ -166,7 +166,7 @@ public static class YuanpuJob {
       Marshal.FreeHGlobal(info);
     }
   }
-  public static int TerminateDescendants(uint rootPid) {
+  public static string TerminateDescendants(uint rootPid) {
     IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
     if (snapshot == new IntPtr(-1)) throw new InvalidOperationException("Process snapshot failed");
     var children = new Dictionary<uint, List<uint>>();
@@ -201,22 +201,28 @@ public static class YuanpuJob {
         queue.Enqueue(pid);
       }
     }
-    int terminated = 0;
+    var outcomes = new List<string>();
     for (int i = descendants.Count - 1; i >= 0; i--) {
-      IntPtr process = OpenProcess(0x100001, false, descendants[i]);
-      if (process == IntPtr.Zero) continue;
+      uint pid = descendants[i];
+      IntPtr process = OpenProcess(0x100001, false, pid);
+      if (process == IntPtr.Zero) {
+        outcomes.Add(pid + ":not-open");
+        continue;
+      }
       try {
         if (TerminateProcess(process, 1)) {
           if (WaitForSingleObject(process, 5000) != 0) {
             throw new InvalidOperationException("Timed out waiting for descendant termination");
           }
-          terminated++;
+          outcomes.Add(pid + ":terminated");
+        } else {
+          outcomes.Add(pid + ":not-terminated");
         }
       } finally {
         CloseHandle(process);
       }
     }
-    return terminated;
+    return string.Join(",", outcomes.ToArray());
   }
 }
 '@
@@ -253,7 +259,7 @@ try {
   Trace-McpStage ("active-processes-" + [YuanpuJob]::ActiveProcessCount($job))
   if (-not [YuanpuJob]::TerminateJobObject($job, 1)) { throw 'TerminateJobObject failed' }
   Trace-McpStage 'job-terminated'
-  Trace-McpStage ("escaped-descendants-terminated-" + [YuanpuJob]::TerminateDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
+  Trace-McpStage ("escaped-descendants-root-" + $env:YUANPU_MCP_CHILD_PID + '-' + [YuanpuJob]::TerminateDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
 } catch {
   Trace-McpStage ('wait-error-' + $_.Exception.GetType().Name)
   throw

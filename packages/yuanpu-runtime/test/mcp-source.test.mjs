@@ -141,7 +141,7 @@ test('an unexpected MCP root exit terminates its process group', async () => {
   const tasklist = process.platform === 'win32'
     ? execFileSync('tasklist', ['/FI', `PID eq ${childPid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' })
     : '';
-  assert.throws(() => process.kill(childPid, 0), `${stages}\ntasklist=${tasklist}`);
+  assert.throws(() => process.kill(childPid, 0), `childPid=${childPid}\n${stages}\ntasklist=${tasklist}`);
   await source.close();
 });
 

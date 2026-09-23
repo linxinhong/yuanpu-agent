@@ -80,10 +80,18 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
       - name: Test managed MCP lifecycle
+        if: runner.os != 'Windows'
         run: |
           pnpm prepare:python-capabilities
           pnpm build
           pnpm --filter @yuanpu-agent/runtime-kit test
+
+      - name: Diagnose Windows MCP descendant cleanup
+        if: runner.os == 'Windows'
+        run: |
+          pnpm prepare:python-capabilities
+          pnpm build
+          pnpm --filter @yuanpu-agent/runtime-kit exec node --test --test-name-pattern="an unexpected MCP root exit terminates its process group" test/mcp-source.test.mjs
 
       - name: Build self-contained Python capability
         env:
