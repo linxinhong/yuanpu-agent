@@ -967,7 +967,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
-    status: ready
+    status: in_progress
     goal: "验证从当前 Pi 0.86.1 镜像升级到官方 v0.87.1 对 Yuanpu 构建、Runtime、SEA 与关键业务入口的兼容性，为是否正式升级提供证据。"
     scope:
       in: ["以官方 v0.87.1 tag 和精确 commit 制作隔离同步候选", "对比 Pi 公共接口与 Yuanpu 适配边界", "在候选树执行构建、类型、单测、SEA 与受控入口烟测并记录差异"]
@@ -987,12 +987,12 @@ tasks:
     investigation_hints: ["docs/pi-integration.md、docs/pi-upstream.json、scripts/sync-pi-packages.mjs 为同步边界；候选 tag 为 https://github.com/earendil-works/pi/releases/tag/v0.87.1", "先隔离检出准确 tag，再从隔离工作树运行 pnpm sync:pi，检查镜像目录、共享 tsconfig 与 bundle helper 的差异", "按 closest Pi/Yuanpu 适配测试 → pnpm check → native 构建与烟测 → 隔离 App/Runtime 入口探针递进"]
     escalation_conditions: ["若候选需要变更 Runtime/协议/数据迁移或用户凭据才可继续验证，记录边界并请求单独实施决定"]
     result:
-      owner: null
+      owner: "codex-d21sep23-12136-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T12:26:07.216Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-030"
+      branch: "task/task-031-pi-0871-isolated-test"
       evidence: []
       follow_up_candidates: []
   - id: TASK-023
