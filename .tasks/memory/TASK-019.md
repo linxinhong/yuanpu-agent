@@ -2,13 +2,13 @@
 
 - 关键词：阶段验证、企业微信、定时任务、系统通知、渠道投递、SQLite、HTTP 400
 - Owner/验证者：`codex-t019sep23`；记录日期：2026-09-23；分支/工作树：`task/task-019-stage-verification` / `.worktrees/codex-task-019`
-- 历史源码基线 `d8564c4`、验证脚本 `0fc2458`；2026-09-23 接管后同步到 `bcbb4ea`（含 TASK-026）。结果见 `.tasks/verification/TASK-019/results.md`。阶段 **未通过**，卡片不得 complete。
+- 历史源码基线 `d8564c4`、验证脚本 `0fc2458`；2026-09-23 接管后同步到 `bcbb4ea`（含 TASK-026），最终非通知验收补测于集成 `main` `3a6f4cf`。结果见 `.tasks/verification/TASK-019/results.md`；修订后的阶段验收通过，原生通知仍未验证并转 TASK-029。
 - 历史验证材料曾并入 `main` 的 `04c5c0c`；下述 D19-01 和 HTTP 400 为修复前观测，当前结论以接管更新及 results.md 增量判定为准。
 
-## 入口与结论
+## 历史基线与入口
 
 - 同一真实 SQLite 的 `ChannelRouter`、`PersistentScheduler`、`PersistentAgentService`、`HostNotificationRouter` 组合验证位于 `packages/yuanpu-runtime/test/task-019-stage-verification.test.mjs`。两名已配对 IM sender 与到期计划并发，重复入站只执行一次；三个 run 分属隔离会话，原 `req_id` 回复与数据库 outbound/trigger 一致。伪造权限的正文没有改变可信 `channel_user` 身份。
-- 真实 Runtime HTTP 复现位于 `apps/runtime/test/task-019-channel-delivery-probe.mjs`：`POST /v1/schedules` 带 `delivery.kind=channel` 返回 400 `Schedule delivery target is not authorized.`，列表仍为空。`apps/runtime/src/index.ts` 的 scheduler caller 只授权 desktop/none，且未装配渠道投递适配器。D19-01 阻断“定时任务向绑定 IM 投递”及其失败不重跑验收。
+- 修复前真实 Runtime HTTP 复现位于 `apps/runtime/test/task-019-channel-delivery-probe.mjs`：`POST /v1/schedules` 带 `delivery.kind=channel` 返回 400 `Schedule delivery target is not authorized.`，列表仍为空。当时 `apps/runtime/src/index.ts` 的 scheduler caller 只授权 desktop/none，且未装配渠道投递适配器；D19-01 后由 TASK-026 修复并复测。
 - 企业微信本机配置现为 1 条连接、0 启用、0 配对、0 凭据引用；TASK-017/018 旧机器人与 Secret 已撤销。隔离探针已验证一名获授权成员的真实私聊收发；真实 Electron 展示/点击以及 Linux/Windows 均未验证。
 - 用户提供新 Bot 变量于 `~/.yuanpu/app/connections/.env`，权限已改为 `0600`，值未输出。DNS/TLS 通过；原配置 SDK 1.0.7 单次鉴权返回 `853000`，用户核对并更新后，同一探针返回 `authenticated=true`。复跑入口为 `packages/yuanpu-runtime/test/task-019-wecom-auth-probe.mjs`。本机现仍未启用连接或写入 Keychain。
 - 仅有一个获授权私聊测试会话，`WECOM_TEST_USER_ID` 尚未配置；`packages/yuanpu-runtime/test/task-019-wecom-live-probe.mjs` 用临时隔离连接、随机 challenge 与首次匹配后锁定 sender 的方式试收。前三轮历史尝试未见入站；第四轮 ready 后用户发送 challenge，脱敏事实为一条私聊入站、一次 Agent 执行、一次 outbound `accepted` 与 SDK `reply_ack`，用户明确确认在企业微信看到了固定回复。单会话端到端收发已通过；重复消息和故障恢复仍未验证。2026-09-23 用户明确个人助手只需自己与机器人真实私聊，第二名真人/真实双会话不再是门槛；历史双 sender fixture 仍用于隔离回归。成功探针残留进程已按 PID 停止，脚本已修正未清理的超时计时器。鉴权脚本提交 `6ce1d60` 的 `pnpm check` 已通过（runner `1790128038312650000.json`）；当前阻断项是 D19-01、其余 IM 场景以及真实 Electron 业务证据。
@@ -40,3 +40,4 @@
 - 第五条真实私聊 run 与回复都成功，但用户没看到 macOS 通知。开发版 Electron 为 ad-hoc 签名且严格校验失败；同二进制原生通知探针返回 `supported=true, failed_event`。Electron 官方文档要求 macOS 通知使用有效签名，因此需签名包再验证展示与点击；当前原因属高概率环境推断，不冒称已证明正式 App 宿主回执。TASK-019 仍 in_progress。
 - 用户确认目前没有 macOS 签名证书；仓库旧打包产物同为 ad-hoc 签名且已过时。V19-07 继续标为缺环境的 `unverified`，不请求密钥、不创建证书、不把开发版通知失败扩大为签名版产品失败。待未来取得有效签名的当前 App，再用同一私聊 run 检查原生展示、点击目标与宿主回执。
 - 用户决定本阶段忽略通知功能，后续再处理。`docs/adr/0003-defer-native-notifications.md` 将原生通知展示/点击和提醒界面移交 TASK-029；TASK-019/020/021 的完成条件相应移除通知门槛。保留以上 V19-07 原始结果和已有代码，不声称功能已通过或主动关闭。TASK-019 仍为 `in_progress`；先复核真实 App 运行中退出、重复回调与既有 fixture 的覆盖边界，不能只因通知暂缓就标 complete。本次 ZG 关系检索定位 `.tasks/tasks.yaml`、`docs/application-architecture.md` 和 TASK-019 验证记录；修订后的卡片以 `tasks validate` 校验。
+- 集成 `main` `3a6f4cf` 的隔离 Electron 探针从真实 `main.cjs`/preload IPC 提交悬停模型请求，App 正常退出后 Runtime 子进程消失；重开同一隔离 App，原 run 可查为 `result_unknown` / `possible` 且模型请求总数保持 1，再次退出也无残留。探针位于 `apps/desktop/test/task-019-electron-app-probe.mjs`，最小 renderer 只调用正式 preload；临时 App/Home/SQLite 全部清理，未碰用户的在运 App 或机器人。工作树和集成 main 各执行一次均 PASS；main 上 Node 24.15.0/pnpm 11.22.0 `pnpm check` PASS（Runtime 22/22、Desktop 20/20）。受控 App 旅程与既有单人真实 IM、调度主动投递、正常重启、权限/去重/等待授权/投递状态 fixture 合并满足修订后的 TASK-019；不宣称用户真实 IM 消息恰在执行中被关闭或原生通知可见。下一步用现有任务 CLI `preflight`/`complete` 核对、结卡，解锁 TASK-020。

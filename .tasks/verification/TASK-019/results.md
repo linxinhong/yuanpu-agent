@@ -1,7 +1,7 @@
 # IM 渠道与调度阶段验证（TASK-019）
 
 验证者：`codex-t019sep23`，非 TASK-015/016/018 主要实现者。记录日期：2026-09-23。
-任务分支：`task/task-019-stage-verification`；历史产品源码基线 `d8564c4`，原验证脚本提交 `0fc2458`；接管后同步到 `bcbb4ea`（含 TASK-026）。环境：macOS arm64、Node 24.15.0、pnpm 11.22.0、隔离临时 SQLite/Runtime、受控模型与渠道 fixture。下表保留原始观测，后续增量判定优先；本阶段总判定仍为 **未通过**。
+任务分支：`task/task-019-stage-verification`；历史产品源码基线 `d8564c4`，原验证脚本提交 `0fc2458`；接管后同步到 `bcbb4ea`（含 TASK-026）。环境：macOS arm64、Node 24.15.0、pnpm 11.22.0、隔离临时 SQLite/Runtime、受控模型与渠道 fixture。下表保留原始观测，后续增量判定优先；修订后非通知阶段在集成 `main` `3a6f4cf` 上 **通过**，原生通知仍归 TASK-029 未验证。
 
 2026-09-23 范围变更：用户明确当前产品定位为个人助手，只要求自己与机器人真实私聊。V19-06 不再以第二名真人、真实双会话或群聊为完成条件；历史两 sender fixture 继续作为权限与隔离回归，原观测不删除。单私聊成功也不豁免重复事件、断线/重启恢复、正式 App 连接和其他出口验收。权威决策见 `docs/application-architecture.md` 第 7 节，产品修复归 `补齐计划到已绑定 IM 的投递（TASK-026）`。
 
@@ -40,6 +40,8 @@
 - V19-07 原生通知真实试发 **未通过用户可见性，原因待签名包复核**：同一用户发第五条已配对私聊后，本机只读库观测到第五次 run `succeeded`、outbound `accepted`，通知功能配置为默认启用，运行 shell 未设置禁用标志；用户明确答复“没看到通知”。本机开发版 Electron 的 `codesign` 显示 `Signature=adhoc`、`TeamIdentifier=not set`，严格校验失败。同一 Electron 二进制的隔离 `apps/desktop/test/fixtures/task-019-native-notification-probe.cjs` 调用原生 `Notification.show()`，输出 `supported=true, status=failed_event`（runner `1790154233178487000.json`）。[Electron 官方通知文档](https://www.electronjs.org/docs/latest/tutorial/notifications) 说明 macOS 通知需要代码签名，未签名应用可能发出 `failed` 事件。由此推断开发版签名状态是当前不可见的高概率原因；未直接捕获正式 App 那条通知的宿主回执，不能断言唯一根因。点击跳转没有通知可点，仍 **unverified**；需有效签名包复测，Linux/Windows 亦未验证。探针仅输出支持/事件状态，临时用户目录已清理，未读取通知中心或其他个人通知。
 - 用户说明目前没有可用的 macOS 签名证书；仓库现有 2026-09-21 打包产物也仅为旧版 ad-hoc 签名且严格校验失败，不能代替当前 App 的通知显示/点击验收。本轮不创建或索取签名凭据、不修改安全设置、不把未执行的签名包试验写成产品失败。V19-07 保留 **unverified（缺有效签名验收环境）**，TASK-019 保持 `in_progress`；已有 IM 私聊收发、重启与隔离运行中退出证据不受此限制影响。
 - 用户随后要求暂缓通知功能（决策见 `docs/adr/0003-defer-native-notifications.md`）。自本次范围修订起，V19-07 不再是 TASK-019/020/021 的完成门槛，原始未见通知、开发版 `failed_event` 和未完成点击观察均保留；通知界面与有效签名版展示/点击移交 TASK-029。TASK-019 仍为 `in_progress`：正式 App 单人私聊和主动投递、干净重启均已有证据，受控 Runtime 运行中退出也通过，但尚须独立复核真实 App 运行中中断及重复回调覆盖能否满足修订后的非通知验收，不能借范围变更直接标 done。
+- V19-03 补测于集成 `main` `3a6f4cf` **pass（隔离 Electron App）**：`apps/desktop/test/task-019-electron-app-probe.mjs` 在临时 `YUANPU_HOME` 中启动真实 `apps/desktop/dist/main.cjs`、preload 与 Runtime，由最小受信 renderer 通过正式 IPC 提交 desktop 对话；本机受控模型服务收到唯一请求并故意悬停。App 退出事件调用生产 `RuntimeManager.stop()` 后，Runtime 子进程消失，SQLite 中该 run 为 `result_unknown` / `external_effect_state=possible`。第二次启动同一 App，renderer 通过正式 `getAgentRun` IPC 仍能查询原 run，模型请求仍只有 1 次；第二次退出后也无 Runtime 子进程。脚本独立执行退出码 0，脱敏摘要 `appLaunches=2, modelRequests=1, recoveredStatus=result_unknown, runtimeChildrenStopped=true`。这是生产 Electron 宿主/IPC/Runtime 的隔离用户旅程，不是中断用户现有企业微信聊天；等待授权、计划投递未知及去重仍由同 revision 的 `agent-service.test.mjs`、`scheduler.test.mjs`、`task-019-stage-verification.test.mjs` 断言。
+- 非通知范围复核：V19-01 的 IM/计划并发、平台重复回调、未配对拒绝与跨会话隔离由真实 SQLite fixture 覆盖；V19-02 的单人主动投递和原私聊回复有用户可见证据，失败/未知不重跑由计划 fixture 覆盖；V19-04 权限隔离、V19-05 执行/投递状态、V19-06 正式 App 私聊与重启回复均有上述历史证据。历史 D19-01 失败已由 TASK-026 修复并复测。`pnpm check` 在集成 `main` `3a6f4cf` 上通过（Node 24.15.0/pnpm 11.22.0；Runtime 22/22、Desktop 20/20）；通知 V19-07 的开发版未见/`failed_event` 仍保留为 TASK-029 未验证，不在本阶段冒称通过。
 
 ## 执行记录
 
@@ -61,6 +63,6 @@
 
 ## 阻断与下一步
 
-D19-01 的实现缺口已由 TASK-026 修复；同一位获授权用户已确认真实原会话回复和定时主动投递均可见，正式 App 重启后收发也通过。下一步仅复核剩余非通知门槛，尤其真实 App 运行中退出与重复回调的证据边界；缺口须明确记录，不能因暂缓通知直接标记 TASK-019 完成。V19-07 的系统展示/点击与提醒管理留给 TASK-029；第二名真人或群聊不是门槛。
+D19-01 的实现缺口已由 TASK-026 修复；同一位获授权用户已确认真实原会话回复和定时主动投递均可见，正式 App 重启后收发也通过。修订后非通知阶段的运行中退出已由集成版本的隔离 Electron 旅程补齐，重复回调/计划触发由可重复 fixture 覆盖；TASK-019 可据上述范围与证据完成。V19-07 系统展示/点击及提醒管理仍未验证，留给 TASK-029；第二名真人或群聊不是门槛，也不宣称执行过用户真实 IM 会话的运行中强制中断。
 
 检索：接管后 ZG 查询 TASK-019/TASK-026 的 Runtime 调度、绑定私聊、宿主通知关系，返回 fresh；据 `.tasks/tasks.yaml`、TASK-019 memory 和 `apps/runtime/src/scheduled-im-delivery.ts` 用 scoped `rg` 核对装配与测试。未创建索引。
