@@ -35,6 +35,8 @@ if (!botId || !secret) {
   const sdkEvents = {};
   let agent;
   let router;
+  let authenticationTimer;
+  let replyTimer;
   try {
     agent = await PersistentAgentService.open({
       store: database.agentRuns,
@@ -103,8 +105,9 @@ if (!botId || !secret) {
     router.start();
     const authenticated = await Promise.race([
       transport.ready().then(() => true),
-      new Promise((resolve) => setTimeout(() => resolve(false), 15_000)),
+      new Promise((resolve) => { authenticationTimer = setTimeout(() => resolve(false), 15_000); }),
     ]);
+    clearTimeout(authenticationTimer);
     if (!authenticated) {
       console.log(JSON.stringify({ status: 'authentication_timeout', sdkEvents }));
       process.exitCode = 1;
@@ -112,8 +115,9 @@ if (!botId || !secret) {
       console.log(JSON.stringify({ status: 'ready', challenge }));
       const replied = await Promise.race([
         replyObserved.then(() => true),
-        new Promise((resolve) => setTimeout(() => resolve(false), 240_000)),
+        new Promise((resolve) => { replyTimer = setTimeout(() => resolve(false), 240_000); }),
       ]);
+      clearTimeout(replyTimer);
       await agent.waitForIdle();
       const inspection = new DatabaseSync(databasePath, { readOnly: true });
       const runCount = inspection.prepare('SELECT COUNT(*) AS count FROM yp_agent_runs').get().count;
@@ -141,6 +145,8 @@ if (!botId || !secret) {
     console.log(JSON.stringify({ status: 'probe_error' }));
     process.exitCode = 1;
   } finally {
+    clearTimeout(authenticationTimer);
+    clearTimeout(replyTimer);
     await router?.close();
     await agent?.close();
     database.close();
