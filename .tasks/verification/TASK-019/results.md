@@ -26,6 +26,9 @@
 - `pnpm check` 在 `bcbb4ea` 加本轮验证脚本/证据改动的工作树上以 Node 24.15.0、pnpm 11.22.0 完整通过（runner `1790139710927758000.json`）；生成的无关 lockfile checksum 已移除。此门禁不代替未收到口令的真实平台试发。
 - V19-07 尝试：以仅含临时工作区、故意不存在的模型密钥和禁用 IM 连接的隔离 `YUANPU_HOME` 运行 `pnpm dev`。Vite、catalog、Electron 进程均启动，但 Computer Use 读取 Electron 窗口连续超时；未提交 Agent run，因而没有生成可供观察的原生通知。判定 **unverified（桌面自动化环境/窗口读取）**，不记产品故障或展示通过。已以 SIGINT 停止开发进程，确认 5173/8787 无监听，并删除本轮 268 KB 临时家目录；用户现有配置未改。
 
+- 用户回复“准备好了”后重新启动独占官方 SDK 长连接探针，确认环境变量存在且没有其他匹配监听进程；`ready` 后发送本轮随机口令。脱敏观测为 `inboundSeen=1`、`matched=1`、`executions=2`、`runCount=2`、`proactiveStatus=accepted`、`scheduledDeliveryStatus=delivered`、`notificationStatus=submitted`，SDK 有 `wecom.reply_ack=1`；用户明确确认企业微信私聊窗口看到了 **2 条**机器人消息。因此 V19-02 的单用户真实定时主动投递及原私聊可见性 **pass**，但通知 `submitted` 仅为 fixture 宿主确认，不是系统展示。探针快照过早，曾输出 `outboundStatuses=[delivering]`、`replyStatus=null` 并退出码 1；结合 SDK reply ack 与用户实际可见两条消息，此非零退出不能作为产品投递失败。已将探针改为有界等待即时回复 outbound 离开 `delivering` 后再汇总，尚未用第二次真实发送验证该脚本修正。临时 SQLite 与长连接已清理；记录不含凭据、真实 userid 或用户消息正文。
+- 上述脚本与证据更新后，`node --check`、`git diff --check` 和 Node 24.15.0/pnpm 11.22.0 的 `pnpm check` 全部通过（runtime-kit 122/122、Runtime 15/15）；安装产生的无关 lockfile checksum 已移除。完整检查不代替未验证的 Electron 通知与重启业务旅程。
+
 ## 执行记录
 
 - `node --test packages/yuanpu-runtime/test/task-019-stage-verification.test.mjs packages/yuanpu-runtime/test/channels.test.mjs packages/yuanpu-runtime/test/scheduler.test.mjs packages/yuanpu-runtime/test/notifications.test.mjs`：27/27 pass，runner 记录 `1790126411085618000.json`。
@@ -46,6 +49,6 @@
 
 ## 阻断与下一步
 
-D19-01 的实现缺口已由 TASK-026 修复并通过独立 fixture 回归；仍需同一位获授权用户在探针 `ready` 后发送当轮口令，确认原会话回复和定时主动投递两条消息均可见。不得复用已经超时的旧口令。随后验证正式 App 连接、断线/重启及真实 Electron 通知展示/点击；第二名真人或群聊不是门槛。完成这些真实旅程与 `pnpm check` 前不得标记 TASK-019 完成或解锁管理界面卡。
+D19-01 的实现缺口已由 TASK-026 修复；同一位获授权用户已经确认本轮真实原会话回复和定时主动投递两条消息均可见。下一步是正式 App 连接、断线/重启及真实 Electron 通知展示/点击；第二名真人或群聊不是门槛。完成这些真实旅程与 `pnpm check` 前不得标记 TASK-019 完成或解锁管理界面卡。
 
 检索：接管后 ZG 查询 TASK-019/TASK-026 的 Runtime 调度、绑定私聊、宿主通知关系，返回 fresh；据 `.tasks/tasks.yaml`、TASK-019 memory 和 `apps/runtime/src/scheduled-im-delivery.ts` 用 scoped `rg` 核对装配与测试。未创建索引。

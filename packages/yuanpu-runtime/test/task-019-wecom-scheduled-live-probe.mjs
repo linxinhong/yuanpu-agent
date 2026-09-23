@@ -186,11 +186,17 @@ if (!botId || !secret) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       await scheduler.tick();
     }
-    const inspection = new DatabaseSync(path, { readOnly: true });
-    const runCount = inspection.prepare('SELECT COUNT(*) AS count FROM yp_agent_runs').get().count;
-    const outboundStatuses = inspection.prepare('SELECT status FROM yp_channel_outbound').all()
-      .map((row) => row.status);
-    inspection.close();
+    let runCount;
+    let outboundStatuses;
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      const inspection = new DatabaseSync(path, { readOnly: true });
+      runCount = inspection.prepare('SELECT COUNT(*) AS count FROM yp_agent_runs').get().count;
+      outboundStatuses = inspection.prepare('SELECT status FROM yp_channel_outbound').all()
+        .map((row) => row.status);
+      inspection.close();
+      if (outboundStatuses.length === 1 && outboundStatuses[0] !== 'delivering') break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     console.log(JSON.stringify({
       status: 'completed', inboundSeen, matched, executions, runCount,
       outboundStatuses, replyStatus: replyStatus ?? null,

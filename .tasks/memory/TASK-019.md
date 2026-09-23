@@ -28,3 +28,4 @@
 - 隔离 `YUANPU_HOME` 的开发版 Electron 已启动，但 Computer Use 读取窗口连续超时，未触发运行或通知；V19-07 保持未验证。开发进程和临时家目录已清理，用户配置未动；勿将 UI 自动化超时当作系统通知失败。
 - 后续先在探针 ready 后请同一获授权用户发当轮新口令，并确认两条消息可见；再测正式 App 连接、退出/重启、真实 Electron 通知展示与点击。未覆盖前不得 complete。旧验证脚本和事实保留作为历史，不把 fixture `submitted` 当作用户可见。
 - 检索：本轮 ZG 针对 TASK-019/TASK-026 的 Runtime、绑定私聊与通知关系返回 fresh，随后 scoped `rg` 核对 `scheduled-im-delivery.ts`、SDK 适配和相邻测试；未建索引。
+- 本轮重新 ready 后收到同一授权用户的随机私聊口令：一次入站、两次 Agent 执行与两条持久 run，定时主动发送平台回执 `accepted`、计划 `delivered`；用户确认在企业微信看到两条机器人消息。V19-02 的真实单用户主动投递已通过。探针曾在即时回复 outbound 仍为 `delivering` 时过早取快照而退出 1；SDK 已有 reply ack，且用户看到两条，故不记产品失败。脚本现增加 15 秒有界等待，修正本身尚未再次实发验证。正式 App 连接、重启组合和真实 Electron 通知展示/点击仍未验收，TASK-019 保持 in_progress。
