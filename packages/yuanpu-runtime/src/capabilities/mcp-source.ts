@@ -166,19 +166,15 @@ public static class YuanpuJob {
       Marshal.FreeHGlobal(info);
     }
   }
-  public static string TerminateDescendants(uint rootPid) {
+  public static List<uint> FindDescendants(uint rootPid) {
     IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
     if (snapshot == new IntPtr(-1)) throw new InvalidOperationException("Process snapshot failed");
     var children = new Dictionary<uint, List<uint>>();
-    var pythonProcesses = new List<string>();
     try {
       ProcessEntry entry = new ProcessEntry();
       entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
       if (Process32FirstW(snapshot, ref entry)) {
         do {
-          if (entry.Executable != null && entry.Executable.EndsWith("python.exe", StringComparison.OrdinalIgnoreCase)) {
-            pythonProcesses.Add(entry.ProcessId + ":" + entry.ParentProcessId);
-          }
           List<uint> siblings;
           if (!children.TryGetValue(entry.ParentProcessId, out siblings)) {
             siblings = new List<uint>();
@@ -205,6 +201,30 @@ public static class YuanpuJob {
         queue.Enqueue(pid);
       }
     }
+    return descendants;
+  }
+  public static string AssignDescendantsToJob(IntPtr job, uint rootPid) {
+    var outcomes = new List<string>();
+    foreach (uint pid in FindDescendants(rootPid)) {
+      IntPtr process = OpenProcess(0x101101, false, pid);
+      if (process == IntPtr.Zero) {
+        outcomes.Add(pid + ":not-open");
+        continue;
+      }
+      try {
+        if (WaitForSingleObject(process, 0) != 0) {
+          outcomes.Add(pid + (AssignProcessToJobObject(job, process) ? ":assigned" : ":not-assigned"));
+        } else {
+          outcomes.Add(pid + ":exited");
+        }
+      } finally {
+        CloseHandle(process);
+      }
+    }
+    return string.Join(",", outcomes.ToArray());
+  }
+  public static string TerminateDescendants(uint rootPid) {
+    var descendants = FindDescendants(rootPid);
     var outcomes = new List<string>();
     for (int i = descendants.Count - 1; i >= 0; i--) {
       uint pid = descendants[i];
@@ -226,7 +246,7 @@ public static class YuanpuJob {
         CloseHandle(process);
       }
     }
-    return string.Join(",", outcomes.ToArray()) + ";python=" + string.Join(",", pythonProcesses.ToArray());
+    return string.Join(",", outcomes.ToArray());
   }
 }
 '@
@@ -256,6 +276,7 @@ try {
     throw 'Assign child to Job Object failed'
   }
   Trace-McpStage 'job-assigned'
+  Trace-McpStage ("descendants-at-start-" + [YuanpuJob]::AssignDescendantsToJob($job, [uint32]$env:YUANPU_MCP_CHILD_PID))
   [Console]::Out.WriteLine('READY')
   [Console]::Out.Flush()
   $waitResult = [YuanpuJob]::WaitForSingleObject($process, [uint32]::MaxValue)
