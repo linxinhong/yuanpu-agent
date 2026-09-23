@@ -1037,7 +1037,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-034
     title: "修复跨平台打包验证流水线"
-    status: in_progress
+    status: done
     goal: "修复 TASK-021 三平台扩展验收发现的构建前置与空配置处理，使 macOS、Windows、Linux 在各自 runner 上完成原有 Runtime smoke 与桌面打包步骤。"
     scope:
       in: ["Runtime Bundle 测试前构建所需 workspace 依赖", "Windows 模型数据补全脚本的 pnpm 子进程启动", "无生产信任根时 CI 空签名 Key ID 的开发构建处理", "三个目标平台原工作流复验"]
@@ -1062,10 +1062,14 @@ tasks:
       owner: "codex-task021-followup-20260923-12136"
       attempts: 0
       claimed_at: "2026-09-23T14:17:37.367Z"
-      completed_at: null
+      completed_at: "2026-09-23T18:57:39.838Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-032"
       branch: "task/task-034-platform-bundle-ci"
-      evidence: []
+      evidence:
+        - {type: "verification", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0; main 32e9a18 (identical tree at merge 29f3740); worktree-kit record /Users/linxinhong/projects/yuanpu-agent/.git/coding-owner/1790189743466427000.json. Unrelated pre-existing uncommitted user files were preserved."}
+        - {type: "verification", check: "Runtime Bundle original three-platform matrix", status: "passed", summary: "Source a0ad030; https://github.com/linxinhong/yuanpu-agent/actions/runs/35904726800: macOS arm64, Windows x64, Linux x64 all passed managed MCP tests, Python artifact, SEA and update smoke, packaging and artifact upload."}
+        - {type: "verification", check: "Desktop Bundle original three-platform matrix", status: "passed", summary: "Source a0ad030; https://github.com/linxinhong/yuanpu-agent/actions/runs/35904726783: macOS arm64, Windows x64, Linux x64 all passed desktop build and artifact upload, including Windows native capability smoke."}
+        - {type: "handoff", check: "TASK-034 durable memory and limits", status: "passed", summary: "Integrated .tasks/memory/TASK-034.md at main 32e9a18; temporary CI diagnostic filtering removed. Production signing and real desktop user-journey acceptance remain outside TASK-034."}
       follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
