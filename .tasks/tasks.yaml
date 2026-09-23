@@ -929,6 +929,38 @@ tasks:
       branch: null
       evidence: []
       follow_up_candidates: []
+  - id: TASK-030
+    title: "修复 SEA 更新回退后的用户提示"
+    status: ready
+    goal: "修复 TASK-021 的 D21-01：已安全回退的不兼容 Runtime 更新应在打包 App 中明确告知用户。"
+    scope:
+      in: ["Runtime 更新回退事件到受信任渲染进程的最小桥接", "可关闭的用户可见提示", "隔离打包版回归探针"]
+      out: ["改变 SEA 更新或 SQLite 回滚策略", "生产签名、Windows/Linux 验收", "在修复卡内宣称 TASK-021 整体完成"]
+    constraints: ["仅传递脱敏的错误类别和固定文案，不向渲染进程暴露原始 stderr、路径或凭据", "恢复成功继续打开 App，退出仍清理 Runtime 子进程", "完成须集成并验证于 main"]
+    forbidden: ["用日志代替用户可见提示", "触碰真实机器人配置或测试会话", "覆盖用户既有改动"]
+    acceptance:
+      - type: assertion
+        expect: "不兼容的已暂存 Runtime 启动失败并成功回退时，打包 App 明确显示更新不兼容且已恢复，用户可关闭提示，原任务数据可见"
+      - type: assertion
+        expect: "正常启动不显示误导性提示；其他回退错误不泄漏原始诊断；失败回退不妨碍 App 打开或改变更新策略"
+      - type: assertion
+        expect: "D21-01 的隔离打包 App 探针在当前修复 revision 重跑并通过，TASK-021 独立验收仍按原边界记录"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-020"]
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: [".tasks/verification/TASK-021/results.md 的 D21-01", "apps/desktop/src/runtime-manager.ts 的 startInternal/reportError；apps/desktop/src/main.ts、preload.ts；apps/app/src/main.tsx", "使用 apps/desktop/test/task-021-packaged-electron-app-probe.mjs 的隔离场景复验，不接入真实机器人"]
+    escalation_conditions: ["若需修改 Runtime 协议或回滚持久化策略，先说明契约冲突"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
   - id: TASK-023
     title: "确定微信 ClawBot 适配架构与安全边界"
     status: pending
