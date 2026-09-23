@@ -24,6 +24,7 @@
 - 新增 `packages/yuanpu-runtime/test/task-019-wecom-scheduled-live-probe.mjs`，使用 `.env` 的两个变量、随机私聊口令和临时 SQLite，在真实入站后才从认证 sender 显式绑定并触发一次定时主动发送。本轮 SDK 已 authenticated，但 180 秒窗口中 `inboundSeen=0`、`matched=0`、`executions=0`，脱敏事件仅有连接/帧/鉴权/心跳；用户尚未确认在该窗口发送口令。该尝试为 **unverified（缺用户输入）**，不是新产品故障，不推翻历史单私聊收发成功。探针正常关闭并清除临时数据库；不保留原始 userid、密钥或消息正文。
 - 本轮 `pnpm build:runtime` PASS（runner `1790139225579356000.json`）；上述 focused PASS；新探针 `node --check` PASS（`1790139363631328000.json`）。本轮尚未做真实 Electron 通知展示/点击，也未完成正式 App 的连接配置、退出/重启组合验收。
 - `pnpm check` 在 `bcbb4ea` 加本轮验证脚本/证据改动的工作树上以 Node 24.15.0、pnpm 11.22.0 完整通过（runner `1790139710927758000.json`）；生成的无关 lockfile checksum 已移除。此门禁不代替未收到口令的真实平台试发。
+- V19-07 尝试：以仅含临时工作区、故意不存在的模型密钥和禁用 IM 连接的隔离 `YUANPU_HOME` 运行 `pnpm dev`。Vite、catalog、Electron 进程均启动，但 Computer Use 读取 Electron 窗口连续超时；未提交 Agent run，因而没有生成可供观察的原生通知。判定 **unverified（桌面自动化环境/窗口读取）**，不记产品故障或展示通过。已以 SIGINT 停止开发进程，确认 5173/8787 无监听，并删除本轮 268 KB 临时家目录；用户现有配置未改。
 
 ## 执行记录
 

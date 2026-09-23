@@ -25,5 +25,6 @@
 - TASK-026 已完成，`apps/runtime/src/scheduled-im-delivery.ts` 经显式绑定后授权计划目标，`ScheduleHistoryRecord` 分列 IM/通知状态。`bcbb4ea` 上 `pnpm build:runtime` PASS（`1790139225579356000.json`），TASK-019 组合及 channel/scheduler/notification/persistence/Runtime 绑定投递 focused PASS（`1790139247012214000.json`）。D19-01 旧探针仍提交任意 route，预期 400，不能再用作成功判据。
 - 新增 `packages/yuanpu-runtime/test/task-019-wecom-scheduled-live-probe.mjs`：通过 `.env` 变量而非读取/输出值，真实私聊挑战命中后才观察成员、绑定临时目标并主动投递。第一轮 SDK authenticated，但 180 秒内无入站，用户未确认在窗口内发送；判定环境未完成，不是产品失败。进程与临时 SQLite 已清理。
 - `pnpm check` 在本轮工作树与 `bcbb4ea` 基线上通过（Node 24.15.0，runner `1790139710927758000.json`）；验证脚本与证据改动不代表真实业务已通过。
+- 隔离 `YUANPU_HOME` 的开发版 Electron 已启动，但 Computer Use 读取窗口连续超时，未触发运行或通知；V19-07 保持未验证。开发进程和临时家目录已清理，用户配置未动；勿将 UI 自动化超时当作系统通知失败。
 - 后续先在探针 ready 后请同一获授权用户发当轮新口令，并确认两条消息可见；再测正式 App 连接、退出/重启、真实 Electron 通知展示与点击。未覆盖前不得 complete。旧验证脚本和事实保留作为历史，不把 fixture `submitted` 当作用户可见。
 - 检索：本轮 ZG 针对 TASK-019/TASK-026 的 Runtime、绑定私聊与通知关系返回 fresh，随后 scoped `rg` 核对 `scheduled-im-delivery.ts`、SDK 适配和相邻测试；未建索引。
