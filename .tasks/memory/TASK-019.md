@@ -2,8 +2,8 @@
 
 - 关键词：阶段验证、企业微信、定时任务、系统通知、渠道投递、SQLite、HTTP 400
 - Owner/验证者：`codex-t019sep23`；记录日期：2026-09-23；分支/工作树：`task/task-019-stage-verification` / `.worktrees/codex-task-019`
-- 产品源码基线 `d8564c4`；验证脚本提交 `0fc2458`；结果见 `.tasks/verification/TASK-019/results.md`。当前阶段 **未通过**，卡片不得 complete。
-- 验证材料快进并入本地 `main` 的 `04c5c0c`，集成后的 `pnpm check` 再次通过；产品缺口未修复。
+- 历史源码基线 `d8564c4`、验证脚本 `0fc2458`；2026-09-23 接管后同步到 `bcbb4ea`（含 TASK-026）。结果见 `.tasks/verification/TASK-019/results.md`。阶段 **未通过**，卡片不得 complete。
+- 历史验证材料曾并入 `main` 的 `04c5c0c`；下述 D19-01 和 HTTP 400 为修复前观测，当前结论以接管更新及 results.md 增量判定为准。
 
 ## 入口与结论
 
@@ -19,3 +19,11 @@
 - 工作树准备使用 `worktree-kit.py prepare/doctor/run`；安装按仓库命令加 `--ignore-pnpmfile`，不要使用 helper 的默认 frozen install；它会遇到 pnpmfile checksum 不匹配。
 - 下一步：`补齐计划到已绑定 IM 的投递（TASK-026）` 修复 D19-01；集成后重跑 API 探针、渠道失败/未知组合与 `pnpm check`。用户已确认后台是长连接；其给的官方 path/100719 与 path/101039 均描述 HTTP 回调，长连接规范是 path/101463。该规范限定每机器人同时一条有效连接；第四轮真实探针已收到应用消息并从入站 sender 路由回复，不需预配置 `WECOM_TEST_USER_ID` 才能接收。用同一授权用户补齐去重、断线/重启、正式 App 连接及真实 Electron 验收；不要求第二成员。不要把 fixture 通知 `submitted` 写成用户已看到。
 - 检索：ZG 关系查询定位 `apps/runtime/src/index.ts`、`.tasks/tasks.yaml`、`docs/application-architecture.md`，再用 scoped `rg` 找到 scheduler 授权及相邻测试；未重建索引。
+
+## 2026-09-23 接管更新
+
+- TASK-026 已完成，`apps/runtime/src/scheduled-im-delivery.ts` 经显式绑定后授权计划目标，`ScheduleHistoryRecord` 分列 IM/通知状态。`bcbb4ea` 上 `pnpm build:runtime` PASS（`1790139225579356000.json`），TASK-019 组合及 channel/scheduler/notification/persistence/Runtime 绑定投递 focused PASS（`1790139247012214000.json`）。D19-01 旧探针仍提交任意 route，预期 400，不能再用作成功判据。
+- 新增 `packages/yuanpu-runtime/test/task-019-wecom-scheduled-live-probe.mjs`：通过 `.env` 变量而非读取/输出值，真实私聊挑战命中后才观察成员、绑定临时目标并主动投递。第一轮 SDK authenticated，但 180 秒内无入站，用户未确认在窗口内发送；判定环境未完成，不是产品失败。进程与临时 SQLite 已清理。
+- `pnpm check` 在本轮工作树与 `bcbb4ea` 基线上通过（Node 24.15.0，runner `1790139710927758000.json`）；验证脚本与证据改动不代表真实业务已通过。
+- 后续先在探针 ready 后请同一获授权用户发当轮新口令，并确认两条消息可见；再测正式 App 连接、退出/重启、真实 Electron 通知展示与点击。未覆盖前不得 complete。旧验证脚本和事实保留作为历史，不把 fixture `submitted` 当作用户可见。
+- 检索：本轮 ZG 针对 TASK-019/TASK-026 的 Runtime、绑定私聊与通知关系返回 fresh，随后 scoped `rg` 核对 `scheduled-im-delivery.ts`、SDK 适配和相邻测试；未建索引。

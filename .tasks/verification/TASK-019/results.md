@@ -1,7 +1,7 @@
 # 通知渠道与调度阶段验证（TASK-019）
 
 验证者：`codex-t019sep23`，非 TASK-015/016/018 主要实现者。记录日期：2026-09-23。
-任务分支：`task/task-019-stage-verification`；产品源码基线 `d8564c4`，验证脚本提交 `0fc2458`。环境：macOS arm64、Node 24.15.0、pnpm 11.22.0、隔离临时 SQLite/Runtime、受控模型与渠道 fixture。以下 `pass` 仅覆盖所注明模式；本阶段总判定 **未通过**。
+任务分支：`task/task-019-stage-verification`；历史产品源码基线 `d8564c4`，原验证脚本提交 `0fc2458`；接管后同步到 `bcbb4ea`（含 TASK-026）。环境：macOS arm64、Node 24.15.0、pnpm 11.22.0、隔离临时 SQLite/Runtime、受控模型与渠道 fixture。下表保留原始观测，后续增量判定优先；本阶段总判定仍为 **未通过**。
 
 2026-09-23 范围变更：用户明确当前产品定位为个人助手，只要求自己与机器人真实私聊。V19-06 不再以第二名真人、真实双会话或群聊为完成条件；历史两 sender fixture 继续作为权限与隔离回归，原观测不删除。单私聊成功也不豁免重复事件、断线/重启恢复、正式 App 连接和其他出口验收。权威决策见 `docs/application-architecture.md` 第 7 节，产品修复归 `补齐计划到已绑定 IM 的投递（TASK-026）`。
 
@@ -16,6 +16,14 @@
 | V19-05 结果语义 | 区分执行失败、投递失败、投递未知和通知 `submitted`；用持久事实确认合法状态转换和执行次数。 | **pass（组件 fixture），组合未验证**。`channels.test.mjs`、`scheduler.test.mjs`、`notifications.test.mjs` 和新组合测试均重跑通过。`submitted` 的 `userVisibility` 为 `unknown`；真实系统展示及计划到 IM 的失败链路尚未证实。 |
 | V19-06 企业微信真实收发 | 同一获授权用户在真实私聊得到原会话回复；重复事件、恢复及正式 App 连接另行验证，跨身份/会话隔离用 fixture。 | **部分通过（单私聊收发）**。前三轮历史试收未观察到入站；第四轮在探针 ready 后，用户发送一次性口令，脱敏事实为 `inboundSeen=1`、`privateTextSeen=1`、`matched=1`、`executions=1`、`runCount=1`、唯一 outbound `accepted`，SDK 有 `wecom.reply_ack=1`，平台回执 `accepted`。用户随后确认在企业微信私聊窗口看到固定测试回复。因此单会话入站、Agent 执行、回复与用户可见性均已验证，先前 0 入站不能再当作持续阻断。重复消息、故障恢复及正式 App 连接尚未验证；第二成员/真实双会话已不属于当前门槛。本机正式连接仍未启用/配对/绑定 Keychain。凭据值、真实 sender 和消息正文未输出到日志或验收记录；探针只在内存中比对消息口令，并在临时 SQLite 中保存 sender 摘要。 |
 | V19-07 原生通知与平台 | 在真实 Electron 中展示并点击通知，分别记录目标系统和外部平台结果。 | **unverified**。重跑的 Electron host fixture 证明提交/权限/去重/点击目标校验，但本轮未观察操作系统展示、点击导航或 Linux/Windows 行为。`submitted` 不代表用户看到。 |
+
+## 2026-09-23 接管后增量判定
+
+- V19-02 的历史 D19-01 已由 TASK-026 在 `2ef87e0` 修复。`bcbb4ea` 上重跑真实 SQLite、认证 loopback HTTP 的 `apps/runtime/test/scheduled-im-delivery.test.mjs`，覆盖观察联系人、显式绑定、计划 201、两个出口分别失败仍只执行一次 Agent、撤销旧目标；连同 TASK-019/渠道/调度/通知/迁移邻近测试全部通过（runner `1790139247012214000.json`）。故 V19-02 现为 **pass（隔离 fixture）/真实企业微信主动投递未验证**。旧 `task-019-channel-delivery-probe.mjs` 使用任意合成 route，新授权契约下仍应 400，不能再作成功探针。
+- V19-05 现为 **pass（组合 fixture）/真实系统未验证**：计划历史分列 IM `deliveryStatus` 与原生通知宿主 `notificationStatus`；`submitted` 只说明宿主提交，用户可见性未知。
+- 新增 `packages/yuanpu-runtime/test/task-019-wecom-scheduled-live-probe.mjs`，使用 `.env` 的两个变量、随机私聊口令和临时 SQLite，在真实入站后才从认证 sender 显式绑定并触发一次定时主动发送。本轮 SDK 已 authenticated，但 180 秒窗口中 `inboundSeen=0`、`matched=0`、`executions=0`，脱敏事件仅有连接/帧/鉴权/心跳；用户尚未确认在该窗口发送口令。该尝试为 **unverified（缺用户输入）**，不是新产品故障，不推翻历史单私聊收发成功。探针正常关闭并清除临时数据库；不保留原始 userid、密钥或消息正文。
+- 本轮 `pnpm build:runtime` PASS（runner `1790139225579356000.json`）；上述 focused PASS；新探针 `node --check` PASS（`1790139363631328000.json`）。本轮尚未做真实 Electron 通知展示/点击，也未完成正式 App 的连接配置、退出/重启组合验收。
+- `pnpm check` 在 `bcbb4ea` 加本轮验证脚本/证据改动的工作树上以 Node 24.15.0、pnpm 11.22.0 完整通过（runner `1790139710927758000.json`）；生成的无关 lockfile checksum 已移除。此门禁不代替未收到口令的真实平台试发。
 
 ## 执行记录
 
@@ -37,6 +45,6 @@
 
 ## 阻断与下一步
 
-D19-01 是 TASK-019 的阻断缺陷，已抽出 `补齐计划到已绑定 IM 的投递（TASK-026）`：需实现 Runtime 对已绑定 IM route 的计划投递授权与渠道 delivery adapter，明确未知发送不自动重发且失败不重跑 Agent。修复并集成后先重跑 API 探针并补充真实 SQLite + 渠道投递失败/未知组合，再重跑 `pnpm check`。新 Bot 的一次授权私聊已完成真实收发和用户可见确认；无需再将 user_id 视为入站前置条件。后续只需同一位获授权用户完成重复消息、断线/重启与正式 App 连接验证，不要求第二名真人。最后用真实 Electron 完成 V19-07；通过前不得标记 TASK-019 完成或解锁管理界面卡。
+D19-01 的实现缺口已由 TASK-026 修复并通过独立 fixture 回归；仍需同一位获授权用户在探针 `ready` 后发送当轮口令，确认原会话回复和定时主动投递两条消息均可见。不得复用已经超时的旧口令。随后验证正式 App 连接、断线/重启及真实 Electron 通知展示/点击；第二名真人或群聊不是门槛。完成这些真实旅程与 `pnpm check` 前不得标记 TASK-019 完成或解锁管理界面卡。
 
-检索：原验证 ZG 查询“TASK-019 阶段验证：Runtime API/SQLite 中 IM、调度、通知的组装路径及持久状态”，有用路径为 `apps/runtime/src/index.ts`、`.tasks/tasks.yaml` 与 `docs/application-architecture.md`，返回 fresh；本次架构调整仅以已知文件/符号为精确锚点，用 scoped `rg` 查 `.tasks/tasks.yaml`、`apps/runtime/src/index.ts`、scheduler/channel 邻近源码；未创建索引。
+检索：接管后 ZG 查询 TASK-019/TASK-026 的 Runtime 调度、绑定私聊、宿主通知关系，返回 fresh；据 `.tasks/tasks.yaml`、TASK-019 memory 和 `apps/runtime/src/scheduled-im-delivery.ts` 用 scoped `rg` 核对装配与测试。未创建索引。
