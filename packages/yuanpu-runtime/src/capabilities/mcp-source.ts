@@ -127,8 +127,11 @@ try {
   Trace-McpStage 'job-assigned'
   [Console]::Out.WriteLine('READY')
   [Console]::Out.Flush()
-  $waitResult = [YuanpuJob]::WaitForSingleObject($process, 0xFFFFFFFF)
+  $waitResult = [YuanpuJob]::WaitForSingleObject($process, [uint32]::MaxValue)
   Trace-McpStage "wait-result-$waitResult"
+} catch {
+  Trace-McpStage ('wait-error-' + $_.Exception.GetType().Name)
+  throw
 } finally {
   [YuanpuJob]::CloseHandle($process) | Out-Null
   [YuanpuJob]::CloseHandle($job) | Out-Null
