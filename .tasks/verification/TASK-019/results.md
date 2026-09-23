@@ -20,6 +20,7 @@
 - `node --test packages/yuanpu-runtime/test/task-019-stage-verification.test.mjs packages/yuanpu-runtime/test/channels.test.mjs packages/yuanpu-runtime/test/scheduler.test.mjs packages/yuanpu-runtime/test/notifications.test.mjs`：27/27 pass，runner 记录 `1790126411085618000.json`。
 - Runtime 通知/企业微信装配 focused：5/5 pass，记录 `1790126411085624000.json`；Desktop notification host focused：5/5 pass，记录 `1790126411078917000.json`。
 - `pnpm check`：pass，runtime-kit 113/113、Runtime 14/14、Desktop 20/20，含构建和 Yuanpu typecheck；记录 `1790126432531431000.json`。安装使用仓库指定 `pnpm install --frozen-lockfile --ignore-pnpmfile`，修复了通用 install 与本仓库 pnpmfile checksum 的配置不匹配；生成的空 checksum 漂移已移除。
+- 验证脚本与结果已快进并入本地 `main` 的 `04c5c0c`；在该集成 revision 以 Node 24.15.0 / pnpm 11.22.0 再跑 `pnpm check`，通过（runtime-kit 113/113、Runtime 14/14、Desktop 20/20）。此检查仍不覆盖下列真实平台与渠道投递缺口。
 - API 失败探针是预期的验收失败，未编入 `pnpm check`；源码改动仅为验证脚本与证据，未修改产品实现。
 
 ## 阻断与下一步

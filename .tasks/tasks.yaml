@@ -755,7 +755,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-019
     title: "通知渠道与调度阶段验证"
-    status: in_progress
+    status: blocked
     goal: "独立证明 IM 发起、定时触发、通知和回复投递组合可用，再支撑管理页面。"
     scope:
       in: ["真实 API/数据库的通知、渠道、调度组合测试","真实首发 IM 与 Electron 通知验证"]
@@ -787,8 +787,15 @@ tasks:
       completed_at: null
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-019"
       branch: "task/task-019-stage-verification"
-      evidence: []
-      follow_up_candidates: []
+      evidence:
+        - {type: "verification", check: "V19-01/V19-04 fixture integration", status: "passed", summary: "At integrated main 04c5c0c, a new real-SQLite combined test proved two paired IM senders plus one schedule use three isolated runs, original reply routes, durable outbound/trigger records, deduplication and fixed channel_user identity; results in .tasks/verification/TASK-019/results.md."}
+        - {type: "verification", check: "V19-02 scheduled IM delivery", status: "failed", summary: "At integrated main 04c5c0c, real Runtime HTTP POST /v1/schedules with channel delivery returned 400 Schedule delivery target is not authorized; no schedule persisted. The scheduler caller rejects every channel target and no channel delivery adapter is assembled. Reproducer and D19-01 in .tasks/verification/TASK-019/results.md."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 passed on branch test tree and again on integrated main 04c5c0c: runtime-kit 113/113, Runtime 14/14, Desktop 20/20, builds and Yuanpu typechecks."}
+        - {type: "boundary", check: "real Enterprise WeChat and native Electron", status: "unverified", summary: "The local WeCom connection is disabled with no paired sender or credential reference; prior test robot and Secret were revoked. This stage did not observe authorized real IM messages, native notification display/click, or Linux/Windows behavior."}
+        - {type: "memory", check: "verification handoff", status: "passed", summary: "Integrated .tasks/verification/TASK-019/results.md and .tasks/memory/TASK-019.md record scenario outcomes, tested revision, toolchain, defect and next checks."}
+      follow_up_candidates:
+        - "D19-01: implement authorized scheduled delivery to a bound IM route with failure/unknown semantics, then retest without rerunning Agent."
+        - "Recreate an isolated Enterprise WeChat robot and authorized test sessions; observe real IM and Electron journeys before resuming TASK-019."
   - id: TASK-020
     title: "实现连接定时任务与提醒管理界面"
     status: pending
