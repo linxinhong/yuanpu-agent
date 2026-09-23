@@ -3,6 +3,8 @@
 验证者：`codex-t019sep23`，非 TASK-015/016/018 主要实现者。记录日期：2026-09-23。
 任务分支：`task/task-019-stage-verification`；产品源码基线 `d8564c4`，验证脚本提交 `0fc2458`。环境：macOS arm64、Node 24.15.0、pnpm 11.22.0、隔离临时 SQLite/Runtime、受控模型与渠道 fixture。以下 `pass` 仅覆盖所注明模式；本阶段总判定 **未通过**。
 
+2026-09-23 范围变更：用户明确当前产品定位为个人助手，只要求自己与机器人真实私聊。V19-06 不再以第二名真人、真实双会话或群聊为完成条件；历史两 sender fixture 继续作为权限与隔离回归，原观测不删除。单私聊成功也不豁免重复事件、断线/重启恢复、正式 App 连接和其他出口验收。权威决策见 `docs/application-architecture.md` 第 7 节，产品修复归 `补齐计划到已绑定 IM 的投递（TASK-026）`。
+
 ## 场景与结果
 
 | 场景 | 规则、操作与可观察事实 | 结果及证据 |
@@ -12,7 +14,7 @@
 | V19-03 退出、重启与状态 | 运行中关闭 App，再打开后能查询中断、等待授权及投递状态，退出后无后台活动。 | **unverified（完整组合）**。已重跑的 scheduler/channel/Runtime 组件测试覆盖 SQLite 重开、未知结果不重跑、退出时投递 unknown、父进程被杀后的子进程清理；尚未在同一真实 IM + Electron 用户旅程中观察全部状态。证据为 focused 测试及 `pnpm check` 记录。 |
 | V19-04 权限与身份 | 远程消息不得改变本机权限策略，未配对身份拒绝，模型正文不得充当可信 sender。 | **pass（fixture）**。V19-01 的伪造文本仍以 `channel_user` 执行，未配对消息在 Agent 前拒绝；Runtime 既有 API 测试也覆盖伪造本机身份拒绝。真实平台身份映射仍待 V19-06。 |
 | V19-05 结果语义 | 区分执行失败、投递失败、投递未知和通知 `submitted`；用持久事实确认合法状态转换和执行次数。 | **pass（组件 fixture），组合未验证**。`channels.test.mjs`、`scheduler.test.mjs`、`notifications.test.mjs` 和新组合测试均重跑通过。`submitted` 的 `userVisibility` 为 `unknown`；真实系统展示及计划到 IM 的失败链路尚未证实。 |
-| V19-06 企业微信真实收发 | 授权测试成员通过首发智能机器人完成双会话、重复消息、回复和故障恢复。 | **部分通过（单私聊收发）**。前三轮历史试收未观察到入站；第四轮在探针 ready 后，用户发送一次性口令，脱敏事实为 `inboundSeen=1`、`privateTextSeen=1`、`matched=1`、`executions=1`、`runCount=1`、唯一 outbound `accepted`，SDK 有 `wecom.reply_ack=1`，平台回执 `accepted`。用户随后确认在企业微信私聊窗口看到固定测试回复。因此单会话入站、Agent 执行、回复与用户可见性均已验证，先前 0 入站不能再当作持续阻断。尚未验证第二成员/双会话、重复消息、故障恢复；本机正式连接仍未启用/配对/绑定 Keychain。凭据值、真实 sender 和消息正文未输出到日志或验收记录；探针只在内存中比对消息口令，并在临时 SQLite 中保存 sender 摘要。 |
+| V19-06 企业微信真实收发 | 同一获授权用户在真实私聊得到原会话回复；重复事件、恢复及正式 App 连接另行验证，跨身份/会话隔离用 fixture。 | **部分通过（单私聊收发）**。前三轮历史试收未观察到入站；第四轮在探针 ready 后，用户发送一次性口令，脱敏事实为 `inboundSeen=1`、`privateTextSeen=1`、`matched=1`、`executions=1`、`runCount=1`、唯一 outbound `accepted`，SDK 有 `wecom.reply_ack=1`，平台回执 `accepted`。用户随后确认在企业微信私聊窗口看到固定测试回复。因此单会话入站、Agent 执行、回复与用户可见性均已验证，先前 0 入站不能再当作持续阻断。重复消息、故障恢复及正式 App 连接尚未验证；第二成员/真实双会话已不属于当前门槛。本机正式连接仍未启用/配对/绑定 Keychain。凭据值、真实 sender 和消息正文未输出到日志或验收记录；探针只在内存中比对消息口令，并在临时 SQLite 中保存 sender 摘要。 |
 | V19-07 原生通知与平台 | 在真实 Electron 中展示并点击通知，分别记录目标系统和外部平台结果。 | **unverified**。重跑的 Electron host fixture 证明提交/权限/去重/点击目标校验，但本轮未观察操作系统展示、点击导航或 Linux/Windows 行为。`submitted` 不代表用户看到。 |
 
 ## 执行记录
@@ -35,6 +37,6 @@
 
 ## 阻断与下一步
 
-D19-01 是 TASK-019 的阻断缺陷：需要实现 Runtime 对已绑定 IM route 的计划投递授权与渠道 delivery adapter，明确未知发送不自动重发且失败不重跑 Agent。该实现属于开发修复，不在本验收卡内。修复后先重跑 API 探针并补充一个真实 SQLite + 渠道投递失败/未知的组合场景，再重跑 `pnpm check`。新 Bot 的一次授权私聊已完成真实收发和用户可见确认；无需再将 user_id 视为入站前置条件。双会话仍需要第二名获授权测试成员，此外还需重复消息与故障恢复证据。最后用真实 Electron 完成 V19-07；通过前不得标记 TASK-019 完成或解锁管理界面卡。
+D19-01 是 TASK-019 的阻断缺陷，已抽出 `补齐计划到已绑定 IM 的投递（TASK-026）`：需实现 Runtime 对已绑定 IM route 的计划投递授权与渠道 delivery adapter，明确未知发送不自动重发且失败不重跑 Agent。修复并集成后先重跑 API 探针并补充真实 SQLite + 渠道投递失败/未知组合，再重跑 `pnpm check`。新 Bot 的一次授权私聊已完成真实收发和用户可见确认；无需再将 user_id 视为入站前置条件。后续只需同一位获授权用户完成重复消息、断线/重启与正式 App 连接验证，不要求第二名真人。最后用真实 Electron 完成 V19-07；通过前不得标记 TASK-019 完成或解锁管理界面卡。
 
-检索：ZG 查询“TASK-019 阶段验证：Runtime API/SQLite 中 IM、调度、通知的组装路径及持久状态”，有用路径为 `apps/runtime/src/index.ts`、`.tasks/tasks.yaml` 与 `docs/application-architecture.md`；随后用 scoped `rg` 和相邻源码/测试定位授权谓词、组合入口与状态断言。ZG 返回 fresh；未创建索引。
+检索：原验证 ZG 查询“TASK-019 阶段验证：Runtime API/SQLite 中 IM、调度、通知的组装路径及持久状态”，有用路径为 `apps/runtime/src/index.ts`、`.tasks/tasks.yaml` 与 `docs/application-architecture.md`，返回 fresh；本次架构调整仅以已知文件/符号为精确锚点，用 scoped `rg` 查 `.tasks/tasks.yaml`、`apps/runtime/src/index.ts`、scheduler/channel 邻近源码；未创建索引。

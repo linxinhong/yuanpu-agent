@@ -758,13 +758,15 @@ tasks:
     status: blocked
     goal: "独立证明 IM 发起、定时触发、通知和回复投递组合可用，再支撑管理页面。"
     scope:
-      in: ["真实 API/数据库的通知、渠道、调度组合测试","真实首发 IM 与 Electron 通知验证"]
+      in: ["真实 API/数据库的通知、渠道、调度组合测试","同一获授权用户的真实企业微信私聊与 Electron 通知验证"]
       out: ["修复实现代替验收","管理页面视觉设计"]
-    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","非主要实现者执行；真实 IM 需授权测试会话；证据脱敏；不得以模拟通知替代系统展示证据"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","非主要实现者执行；真实 IM 限一位获授权用户私聊；证据脱敏；不得以模拟通知替代系统展示证据","第二名真人或真实群聊不是本阶段门槛；未配对身份拒绝和跨会话隔离仍需 fixture 回归"]
     forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
     acceptance:
       - type: assertion
-        expect: "IM 提交与定时任务并发时会话、身份、回复目标正确；重复消息/触发无重复执行"
+        expect: "一位获授权用户在真实企业微信私聊发消息，产生一次 Agent run 并在原私聊看到回复；记录入站、持久投递与用户可见性，不要求第二名真人或真实群聊"
+      - type: assertion
+        expect: "同一用户的 IM 提交与定时任务并发时会话、身份、回复目标正确；重复消息/触发无重复执行；跨身份/会话隔离和未配对拒绝以隔离 fixture 验证"
       - type: assertion
         expect: "定时任务结束既可请求系统提醒又可向绑定 IM 投递，单一出口失败不重跑模型"
       - type: assertion
@@ -775,10 +777,10 @@ tasks:
         expect: "以事件序列和数据库事实区分执行失败、投递失败、投递未知及通知 submitted；身份映射、执行次数和合法状态转换由代码断言，疑似串话或重复执行必须回查本地原始证据"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-015","TASK-016","TASK-018"]
+    dependencies: ["TASK-015","TASK-016","TASK-018","TASK-026"]
     risk_level: L3
     recommended_model: "gpt-5.6 sol"
-    investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节","先本机 API/数据库故障注入，再真实 Electron/IM；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done"]
+    investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节；2026-09-23 个人助手范围决策见第 7 节","先本机 API/数据库故障注入，再用一位授权用户做真实企业微信单私聊、重连/重启和 Electron；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done；历史双 sender fixture 可保留为额外隔离回归"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
       owner: "codex-t019sep23"
@@ -792,13 +794,13 @@ tasks:
         - {type: "verification", check: "V19-02 scheduled IM delivery", status: "failed", summary: "At integrated main 04c5c0c, real Runtime HTTP POST /v1/schedules with channel delivery returned 400 Schedule delivery target is not authorized; no schedule persisted. The scheduler caller rejects every channel target and no channel delivery adapter is assembled. Reproducer and D19-01 in .tasks/verification/TASK-019/results.md."}
         - {type: "verification", check: "new WeCom bot authentication", status: "passed", summary: "The initial official SDK 1.0.7 attempt returned 853000; after the user verified and updated the same local .env, the same one-attempt probe returned authenticated=true. Values were never printed, no message was sent, and the local connection remains disabled. History and limits are in .tasks/verification/TASK-019/results.md."}
         - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 passed on branch test tree and again on integrated main 04c5c0c: runtime-kit 113/113, Runtime 14/14, Desktop 20/20, builds and Yuanpu typechecks."}
-        - {type: "verification", check: "V19-06 single authorized WeCom private chat", status: "passed", summary: "After three historical no-inbound attempts, the fourth ready live probe received one exact-challenge private text, executed one Agent run, persisted one accepted outbound and received an SDK reply acknowledgement; the user confirmed seeing the fixed reply in WeCom. No credentials, raw sender or message text were logged. Full V19-06 remains open for a second authorized member, deduplication and recovery; local connection remains disabled."}
+        - {type: "verification", check: "V19-06 single authorized WeCom private chat", status: "passed", summary: "After three historical no-inbound attempts, the fourth ready live probe received one exact-challenge private text, executed one Agent run, persisted one accepted outbound and received an SDK reply acknowledgement; the user confirmed seeing the fixed reply in WeCom. No credentials, raw sender or message text were logged. Under the 2026-09-23 single-user scope, real-person concurrency is no longer required; deduplication, recovery and formal App connection remain open."}
         - {type: "command", check: "pnpm check after V19-06 evidence", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 full rerun passed after one Desktop local-port ECONNREFUSED flake; the focused runtime-manager suite passed 7/7 between full runs. The first failure and rerun are documented in results.md."}
-        - {type: "boundary", check: "remaining real Enterprise WeChat and native Electron", status: "unverified", summary: "One private conversation passed end-to-end, but two-user concurrency, repeat delivery, disconnect recovery and production connection setup remain unverified. Native notification display/click and Linux/Windows behavior remain unverified. Do not treat one conversation or fixture submitted status as full acceptance."}
+        - {type: "boundary", check: "remaining real Enterprise WeChat and native Electron", status: "unverified", summary: "One authorized private conversation passed end-to-end. Repeat delivery, disconnect/restart recovery and formal App connection setup remain unverified. Native notification display/click and Linux/Windows behavior remain unverified. Two-user real concurrency is outside the current personal-assistant scope; fixture isolation still applies."}
         - {type: "memory", check: "verification handoff", status: "passed", summary: "Integrated .tasks/verification/TASK-019/results.md and .tasks/memory/TASK-019.md record scenario outcomes, tested revision, toolchain, defect and next checks."}
       follow_up_candidates:
         - "D19-01: implement authorized scheduled delivery to a bound IM route with failure/unknown semantics, then retest without rerunning Agent."
-        - "Provide a second authorized test member for two-conversation acceptance; then verify repeat delivery, disconnect recovery and real Electron notification display/click. The successful inbound callback already supplied the sender identity for the first private conversation, so WECOM_TEST_USER_ID is not a prerequisite for receiving messages."
+        - "With the same authorized user, verify repeat delivery, disconnect/restart recovery, formal App connection and real Electron notification display/click. The successful inbound callback already supplied the sender identity; WECOM_TEST_USER_ID and a second real member are not prerequisites for receiving messages."
   - id: TASK-020
     title: "实现连接定时任务与提醒管理界面"
     status: pending
@@ -914,7 +916,7 @@ tasks:
     forbidden: ["自动重放发送结果未知的回复或重复执行 Agent","在日志中记录 bot_token、context_token、正文、二维码、媒体密钥/URL 或真实用户标识","用合成 fixture 冒充微信真实收发"]
     acceptance:
       - type: assertion
-        expect: "已配对微信用户发送文本后收到同一会话回复；未配对身份被拒绝，两个账号/会话不串内容，重复消息只产生一次 run"
+        expect: "一位已配对微信用户在真实私聊发送文本后收到同一会话回复；未配对身份拒绝、跨账号/会话隔离用 fixture 证明，重复消息只产生一次 run"
       - type: assertion
         expect: "游标、消息去重、context_token 和投递状态持久化；断线或重启不重复执行，发送未知保持 result_unknown 并支持显式对账"
       - type: assertion
@@ -928,7 +930,7 @@ tasks:
     dependencies: ["TASK-023"]
     risk_level: L4
     recommended_model: "gpt-5.6 sol"
-    investigation_hints: ["复用 TASK-018 的共用 channel 路由、身份与投递接口，只新增平台 adapter；避免复制第二套 Agent/持久化状态机","从官方协议合成重放与错误帧测试开始，再做授权账号单会话、双会话、断线和重新绑定；记录官方依赖版本/revision","实现后要求独立安全复审：凭据/日志/媒体留存、会话隔离、未知发送与进程生命周期"]
+    investigation_hints: ["复用 TASK-018 的共用 channel 路由、身份与投递接口，只新增平台 adapter；避免复制第二套 Agent/持久化状态机","从官方协议合成重放、错误帧和跨会话隔离测试开始，再做一位获授权用户的真实私聊、断线和重新绑定；第二名真人不是当前个人助手门槛；记录官方依赖版本/revision","实现后要求独立安全复审：凭据/日志/媒体留存、会话隔离、未知发送与进程生命周期"]
     escalation_conditions: ["实现证据与 TASK-023 选择冲突或需要未公开接口时停止并回到架构评审","缺授权微信账号、二维码或测试会话时可完成 fixture，但不得标 done 或宣称真实接通"]
     result:
       owner: null
@@ -944,13 +946,13 @@ tasks:
     status: pending
     goal: "由非实现者证明 ClawBot 在授权真实微信环境中的身份、收发、恢复和数据清理满足契约。"
     scope:
-      in: ["真实授权账号的文本与已实现媒体旅程","双会话隔离、重复消息、断线重启、重新绑定和发送未知故障注入","日志、SQLite、缓存目录与 App 退出后的数据/进程检查"]
+      in: ["一位真实授权用户的私聊文本与已实现媒体旅程","fixture 跨会话隔离、重复消息、断线重启、重新绑定和发送未知故障注入","日志、SQLite、缓存目录与 App 退出后的数据/进程检查"]
       out: ["在验收卡内修复实现","扩大到未授权联系人或业务群","把企业微信或 fixture 结果替代 ClawBot 真实证据"]
-    constraints: ["非 TASK-024 主要实现者执行；只使用明确授权测试账号/会话","证据只保留替换 ID、事件序列、状态和必要截图；不保存二维码、token、正文或附件原件","完成须集成并验证于 main"]
+    constraints: ["非 TASK-024 主要实现者执行；真实平台仅要求一位明确授权用户的私聊，不要求第二名真人或业务群","证据只保留替换 ID、事件序列、状态和必要截图；不保存二维码、token、正文或附件原件","完成须集成并验证于 main"]
     forbidden: ["构建成功冒充业务验收","submitted 或发送请求完成冒充用户已收到","遗漏账号解绑、多设备或版本兼容未验证项"]
     acceptance:
       - type: assertion
-        expect: "授权用户完成消息 → 单次 Agent run → 原会话回复；第二会话同时操作不串线，重放同一平台消息不重复执行"
+        expect: "同一授权用户完成真实私聊消息 → 单次 Agent run → 原会话可见回复；跨会话/未配对身份隔离由 fixture 证明，重放同一平台消息不重复执行"
       - type: assertion
         expect: "连接中断、App 退出/重启和发送回执丢失分别得到契约规定的恢复结果，未知发送不自动重复"
       - type: assertion
@@ -962,8 +964,42 @@ tasks:
     dependencies: ["TASK-024"]
     risk_level: L4
     recommended_model: "gpt-5.6 sol"
-    investigation_hints: ["证据写入 .tasks/verification/TASK-025/results.md；引用 TASK-023 契约和 TASK-024 实现 revision","先 fixture 故障注入与本地数据检查，再授权真实微信双会话；验收失败建独立修复卡","独立复核问题：平台事实是否仍有效、敏感数据是否最小化、局部成功是否被扩大为整体通过"]
+    investigation_hints: ["证据写入 .tasks/verification/TASK-025/results.md；引用 TASK-023 契约和 TASK-024 实现 revision","先 fixture 故障注入与本地数据检查，再做一位授权用户的真实微信私聊；验收失败建独立修复卡","独立复核问题：平台事实是否仍有效、敏感数据是否最小化、单私聊成功是否被扩大为群聊/多用户通过"]
     escalation_conditions: ["没有授权账号或平台仍处灰度/绑定限制时保留未验证并等待环境，不改用非官方登录方案","发现平台条款、协议或版本变化影响接入合法性/兼容性时暂停验收并重开 TASK-023 决策"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-026
+    title: "补齐计划到已绑定 IM 的投递"
+    status: ready
+    goal: "修复 D19-01，使本机计划能向同一用户明确绑定的企业微信私聊投递结果，并与系统提醒独立记录成败。"
+    scope:
+      in: ["计划 channel 目标的授权与可撤销持久绑定","Runtime 对调度投递适配器和现有渠道发送能力的装配","计划结果的接受、失败、未知状态及重启恢复测试"]
+      out: ["TASK-019 的独立业务验收","群聊、第二名真实用户或其他平台的主动推送","更改 Pi 上游或引入独立后台服务"]
+    constraints: ["仅向用户显式配对且仍有效的私聊目标投递；不能把摘要反推为 userid 或把过期 response_url 当作长期路由","凭据和原始目标标识不得进入日志/API 响应；若需新增持久字段，须定义最小化保存、迁移和解绑清理","App 退出后没有独立发送进程；未知发送不盲目重试"]
+    forbidden: ["接受任意客户端提交的 userid/routeId 作为授权目标","投递失败或未知时重跑 Agent","用成功入站回复代替计划主动投递的证据"]
+    acceptance:
+      - type: assertion
+        expect: "已配对私聊目标经用户明确绑定后，POST /v1/schedules 接受 channel 投递并持久化；未绑定、已解绑或连接身份变化的目标在执行前拒绝，不能向旧目标发消息"
+      - type: assertion
+        expect: "到期计划只执行一次 Agent；同一结果分别触发系统提醒与绑定私聊投递，数据库可查询各出口状态；单一出口失败不重跑模型"
+      - type: assertion
+        expect: "投递接受、明确失败和结果未知分别持久记录；重启只继续可证明安全的投递，不把未知结果自动重复发送；解绑/退出后不再向目标发送"
+      - type: assertion
+        expect: "存量数据库可安全迁移；新目标引用、日志与 API 响应不泄漏凭据或原始成员标识，错误目标和跨连接 route 被拒绝"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-016","TASK-018"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["D19-01 复现在 apps/runtime/test/task-019-channel-delivery-probe.mjs；apps/runtime/src/index.ts 的 schedulerCaller.authorizeDelivery 当前只接受 desktop/none，PersistentScheduler.open 未传 delivery；协议在 packages/yuanpu-protocol/src/agent.ts，调度口在 packages/yuanpu-runtime/src/scheduler/service.ts","预检 packages/yuanpu-runtime/src/channels/router.ts 与 store.ts：入站回复 routeId 是 inboundId，配对表只留 sender 摘要，不能直接当作跨重启的主动发送目标；从明确授权的稳定绑定定义开始，追踪受影响调用方","验证阶梯：先跑 scheduler/channel 邻近测试，再使 TASK-019 HTTP 探针由 400 变为受控成功并覆盖未绑定/解绑/错连接、失败/未知及 SQLite 重开；最后 pnpm check。真实企业微信单私聊显示由独立 TASK-019 复验，不在本实现卡冒称完成","对新增目标持久化和发送幂等语义做独立安全/数据边界复核，重点检查泄漏、误投递与回滚兼容"]
+    escalation_conditions: ["现有 SecretStore/数据边界无法安全持久化已授权目标时，先提出具体契约冲突，不用硬编码 userid 或扩大消息目标","若官方平台不支持该主动发送或需新增授权范围，记录限制并交由架构决策，不假定成功"]
     result:
       owner: null
       attempts: 0
