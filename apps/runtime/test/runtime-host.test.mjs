@@ -66,7 +66,7 @@ test('private IM summary requires a current paired sender and exposes only run a
     agentRuns: { get: () => run },
     channels: {
       getInboundForRun: () => inbound,
-      getOutboundForRun: () => ({ status: 'unknown', contentDigest: 'secret-digest', failureCode: 'private-error' }),
+      getOutboundForRun: () => ({ runId: 'im-run', inboundId: 'inbound-fixture', status: 'unknown', contentDigest: 'secret-digest', failureCode: 'private-error' }),
     },
   };
   const document = {
@@ -89,6 +89,10 @@ test('private IM summary requires a current paired sender and exposes only run a
   assert.equal(getDesktopPrivateImRunSummary('im-run', {
     ...stores,
     agentRuns: { get: () => ({ ...run, context: { ...run.context, delivery: { kind: 'channel', routeId: 'foreign' } } }) },
+  }, document, '/fixture/workspace'), undefined);
+  assert.equal(getDesktopPrivateImRunSummary('im-run', {
+    ...stores,
+    channels: { ...stores.channels, getOutboundForRun: () => ({ runId: 'im-run', inboundId: 'foreign', status: 'accepted' }) },
   }, document, '/fixture/workspace'), undefined);
   assert.deepEqual(getDesktopPrivateImRunSummary('im-run', {
     ...stores,
