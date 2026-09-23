@@ -48,10 +48,12 @@ export function getDesktopPrivateImRunSummary(
     || inbound.action !== 'run'
     || !document.connections.some((connection) => connection.connectionId === inbound.connectionId
       && connection.pairedSenderDigests?.includes(inbound.senderDigest))) return undefined;
+  const outbound = stores.channels.getOutboundForRun(runId);
+  if (outbound && (outbound.inboundId !== inbound.inboundId || outbound.runId !== runId)) return undefined;
   return {
     runId: run.runId,
     runStatus: run.status,
-    replyDeliveryStatus: stores.channels.getOutboundForRun(runId)?.status ?? 'not_created',
+    replyDeliveryStatus: outbound?.status ?? 'not_created',
   };
 }
 
