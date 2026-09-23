@@ -977,7 +977,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-026
     title: "补齐计划到已绑定 IM 的投递"
-    status: in_progress
+    status: done
     goal: "修复 D19-01，使本机计划能向同一用户明确绑定的企业微信私聊投递结果，并与系统提醒独立记录成败。"
     scope:
       in: ["计划 channel 目标的授权与可撤销持久绑定","Runtime 对调度投递适配器和现有渠道发送能力的装配","计划结果的接受、失败、未知状态及重启恢复测试"]
@@ -1004,8 +1004,14 @@ tasks:
       owner: "codex-t026sep23-12136"
       attempts: 0
       claimed_at: "2026-09-23T03:07:49.391Z"
-      completed_at: null
+      completed_at: "2026-09-23T03:49:53.850Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-026"
       branch: "task/task-026-scheduled-im-delivery"
-      evidence: []
+      evidence:
+        - {type: "assertion", check: "authorized scheduled private IM delivery", status: "passed", summary: "Integrated revision 2ef87e0: authenticated loopback HTTP covers observed contact, explicit bind, schedule acceptance, unauthorized target, revoked route, and no send to the old target. Fixture transport proves proactive delivery without using live credentials."}
+        - {type: "assertion", check: "independent delivery outcomes and recovery", status: "passed", summary: "Integrated revision 2ef87e0: tests persist distinct IM and native-host statuses, opposite outlet failures, deferred auth, unknown non-idempotent send after restart, and unresolved notification receipt recovery; Agent is not rerun for delivery failure."}
+        - {type: "assertion", check: "privacy, migration, and independent review", status: "passed", summary: "Integrated revision 2ef87e0: opaque route API and target cleanup, wrong-connection rejection, populated reconstructed v4-to-v5 migration, fault-isolated notification bookkeeping, and independent read-only security review with no remaining high-risk finding. Historical v4 binary fixture was not available."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Passed on integrated main revision 2ef87e0 with Node 24.15.0 and pnpm 11.22.0 after branch revision 67a2e18 also passed."}
+        - {type: "command", check: "pnpm build:native and pnpm smoke:native", status: "passed", summary: "Passed on branch revision 67a2e18 (same implementation tree integrated as 2ef87e0) on darwin-arm64; final records 1790135059055664000.json and 1790135071213067000.json."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-026.md and docs/adr/0002-scheduled-im-targets.md. Real WeCom display and Electron click acceptance remain with independent TASK-019; this implementation card does not claim them."}
       follow_up_candidates: []
