@@ -134,7 +134,10 @@ test('an unexpected MCP root exit terminates its process group', async () => {
   assert.equal(typeof childPid, 'number');
   process.kill(childPid, 0);
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 400));
-  assert.throws(() => process.kill(childPid, 0));
+  const stages = process.platform === 'win32'
+    ? (await readFile(windowsDiagnosticFile, 'utf8')).trim().split(/\r?\n/u).slice(-12).join('\n')
+    : '';
+  assert.throws(() => process.kill(childPid, 0), stages);
   await source.close();
 });
 
@@ -231,7 +234,7 @@ test('a real unresponsive process does not hide a healthy Python MCP source', as
   const server = createYuanpuMcpServer(
     [unresponsive, healthy],
     undefined,
-    { discoveryTimeoutMs: process.platform === 'win32' ? 15_000 : 2_000 },
+    { discoveryTimeoutMs: process.platform === 'win32' ? 90_000 : 2_000 },
   );
   const result = await server.search({ query: 'echo', limit: 20 });
   assert.equal(

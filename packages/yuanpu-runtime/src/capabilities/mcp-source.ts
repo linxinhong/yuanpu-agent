@@ -127,10 +127,12 @@ try {
   Trace-McpStage 'job-assigned'
   [Console]::Out.WriteLine('READY')
   [Console]::Out.Flush()
-  [YuanpuJob]::WaitForSingleObject($process, 0xFFFFFFFF) | Out-Null
+  $waitResult = [YuanpuJob]::WaitForSingleObject($process, 0xFFFFFFFF)
+  Trace-McpStage "wait-result-$waitResult"
 } finally {
   [YuanpuJob]::CloseHandle($process) | Out-Null
   [YuanpuJob]::CloseHandle($job) | Out-Null
+  Trace-McpStage 'job-closed'
 }
 `;
 
