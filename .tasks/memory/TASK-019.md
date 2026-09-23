@@ -1,4 +1,4 @@
-# 通知渠道与调度阶段验证（TASK-019）
+# IM 渠道与调度阶段验证（TASK-019）
 
 - 关键词：阶段验证、企业微信、定时任务、系统通知、渠道投递、SQLite、HTTP 400
 - Owner/验证者：`codex-t019sep23`；记录日期：2026-09-23；分支/工作树：`task/task-019-stage-verification` / `.worktrees/codex-task-019`
@@ -38,3 +38,5 @@
 - 用户确认“重启后已回复”，补齐至少一条重启后私聊回复的可见性；随后只读库中累计四条不同平台消息、四个成功 IM run、四条 `accepted` outbound，同一 sender/会话。正常退出/重启、持久记录、重连收发已通过；执行中关闭与系统通知用户可见性仍待验收。
 - 新增隔离真实 Runtime HTTP/SQLite 的运行中退出测试：模型服务悬停时 SIGTERM，持久 run 为 `result_unknown`/`possible`；重开 Runtime 可查询且不重跑模型。focused 与完整 `pnpm check` 通过（runner `1790154133738838000.json`、`1790154280381299000.json`）。这是受控 Runtime 验证，不是用户真实 IM 运行中断的现场证据。
 - 第五条真实私聊 run 与回复都成功，但用户没看到 macOS 通知。开发版 Electron 为 ad-hoc 签名且严格校验失败；同二进制原生通知探针返回 `supported=true, failed_event`。Electron 官方文档要求 macOS 通知使用有效签名，因此需签名包再验证展示与点击；当前原因属高概率环境推断，不冒称已证明正式 App 宿主回执。TASK-019 仍 in_progress。
+- 用户确认目前没有 macOS 签名证书；仓库旧打包产物同为 ad-hoc 签名且已过时。V19-07 继续标为缺环境的 `unverified`，不请求密钥、不创建证书、不把开发版通知失败扩大为签名版产品失败。待未来取得有效签名的当前 App，再用同一私聊 run 检查原生展示、点击目标与宿主回执。
+- 用户决定本阶段忽略通知功能，后续再处理。`docs/adr/0003-defer-native-notifications.md` 将原生通知展示/点击和提醒界面移交 TASK-029；TASK-019/020/021 的完成条件相应移除通知门槛。保留以上 V19-07 原始结果和已有代码，不声称功能已通过或主动关闭。TASK-019 仍为 `in_progress`；先复核真实 App 运行中退出、重复回调与既有 fixture 的覆盖边界，不能只因通知暂缓就标 complete。本次 ZG 关系检索定位 `.tasks/tasks.yaml`、`docs/application-architecture.md` 和 TASK-019 验证记录；修订后的卡片以 `tasks validate` 校验。

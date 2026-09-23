@@ -754,13 +754,13 @@ tasks:
         - {type: "boundary", check: "external provider and platform evidence", status: "unverified", summary: "Real Enterprise WeChat private-message display, group mentions, offline recovery, rate limits and provider disconnect behavior remain unverified because the temporary robot and Secret were revoked. Non-macOS credential stores and attachments are not implemented or claimed."}
       follow_up_candidates: []
   - id: TASK-019
-    title: "通知渠道与调度阶段验证"
+    title: "IM 渠道与调度阶段验证"
     status: in_progress
-    goal: "独立证明 IM 发起、定时触发、通知和回复投递组合可用，再支撑管理页面。"
+    goal: "独立证明单人 IM 发起、定时触发和原会话/主动投递组合可用，再支撑管理页面。"
     scope:
-      in: ["真实 API/数据库的通知、渠道、调度组合测试","同一获授权用户的真实企业微信私聊与 Electron 通知验证"]
-      out: ["修复实现代替验收","管理页面视觉设计"]
-    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","非主要实现者执行；真实 IM 限一位获授权用户私聊；证据脱敏；不得以模拟通知替代系统展示证据","第二名真人或真实群聊不是本阶段门槛；未配对身份拒绝和跨会话隔离仍需 fixture 回归"]
+      in: ["真实 API/数据库的渠道与调度组合测试","同一获授权用户的真实企业微信私聊、主动投递及 App 重启验证"]
+      out: ["原生通知展示/点击和提醒偏好验收，后移 TASK-029","修复实现代替验收","管理页面视觉设计"]
+    constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","非主要实现者执行；真实 IM 限一位获授权用户私聊；证据脱敏；历史通知未通过/未验证记录不得改写为通过","第二名真人或真实群聊不是本阶段门槛；未配对身份拒绝和跨会话隔离仍需 fixture 回归"]
     forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
     acceptance:
       - type: assertion
@@ -768,19 +768,19 @@ tasks:
       - type: assertion
         expect: "同一用户的 IM 提交与定时任务并发时会话、身份、回复目标正确；重复消息/触发无重复执行；跨身份/会话隔离和未配对拒绝以隔离 fixture 验证"
       - type: assertion
-        expect: "定时任务结束既可请求系统提醒又可向绑定 IM 投递，单一出口失败不重跑模型"
+        expect: "定时任务结束可向已绑定 IM 主动投递；投递失败或结果未知不重新执行模型"
       - type: assertion
         expect: "执行中关闭 App，再打开后可查中断/等待授权/投递状态；没有独立后台活动"
       - type: assertion
         expect: "独立检查远程身份不能改变本机权限策略；未验证系统或外部平台逐项标记"
       - type: assertion
-        expect: "以事件序列和数据库事实区分执行失败、投递失败、投递未知及通知 submitted；身份映射、执行次数和合法状态转换由代码断言，疑似串话或重复执行必须回查本地原始证据"
+        expect: "以事件序列和数据库事实区分执行失败、投递失败及投递未知；身份映射、执行次数和合法状态转换由代码断言，疑似串话或重复执行必须回查本地原始证据"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-015","TASK-016","TASK-018","TASK-026","TASK-027","TASK-028"]
     risk_level: L3
     recommended_model: "gpt-5.6 sol"
-    investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节；2026-09-23 个人助手范围决策见第 7 节","先本机 API/数据库故障注入，再用一位授权用户做真实企业微信单私聊、重连/重启和 Electron；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done；历史双 sender fixture 可保留为额外隔离回归"]
+    investigation_hints: ["依赖卡行为测试与 docs/application-architecture.md 第 7–10 节；个人助手范围及通知暂缓见 docs/adr/0003-defer-native-notifications.md","先本机 API/数据库故障注入，再用一位授权用户做真实企业微信单私聊和 App 重连/重启；记录 .tasks/verification/TASK-019/results.md","运行 pnpm check；缺环境保留缺口，不直接把卡标 done；历史双 sender/通知 fixture 可保留为额外回归但不是原生展示证据"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
       owner: "codex-t019sep23"
@@ -814,15 +814,17 @@ tasks:
         - {type: "verification", check: "V19-06 visible reply after App restart", status: "passed", summary: "The user explicitly confirmed a WeCom private-chat reply after the App restart. Read-only local SQLite then showed four distinct provider private messages, four successful IM runs and four accepted outbounds, all within the same paired sender/conversation. At least one post-restart reply was user-visible; in-flight interruption and native notification remain unverified."}
         - {type: "verification", check: "V19-03 in-flight Runtime restart", status: "passed", summary: "A new isolated real Runtime HTTP/SQLite test held a model request, terminated Runtime while the run was active, then reopened the same home. The run remained queryable as result_unknown with external effect possible and the model request count stayed one. Focused test and full pnpm check passed; this is controlled Runtime evidence, not an interrupted real IM journey."}
         - {type: "verification", check: "V19-07 native macOS notification visibility", status: "unverified", summary: "The fifth real private message completed one successful run and accepted reply, but the user saw no macOS notification. The dev Electron binary is ad-hoc signed and fails strict verification; a same-binary native Notification.show probe returned supported=true and failed_event. Official Electron docs require a signed macOS app; signed-package display and click remain unverified, and the formal App host receipt was not directly captured."}
+        - {type: "boundary", check: "macOS notification signing environment", status: "unverified", summary: "The user confirmed no macOS signing certificate is currently available. The existing old package is also ad-hoc signed and cannot validate the current App. Native display and click remain unverified pending an effectively signed current build; IM chat and controlled Runtime recovery evidence remain valid. No signing credentials were requested or created."}
+        - {type: "boundary", check: "2026-09-23 native notification scope deferral", status: "passed", summary: "By user request, native display/click and reminder UI are no longer completion gates for TASK-019/020/021; docs/adr/0003-defer-native-notifications.md assigns them to TASK-029. V19-07 failed user visibility and unsigned dev-binary evidence remain historical unverified facts, not a pass. TASK-019 remains in progress for non-notification evidence review."}
       follow_up_candidates:
-        - "With the same authorized user, verify repeat delivery, disconnect/restart recovery, formal App connection and real Electron notification display/click. The successful inbound callback already supplied the sender identity; WECOM_TEST_USER_ID and a second real member are not prerequisites for receiving messages."
+        - "Same-user real private reply, proactive delivery, clean App restart and controlled in-flight Runtime recovery have evidence. Before TASK-019 completion, independently assess the remaining real App in-flight/interruption and duplicate-callback coverage against the revised non-notification acceptance; keep any gap explicit. Native display/click belongs to deferred TASK-029."
   - id: TASK-020
-    title: "实现连接定时任务与提醒管理界面"
+    title: "实现连接与定时任务管理界面"
     status: pending
-    goal: "用户能在现有 Electron 界面管理连接和计划，并追踪执行与提醒结果。"
+    goal: "用户能在现有 Electron 界面管理连接和计划，并追踪执行与 IM 投递结果。"
     scope:
-      in: ["沿用现有壳的连接列表/配置、定时任务列表/编辑及运行详情","会话来源和取消入口、提醒偏好与明确权限状态","对接已验证的 Runtime API 和 preload"]
-      out: ["未经决策启用完全访问或默认托盘","重做技能市场与全应用视觉风格"]
+      in: ["沿用现有壳的连接列表/配置、定时任务列表/编辑及运行详情","会话来源、取消入口和 IM 投递状态","对接已验证的 Runtime API 和 preload"]
+      out: ["原生通知提醒偏好、权限状态及点击导航，后移 TASK-029","未经决策启用完全访问或默认托盘","重做技能市场与全应用视觉风格"]
     constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","使用现有 main.tsx/styles.css 风格；新增页面按 UI Delivery 在写 UI 前呈现现有壳参考图和设计，不能把规划提案标已批准"]
     forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
     acceptance:
@@ -831,7 +833,7 @@ tasks:
       - type: assertion
         expect: "用户创建计划、检查时区/下次时间、启停并刷新后状态保持；详情可定位 run 和会话"
       - type: assertion
-        expect: "用户在会话中取消任务，观察真实终态；通知点击跳转与任务列表返回路径一致"
+        expect: "用户在会话中取消任务并观察真实终态；任务列表、运行详情与会话之间可相互定位"
       - type: assertion
         expect: "按 docs/application-architecture.md 的界面提案先呈现可审阅设计，再实现；覆盖空、加载、失败、等待授权状态"
       - type: command
@@ -839,7 +841,7 @@ tasks:
     dependencies: ["TASK-019"]
     risk_level: L2
     recommended_model: "gpt-5.6 sol"
-    investigation_hints: ["apps/app/src/main.tsx、styles.css、apps/desktop/src/preload.ts 与 yuanpu-protocol；未发现 .tasks/ui.yaml，沿用现有 UI 作为默认","UI 提案见 docs/application-architecture.md 第 13 节；后续视觉证据保存在 .tasks/ui/TASK-020/","最小接口行为验证 → pnpm check → 真实 Electron 操作核心旅程；不能只截图或只用静态假数据"]
+    investigation_hints: ["apps/app/src/main.tsx、styles.css、apps/desktop/src/preload.ts 与 yuanpu-protocol；未发现 .tasks/ui.yaml，沿用现有 UI 作为默认","UI 提案见 docs/application-architecture.md 第 13 节；通知部分按 docs/adr/0003-defer-native-notifications.md 暂缓；后续视觉证据保存在 .tasks/ui/TASK-020/","最小接口行为验证 → pnpm check → 真实 Electron 操作核心旅程；不能只截图或只用静态假数据"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
     result:
       owner: null
@@ -853,15 +855,15 @@ tasks:
   - id: TASK-021
     title: "App 多入口与升级完整业务验收"
     status: pending
-    goal: "证明用户从配置到 IM/定时任务执行、通知导航及升级恢复的完整体验。"
+    goal: "证明用户从配置到 IM/定时任务执行、结果导航及升级恢复的完整体验；原生通知另行验收。"
     scope:
       in: ["桌面端完整用户旅程和打包应用","App 生命周期、SEA 升级与持久数据兼容的跨平台回归"]
-      out: ["生产发布与签名缺口自动豁免","在验证卡内新增业务实现"]
+      out: ["原生通知显示/点击及提醒偏好验收，后移 TASK-029","生产发布与签名缺口自动豁免","在验证卡内新增业务实现"]
     constraints: ["Pi 上游及兄弟仓库不修改；App 退出后不保留后台服务","完成须集成并验证于 main；本次建卡不授权实现、提交或推送","非本轮主要实现者验收；只用授权测试会话；发布前必须补齐目标平台证据"]
     forbidden: ["用构建成功代替真实业务验收","覆盖用户既有改动或伪造平台验证结果"]
     acceptance:
       - type: assertion
-        expect: "完成配置连接 → IM 对话 → 定时任务 → 系统提醒 → 点击查看结果的真实旅程"
+        expect: "完成配置连接 → IM 对话 → 定时任务 → 从 App 任务列表/运行详情查看结果的真实旅程"
       - type: assertion
         expect: "计划等待、任务执行、消息待投递三种状态分别退出并重新启动，结果符合恢复策略"
       - type: assertion
@@ -869,14 +871,46 @@ tasks:
       - type: assertion
         expect: "macOS/Windows/Linux 分别记录可执行证据和未验证项；继承历史生产签名/制品信任缺口，不宣称已解决"
       - type: assertion
-        expect: "为每条用户旅程主张关联当前 revision、平台、真实/fixture 模式及证据位置；独立验证者依据原始证据逐项复核局部通过被扩大为整体通过、模拟通知冒充展示、submitted 冒充已读和历史签名缺口遗漏"
+        expect: "为每条用户旅程主张关联当前 revision、平台、真实/fixture 模式及证据位置；独立验证者依据原始证据逐项复核局部通过被扩大为整体通过、历史签名缺口遗漏或把暂缓的通知宣称已通过"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-020"]
     risk_level: L3
     recommended_model: "gpt-5.6 sol"
-    investigation_hints: ["阶段验证记录、apps/desktop/test、apps/runtime/scripts/native 与打包配置","pnpm check → pnpm build:native && pnpm smoke:native → pnpm package:desktop → 当前 revision 平台旅程","证据保存 .tasks/verification/TASK-021/results.md；回归失败提独立修复，不修改历史验收结论"]
+    investigation_hints: ["阶段验证记录、apps/desktop/test、apps/runtime/scripts/native 与打包配置；通知暂缓见 docs/adr/0003-defer-native-notifications.md","pnpm check → pnpm build:native && pnpm smoke:native → pnpm package:desktop → 当前 revision 平台旅程","证据保存 .tasks/verification/TASK-021/results.md；回归失败提独立修复，不修改历史验收结论"]
     escalation_conditions: ["需改变已确认 App 生命周期或修改 Pi 上游时报告具体冲突","缺平台选择、凭据或目标系统时保留对应未验证项；不扩大为公网或生产操作"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-029
+    title: "补齐提醒界面与签名版原生通知验收"
+    status: pending
+    goal: "待具备有效 macOS 签名验收环境后，补齐提醒偏好、系统通知展示和点击回到对应运行的真实体验。"
+    scope:
+      in: ["提醒偏好和通知权限状态界面","当前版本有效签名的 macOS App 原生通知展示、点击与目标导航验收","失败事件、权限拒绝、submitted 与用户可见性的区分"]
+      out: ["把 ad-hoc 开发版通知提交当作用户可见","无证书时索取或创建签名凭据","改变 IM 与定时任务已验证的投递行为"]
+    constraints: ["现有通知实现保留，不能以暂缓验收为由删除或静默关闭","仅在用户授权的测试会话观察通知；不记录敏感消息正文或凭据","完成须集成并验证于 main；无有效签名环境时保留未验证状态，不阻塞 TASK-019/020/021"]
+    forbidden: ["将 submitted、fixture 或 failed_event 记为系统展示通过","修改系统安全设置来规避签名要求","覆盖用户既有改动或伪造平台验证结果"]
+    acceptance:
+      - type: assertion
+        expect: "用户可查看并更改提醒偏好、理解系统通知权限状态；失败或拒绝有明确反馈"
+      - type: assertion
+        expect: "当前 revision 的有效签名 macOS App 在授权私聊或计划完成后，用户实际看到系统通知，点击后定位到对应会话或运行；过期目标有可理解提示"
+      - type: assertion
+        expect: "记录宿主回执、系统展示和点击导航为独立事实；保留 TASK-019 开发版未见通知及 failed_event 的历史证据，不借此推断签名版结果"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-015","TASK-020"]
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["docs/adr/0003-defer-native-notifications.md 与 .tasks/verification/TASK-019/results.md 的 V19-07 历史证据","apps/desktop/src/notification-host.ts、apps/app/src/main.tsx 与 docs/application-architecture.md 第 13 节；先设计审阅再实现提醒界面","用有效签名的当前 App 与一位授权用户复测，不把旧 ad-hoc 包或 fixture 作为展示证据"]
+    escalation_conditions: ["缺有效签名身份或用户授权测试会话时保留未验证项并请求环境，不弱化验收","若修复需要修改 IM 身份或投递契约，先说明边界与回归影响"]
     result:
       owner: null
       attempts: 0
