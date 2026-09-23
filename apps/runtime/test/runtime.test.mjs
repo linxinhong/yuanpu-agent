@@ -25,6 +25,84 @@ test('runtime CLI accepts a name', () => {
   assert.equal(output.trim(), 'Hello, CI!');
 });
 
+test('optional Enterprise WeChat startup failure does not prevent Runtime readiness', async (context) => {
+  for (const [name, document, expectedEvent] of [
+    ['malformed JSON', '{', 'configuration_invalid'],
+    ['legacy unknown field', {
+      schemaVersion: 1,
+      connections: [{
+        enabled: false,
+        provider: 'wecom',
+        connectionId: 'imc_fixture',
+        groupAllowlist: [],
+      }],
+    }, 'configuration_invalid'],
+    ['unavailable Keychain credential', {
+      schemaVersion: 1,
+      connections: [{
+        enabled: true,
+        provider: 'wecom',
+        connectionId: 'imc_fixture',
+        providerAccountRef: 'fixture-bot',
+        credentialRefs: { botSecret: 'keychain:yuanpu/im/imc_fixture/bot-secret' },
+        directMessagePolicy: 'paired-only',
+        groupPolicy: 'allowlist-paired-sender-and-provider-at-mention',
+        acceptedMessageTypes: ['text'],
+      }],
+    }, 'credential_unavailable'],
+  ]) {
+    await context.test(name, async (scenario) => {
+      const home = await mkdtemp(join(tmpdir(), 'yuanpu-optional-wecom-'));
+      await mkdir(join(home, 'app', 'connections'), { recursive: true });
+      await writeFile(
+        join(home, 'app', 'connections', 'wecom.json'),
+        typeof document === 'string' ? document : JSON.stringify(document),
+      );
+      const token = randomBytes(32).toString('hex');
+      const approvalPublicKey = generateKeyPairSync('ed25519').publicKey
+        .export({ type: 'spki', format: 'der' }).toString('base64');
+      const child = spawn(process.execPath, ['dist/index.cjs', '--serve', '--port', '0'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          YUANPU_HOME: home,
+          YUANPU_PYTHON_MCP_EXECUTABLE: '',
+          YUANPU_PYTHON_MCP_ROOT: '',
+        },
+      });
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
+      scenario.after(async () => {
+        child.kill();
+        await rm(home, { recursive: true, force: true });
+      });
+      const ready = await new Promise((resolve, reject) => {
+        let stdout = '';
+        const timeout = setTimeout(() => reject(new Error('Runtime did not become ready')), 5_000);
+        child.once('error', reject);
+        child.once('exit', (code) => reject(new Error(`Runtime exited before ready: ${code}`)));
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', (chunk) => {
+          stdout += chunk;
+          const newline = stdout.indexOf('\n');
+          if (newline < 0) return;
+          clearTimeout(timeout);
+          resolve(JSON.parse(stdout.slice(0, newline)));
+        });
+      });
+      assert.equal(ready.event, 'ready');
+      const health = await fetch(`http://${ready.host}:${ready.port}/v1/health`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assert.equal(health.status, 200);
+      assert.match(stderr, new RegExp(`\\[wecom\\] ${expectedEvent}`));
+      assert.doesNotMatch(stderr, /fixture-bot|bot-secret/);
+    });
+  }
+});
+
 test('runtime server exposes its protocol and greeting', async (context) => {
   const home = await mkdtemp(join(tmpdir(), 'yuanpu-runtime-test-'));
   const pluginsRoot = join(home, 'plugins');

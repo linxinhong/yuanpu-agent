@@ -227,3 +227,33 @@ test('rejects duplicate connection ownership and closes an adapter whose start f
     assert.equal(closed, true);
   });
 });
+
+test('a later connection failure closes an earlier started adapter', async () => {
+  const document = enabledConnection();
+  document.connections.push({
+    ...document.connections[0],
+    connectionId: 'imc_second',
+    providerAccountRef: 'bot-second',
+    credentialRefs: { botSecret: 'keychain:yuanpu/im/imc_second/bot-secret' },
+  });
+  await withConfig(document, async (appPath) => {
+    let closed = false;
+    await assert.rejects(startConfiguredWecomChannels({
+      appPath,
+      workspaceId: '/fixture-workspace',
+      store: store(),
+      agent: agent(),
+      resolveCredential: async (reference) => {
+        if (reference.includes('imc_second')) throw new Error('fixture credential unavailable');
+        return 'fixture-secret';
+      },
+      createTransport: () => ({
+        connect() {},
+        async ready() {},
+        async reply() { return { status: 'accepted' }; },
+        close() { closed = true; },
+      }),
+    }), /fixture credential unavailable/);
+    assert.equal(closed, true);
+  });
+});

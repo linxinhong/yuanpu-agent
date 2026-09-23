@@ -1346,18 +1346,29 @@ async function serve(): Promise<void> {
 
   try {
     parentMonitor = installParentProcessMonitor(parentPid, shutdown);
-    wecomChannels.push(...await startConfiguredWecomChannels({
-      appPath: home.appPath,
-      workspaceId: home.config.workingDirectory,
-      store: metadata.channels,
-      agent: agentService,
-      log: (record) => {
-        const message = `[wecom] ${record.event}`;
-        if (record.level === 'error') console.error(message);
-        else if (record.level === 'warn') console.warn(message);
-        else if (record.level === 'info') console.info(message);
-      },
-    }));
+    try {
+      wecomChannels.push(...await startConfiguredWecomChannels({
+        appPath: home.appPath,
+        workspaceId: home.config.workingDirectory,
+        store: metadata.channels,
+        agent: agentService,
+        log: (record) => {
+          const message = `[wecom] ${record.event}`;
+          if (record.level === 'error') console.error(message);
+          else if (record.level === 'warn') console.warn(message);
+          else if (record.level === 'info') console.info(message);
+        },
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const event = message === 'Enterprise WeChat connection configuration is invalid.'
+        || message === 'Enabled Enterprise WeChat connection is incomplete or unsafe.'
+        ? 'configuration_invalid'
+        : message === 'Enterprise WeChat credential could not be resolved from the system Keychain.'
+          ? 'credential_unavailable'
+          : 'connection_unavailable';
+      console.warn(`[wecom] ${event}`);
+    }
     await scheduler.tick();
   } catch (error) {
     parentMonitor?.dispose();
