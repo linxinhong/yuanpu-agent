@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { app, BrowserWindow, dialog, ipcMain, Notification, type IpcMainInvokeEvent } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import type { NotificationNavigationTarget } from '@yuanpu-agent/protocol';
+import type { NotificationNavigationTarget, RuntimeRecoveryNotice } from '@yuanpu-agent/protocol';
 
 import { RuntimeManager } from './runtime-manager.js';
 import { ElectronNotificationHost, type NativeNotification } from './notification-host.js';
@@ -16,6 +16,7 @@ let quitAllowed = false;
 let notificationHost: ElectronNotificationHost | undefined;
 let pendingNotificationTarget: NotificationNavigationTarget | undefined;
 let notificationsEnabled = true;
+let runtimeRecoveryNotice: RuntimeRecoveryNotice | undefined;
 
 function flushNotificationNavigation(): void {
   if (!mainWindow || mainWindow.webContents.isLoadingMainFrame() || !pendingNotificationTarget) return;
@@ -102,9 +103,13 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
     app.getPath('userData'),
     app.isPackaged,
     app.getVersion(),
+    {
+      onUpdateRecovery: (kind) => { runtimeRecoveryNotice = { kind }; },
+    },
   );
 
   ipcMain.handle('runtime:info', trustedHandler(() => runtime.info()));
+  ipcMain.handle('runtime:recovery-notice', trustedHandler(() => runtimeRecoveryNotice));
   ipcMain.handle('runtime:greeting', trustedHandler((name: string) => runtime.greeting(name)));
   ipcMain.handle('runtime:chat', trustedHandler((message: string) => runtime.chat(message)));
   ipcMain.handle('runtime:chat:submit', trustedHandler((message: string) => runtime.submitDesktopMessage(message)));

@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 const bridge: DesktopBridge = {
   runtimeInfo: () => ipcRenderer.invoke('runtime:info'),
+  runtimeRecoveryNotice: () => ipcRenderer.invoke('runtime:recovery-notice'),
   greeting: (name) => ipcRenderer.invoke('runtime:greeting', name),
   chat: (message) => ipcRenderer.invoke('runtime:chat', message),
   submitDesktopMessage: (message) => ipcRenderer.invoke('runtime:chat:submit', message),
