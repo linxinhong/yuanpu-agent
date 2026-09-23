@@ -9,6 +9,8 @@ import {
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 
+import { resolveArtifactSigningKeyId } from './signing-key-id.mjs';
+
 const root = resolve(import.meta.dirname, '..');
 const output = join(root, 'dist-artifact');
 const work = join(root, '.pyinstaller');
@@ -75,9 +77,7 @@ const publicKeyBase64 = process.env.YUANPU_ARTIFACT_TRUST_ROOT_PUBLIC_KEY_BASE64
 if (privateKeyFile && privateKeyBase64) throw new Error('Configure only one artifact signing key source.');
 const hasProductionKey = Boolean(privateKeyFile || privateKeyBase64);
 const hasProductionTrustRoot = Boolean(hasProductionKey || publicKeyBase64);
-const keyId = process.env.YUANPU_ARTIFACT_SIGNING_KEY_ID
-  ?? (hasProductionTrustRoot ? undefined : 'yuanpu-development-ephemeral');
-if (!keyId) throw new Error('YUANPU_ARTIFACT_SIGNING_KEY_ID is required with a production trust root.');
+const keyId = resolveArtifactSigningKeyId(process.env.YUANPU_ARTIFACT_SIGNING_KEY_ID, hasProductionTrustRoot);
 
 let privateKey;
 let publicKey;
