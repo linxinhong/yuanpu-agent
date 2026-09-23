@@ -931,7 +931,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-030
     title: "修复 SEA 更新回退后的用户提示"
-    status: ready
+    status: in_progress
     goal: "修复 TASK-021 的 D21-01：已安全回退的不兼容 Runtime 更新应在打包 App 中明确告知用户。"
     scope:
       in: ["Runtime 更新回退事件到受信任渲染进程的最小桥接", "可关闭的用户可见提示", "隔离打包版回归探针"]
@@ -953,12 +953,12 @@ tasks:
     investigation_hints: [".tasks/verification/TASK-021/results.md 的 D21-01", "apps/desktop/src/runtime-manager.ts 的 startInternal/reportError；apps/desktop/src/main.ts、preload.ts；apps/app/src/main.tsx", "使用 apps/desktop/test/task-021-packaged-electron-app-probe.mjs 的隔离场景复验，不接入真实机器人"]
     escalation_conditions: ["若需修改 Runtime 协议或回滚持久化策略，先说明契约冲突"]
     result:
-      owner: null
+      owner: "codex-d21sep23-12136-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T12:10:24.852Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-030"
+      branch: "task/task-030-runtime-recovery-notice"
       evidence: []
       follow_up_candidates: []
   - id: TASK-023
