@@ -59,6 +59,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 public static class YuanpuJob {
+  private static readonly Dictionary<uint, IntPtr> TrackedDescendants = new Dictionary<uint, IntPtr>();
   [StructLayout(LayoutKind.Sequential)]
   public struct BasicLimits {
     public long PerProcessUserTimeLimit;
@@ -166,7 +167,7 @@ public static class YuanpuJob {
       Marshal.FreeHGlobal(info);
     }
   }
-  public static List<uint> FindDescendants(uint rootPid) {
+  public static List<uint> FindDescendants(IEnumerable<uint> roots) {
     IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
     if (snapshot == new IntPtr(-1)) throw new InvalidOperationException("Process snapshot failed");
     var children = new Dictionary<uint, List<uint>>();
@@ -190,8 +191,10 @@ public static class YuanpuJob {
     var queue = new Queue<uint>();
     var seen = new HashSet<uint>();
     var descendants = new List<uint>();
-    queue.Enqueue(rootPid);
-    seen.Add(rootPid);
+    foreach (uint rootPid in roots) {
+      queue.Enqueue(rootPid);
+      seen.Add(rootPid);
+    }
     while (queue.Count > 0) {
       List<uint> direct;
       if (!children.TryGetValue(queue.Dequeue(), out direct)) continue;
@@ -205,7 +208,7 @@ public static class YuanpuJob {
   }
   public static string AssignDescendantsToJob(IntPtr job, uint rootPid) {
     var outcomes = new List<string>();
-    foreach (uint pid in FindDescendants(rootPid)) {
+    foreach (uint pid in FindDescendants(new uint[] { rootPid })) {
       IntPtr process = OpenProcess(0x101101, false, pid);
       if (process == IntPtr.Zero) {
         outcomes.Add(pid + ":not-open");
@@ -223,29 +226,38 @@ public static class YuanpuJob {
     }
     return string.Join(",", outcomes.ToArray());
   }
-  public static string TerminateDescendants(uint rootPid) {
-    var descendants = FindDescendants(rootPid);
+  public static string TrackDescendants(uint rootPid) {
     var outcomes = new List<string>();
-    for (int i = descendants.Count - 1; i >= 0; i--) {
-      uint pid = descendants[i];
+    var roots = new List<uint>(TrackedDescendants.Keys);
+    roots.Add(rootPid);
+    foreach (uint pid in FindDescendants(roots)) {
+      if (TrackedDescendants.ContainsKey(pid)) continue;
       IntPtr process = OpenProcess(0x100001, false, pid);
       if (process == IntPtr.Zero) {
         outcomes.Add(pid + ":not-open");
         continue;
       }
+      TrackedDescendants.Add(pid, process);
+      outcomes.Add(pid + ":tracked");
+    }
+    return string.Join(",", outcomes.ToArray());
+  }
+  public static string TerminateTrackedDescendants() {
+    var outcomes = new List<string>();
+    foreach (var descendant in TrackedDescendants) {
       try {
-        if (TerminateProcess(process, 1)) {
-          if (WaitForSingleObject(process, 5000) != 0) {
-            throw new InvalidOperationException("Timed out waiting for descendant termination");
-          }
-          outcomes.Add(pid + ":terminated");
+        if (WaitForSingleObject(descendant.Value, 0) == 0) {
+          outcomes.Add(descendant.Key + ":exited");
+        } else if (TerminateProcess(descendant.Value, 1) && WaitForSingleObject(descendant.Value, 5000) == 0) {
+          outcomes.Add(descendant.Key + ":terminated");
         } else {
-          outcomes.Add(pid + ":not-terminated");
+          outcomes.Add(descendant.Key + ":not-terminated");
         }
       } finally {
-        CloseHandle(process);
+        CloseHandle(descendant.Value);
       }
     }
+    TrackedDescendants.Clear();
     return string.Join(",", outcomes.ToArray());
   }
 }
@@ -277,14 +289,19 @@ try {
   }
   Trace-McpStage 'job-assigned'
   Trace-McpStage ("descendants-at-start-" + [YuanpuJob]::AssignDescendantsToJob($job, [uint32]$env:YUANPU_MCP_CHILD_PID))
+  Trace-McpStage ("tracked-at-start-" + [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
   [Console]::Out.WriteLine('READY')
   [Console]::Out.Flush()
-  $waitResult = [YuanpuJob]::WaitForSingleObject($process, [uint32]::MaxValue)
+  do {
+    $waitResult = [YuanpuJob]::WaitForSingleObject($process, 50)
+    if ($waitResult -eq 258) { [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null }
+  } while ($waitResult -eq 258)
+  Trace-McpStage ("tracked-at-exit-" + [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
   Trace-McpStage "wait-result-$waitResult"
   Trace-McpStage ("active-processes-" + [YuanpuJob]::ActiveProcessCount($job))
   if (-not [YuanpuJob]::TerminateJobObject($job, 1)) { throw 'TerminateJobObject failed' }
   Trace-McpStage 'job-terminated'
-  Trace-McpStage ("escaped-descendants-root-" + $env:YUANPU_MCP_CHILD_PID + '-' + [YuanpuJob]::TerminateDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
+  Trace-McpStage ("tracked-terminated-" + [YuanpuJob]::TerminateTrackedDescendants())
 } catch {
   Trace-McpStage ('wait-error-' + $_.Exception.GetType().Name)
   throw
