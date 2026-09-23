@@ -23,6 +23,7 @@
 - 验证脚本与结果已快进并入本地 `main` 的 `04c5c0c`；在该集成 revision 以 Node 24.15.0 / pnpm 11.22.0 再跑 `pnpm check`，通过（runtime-kit 113/113、Runtime 14/14、Desktop 20/20）。此检查仍不覆盖下列真实平台与渠道投递缺口。
 - API 失败探针是预期的验收失败，未编入 `pnpm check`；源码改动仅为验证脚本与证据，未修改产品实现。
 - 新 Bot 鉴权复跑命令（从 `packages/yuanpu-runtime` 执行）：`node --env-file=/Users/linxinhong/.yuanpu/app/connections/.env test/task-019-wecom-auth-probe.mjs`。脚本不发送消息，限制一次鉴权尝试，仅输出成功布尔值或数字错误码并断开。2026-09-23 本机观察为 `authenticated=false, errcode=853000`，退出码 1；`.env` 权限已收紧为 `0600`。未将凭据导入 Keychain 或启用现有连接。
+- 鉴权交接提交 `6ce1d60` 再跑 `pnpm check`：pass，runtime-kit 113/113、Runtime 14/14、Desktop 20/20；runner 记录 `1790128038312650000.json`。无产品实现改动，检查通过不改变 V19-02 或 V19-06 的结论。
 
 ## 阻断与下一步
 
