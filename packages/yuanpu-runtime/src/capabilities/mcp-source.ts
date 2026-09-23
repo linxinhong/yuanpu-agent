@@ -332,6 +332,15 @@ export class ManagedMcpCapabilitySource {
       if (process.platform === 'win32') {
         const systemRoot = isolatedEnv.SYSTEMROOT;
         if (!systemRoot) throw new ManagedMcpSourceError('unavailable', 'SYSTEMROOT is required for Windows MCP isolation.');
+        const temp = join(this.#options.privateHome, 'temp');
+        await mkdir(temp, { recursive: true });
+        isolatedEnv.TEMP = temp;
+        isolatedEnv.TMP = temp;
+        isolatedEnv.PATH = [
+          isolatedEnv.PATH,
+          join(systemRoot, 'System32'),
+          systemRoot,
+        ].filter(Boolean).join(';');
         const supervisor = join(this.#options.privateHome, 'mcp-job-supervisor.ps1');
         await writeFile(supervisor, WINDOWS_JOB_SUPERVISOR, { encoding: 'utf8', mode: 0o600 });
         isolatedEnv.YUANPU_MCP_CHILD_COMMAND = command;
