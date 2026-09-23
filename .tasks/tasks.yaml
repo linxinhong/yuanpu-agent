@@ -1001,7 +1001,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-033
     title: "区分企业微信运行与回复投递状态"
-    status: in_progress
+    status: done
     goal: "修复 TASK-021 的 D21-02：App 查看企业微信运行结果时，应同时看见独立的回复投递状态，尤其不能把 Agent 成功误读为已投递。"
     scope:
       in: ["按运行 ID 查询持久化 IM outbound 的最小可信接口", "现有运行详情中单独呈现回复投递结果与未知状态", "隔离 App 重启后的浏览器/进程回归"]
@@ -1026,10 +1026,14 @@ tasks:
       owner: "codex-task021-followup-20260923-12136"
       attempts: 0
       claimed_at: "2026-09-23T13:51:45.138Z"
-      completed_at: null
+      completed_at: "2026-09-23T14:15:20.564Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-032"
       branch: "task/task-033-im-delivery-status"
-      evidence: []
+      evidence:
+        - {type: "assertion", check: "paired private IM authorization and minimized summary", status: "passed", summary: "Product commits 06312e9/c7bfe95/193fe5a integrated at main e16cfef. Unit test asserts current pairing, matching workspace/conversation/route/inbound/outbound, denial after revocation or cross-link and status-only fields; focused runner 1790172477269261000.json. Independent verifier reviewed the trust path and found no remaining confirmed authorization defect."}
+        - {type: "assertion", check: "App distinguishes Agent run from IM reply delivery after restart", status: "passed", summary: "Independent TASK-021 fixture at verification commit 1de5775 on macOS arm64: two real Electron main/preload/React launches over isolated SQLite and controlled Runtime/provider; outbound unknown after quit/restart, Agent and send each once, renderer displayed separate succeeded and delivery-unknown rows, re-navigation persisted, revoked pairing denied, children cleaned. Runner 1790172599019589000.json. Formal Runtime/real WeCom provider not claimed."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 macOS task branch 193fe5a runner 1790172504403108000.json and independent verification branch runner 1790172530489632000.json passed. Integrated main e16cfef passed ubuntu-24.04 CI run 35872482174."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-033.md at main f0db8be records exact public seams, auth policy, fixture/business limits and Linux CI evidence. TASK-021 remains separately in progress."}
       follow_up_candidates: []
   - id: TASK-031
     title: "隔离验证 Pi v0.87.1 内核同步"
