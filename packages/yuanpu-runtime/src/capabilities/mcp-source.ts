@@ -46,16 +46,9 @@ const execFileAsync = promisify(execFile);
 
 const WINDOWS_JOB_SUPERVISOR = String.raw`
 $ErrorActionPreference = 'Stop'
-function Trace-McpStage([string]$stage) {
-  if ($env:YUANPU_MCP_DIAGNOSTIC_FILE) {
-    [IO.File]::AppendAllText($env:YUANPU_MCP_DIAGNOSTIC_FILE, [DateTime]::UtcNow.ToString('o') + ' ' + $stage + [Environment]::NewLine)
-  }
-}
-Trace-McpStage 'start'
 Add-Type @'
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 public static class YuanpuJob {
@@ -89,17 +82,6 @@ public static class YuanpuJob {
     public UIntPtr JobMemoryLimit;
     public UIntPtr PeakProcessMemoryUsed;
     public UIntPtr PeakJobMemoryUsed;
-  }
-  [StructLayout(LayoutKind.Sequential)]
-  public struct BasicAccounting {
-    public long TotalUserTime;
-    public long TotalKernelTime;
-    public long ThisPeriodTotalUserTime;
-    public long ThisPeriodTotalKernelTime;
-    public uint TotalPageFaultCount;
-    public uint TotalProcesses;
-    public uint ActiveProcesses;
-    public uint TotalTerminatedProcesses;
   }
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
   public struct ProcessEntry {
@@ -149,20 +131,6 @@ public static class YuanpuJob {
       }
       ExtendedLimits limits = (ExtendedLimits)Marshal.PtrToStructure(info, typeof(ExtendedLimits));
       return (limits.BasicLimitInformation.LimitFlags & 0x2000) != 0;
-    } finally {
-      Marshal.FreeHGlobal(info);
-    }
-  }
-  public static uint ActiveProcessCount(IntPtr job) {
-    uint size = (uint)Marshal.SizeOf(typeof(BasicAccounting));
-    IntPtr info = Marshal.AllocHGlobal((int)size);
-    try {
-      uint returnedLength;
-      if (!QueryInformationJobObject(job, 1, info, size, out returnedLength)) {
-        throw new InvalidOperationException("QueryInformationJobObject accounting failed");
-      }
-      BasicAccounting accounting = (BasicAccounting)Marshal.PtrToStructure(info, typeof(BasicAccounting));
-      return accounting.ActiveProcesses;
     } finally {
       Marshal.FreeHGlobal(info);
     }
@@ -262,7 +230,6 @@ public static class YuanpuJob {
   }
 }
 '@
-Trace-McpStage 'add-type'
 
 $job = [YuanpuJob]::CreateJobObject([IntPtr]::Zero, $null)
 if ($job -eq [IntPtr]::Zero) { throw 'CreateJobObject failed' }
@@ -287,28 +254,21 @@ try {
   if (-not [YuanpuJob]::AssignProcessToJobObject($job, $process)) {
     throw 'Assign child to Job Object failed'
   }
-  Trace-McpStage 'job-assigned'
-  Trace-McpStage ("descendants-at-start-" + [YuanpuJob]::AssignDescendantsToJob($job, [uint32]$env:YUANPU_MCP_CHILD_PID))
-  Trace-McpStage ("tracked-at-start-" + [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
+  # A venv launcher can create the real interpreter before it joins the Job.
+  [YuanpuJob]::AssignDescendantsToJob($job, [uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null
+  [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null
   [Console]::Out.WriteLine('READY')
   [Console]::Out.Flush()
   do {
     $waitResult = [YuanpuJob]::WaitForSingleObject($process, 50)
     if ($waitResult -eq 258) { [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null }
   } while ($waitResult -eq 258)
-  Trace-McpStage ("tracked-at-exit-" + [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID))
-  Trace-McpStage "wait-result-$waitResult"
-  Trace-McpStage ("active-processes-" + [YuanpuJob]::ActiveProcessCount($job))
+  [YuanpuJob]::TrackDescendants([uint32]$env:YUANPU_MCP_CHILD_PID) | Out-Null
   if (-not [YuanpuJob]::TerminateJobObject($job, 1)) { throw 'TerminateJobObject failed' }
-  Trace-McpStage 'job-terminated'
-  Trace-McpStage ("tracked-terminated-" + [YuanpuJob]::TerminateTrackedDescendants())
-} catch {
-  Trace-McpStage ('wait-error-' + $_.Exception.GetType().Name)
-  throw
 } finally {
+  [YuanpuJob]::TerminateTrackedDescendants() | Out-Null
   [YuanpuJob]::CloseHandle($process) | Out-Null
   [YuanpuJob]::CloseHandle($job) | Out-Null
-  Trace-McpStage 'job-closed'
 }
 `;
 

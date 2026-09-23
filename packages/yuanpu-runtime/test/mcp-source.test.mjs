@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,7 +19,6 @@ const pythonExecutable = process.platform === 'win32'
   ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
   : join(pythonRoot, '.venv', 'bin', 'python');
 const testPrivateHome = await mkdtemp(join(tmpdir(), 'yuanpu-mcp-test-'));
-const windowsDiagnosticFile = join(testPrivateHome, 'supervisor-stages.log');
 after(() => rm(testPrivateHome, { recursive: true, force: true }));
 
 function pythonSource(overrides = {}) {
@@ -42,7 +40,6 @@ function pythonSource(overrides = {}) {
       PATH: dirname(pythonExecutable),
       PYTHONPATH: join(pythonRoot, 'src'),
       PYTHONUNBUFFERED: '1',
-      ...(process.platform === 'win32' ? { YUANPU_MCP_DIAGNOSTIC_FILE: windowsDiagnosticFile } : {}),
       YUANPU_MCP_TEST_FIXTURES: '1',
       ...(process.platform === 'win32' && process.env.SYSTEMROOT
         ? { SYSTEMROOT: process.env.SYSTEMROOT }
@@ -61,13 +58,7 @@ test('real Python MCP discovery and execution preserve structured results and er
   });
   const search = await server.search({ query: 'echo' });
   const echo = search.matches.find((match) => match.originalName === 'yuanpu_echo_text');
-  const stages = process.platform === 'win32'
-    ? await readFile(windowsDiagnosticFile, 'utf8').catch(() => 'no supervisor stage')
-    : '';
-  const childStderr = process.platform === 'win32'
-    ? await readFile(`${windowsDiagnosticFile}.stderr`, 'utf8').catch(() => 'no child stderr')
-    : '';
-  assert.ok(echo, `${JSON.stringify(search)}; stages=${stages}; child stderr=${childStderr}`);
+  assert.ok(echo, JSON.stringify(search));
   const result = await server.execute({ name: echo.name, arguments: { text: '源谱' } });
   assert.deepEqual(result.structuredContent, { text: '源谱', length: 2 });
   assert.equal(result.content[0].type, 'text');
@@ -135,13 +126,7 @@ test('an unexpected MCP root exit terminates its process group', async () => {
   assert.equal(typeof childPid, 'number');
   process.kill(childPid, 0);
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 400));
-  const stages = process.platform === 'win32'
-    ? (await readFile(windowsDiagnosticFile, 'utf8')).trim().split(/\r?\n/u).slice(-12).join('\n')
-    : '';
-  const tasklist = process.platform === 'win32'
-    ? execFileSync('tasklist', ['/FI', `PID eq ${childPid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' })
-    : '';
-  assert.throws(() => process.kill(childPid, 0), `childPid=${childPid}\n${stages}\ntasklist=${tasklist}`);
+  assert.throws(() => process.kill(childPid, 0));
   await source.close();
 });
 
