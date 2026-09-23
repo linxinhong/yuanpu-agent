@@ -1059,7 +1059,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-028
     title: "隔离企业微信日志与 Runtime 就绪协议"
-    status: ready
+    status: in_progress
     goal: "启用企业微信长连接时，SDK 诊断日志不得破坏 Desktop 读取 Runtime 首行 JSON 就绪信号，App 应正常启动。"
     scope:
       in: ["Runtime 企业微信日志的输出边界", "就绪握手回归测试", "正式 App 启动复验"]
@@ -1079,11 +1079,11 @@ tasks:
     investigation_hints: ["apps/runtime/src/index.ts 的 startConfiguredWecomChannels log callback 使用 console.info；apps/desktop/src/runtime-manager.ts 的 launch 解析 stdout 首行；最近测试 apps/runtime/test/runtime.test.mjs", "先建立 info 事件污染 stdout 的失败测试，再修正日志输出，跑 focused 与 pnpm check；最后用已启用的本机连接重启 App 并只记录脱敏状态"]
     escalation_conditions: ["若 stdout 还有其他非协议写入，记录具体来源并扩展同一启动边界修复，不跳过 ready 校验"]
     result:
-      owner: null
+      owner: "codex-t028sep23-12136"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-23T06:47:22.434Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-028"
+      branch: "task/task-028-wecom-ready-logs"
       evidence: []
       follow_up_candidates: []
