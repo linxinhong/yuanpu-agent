@@ -94,6 +94,10 @@ export interface RuntimeUpdateState {
   message?: string;
 }
 
+export interface RuntimeRecoveryNotice {
+  kind: 'incompatible_protocol' | 'activation_failed';
+}
+
 export interface CapabilityApprovalSummary {
   requestId: string;
   runId?: string;
@@ -242,6 +246,7 @@ export interface PluginConfigValidation {
 
 export interface DesktopBridge {
   runtimeInfo(): Promise<RuntimeInfo>;
+  runtimeRecoveryNotice(): Promise<RuntimeRecoveryNotice | undefined>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
   submitDesktopMessage(message: string): Promise<AgentRunReceipt>;

@@ -54,6 +54,10 @@ interface RuntimeCommand extends RuntimeActivation {
   args: string[];
 }
 
+class RuntimeProtocolIncompatibilityError extends Error {}
+
+export type RuntimeUpdateRecoveryReason = 'incompatible_protocol' | 'activation_failed';
+
 export interface RuntimeManagerOptions {
   command?: { executable: string; args: string[] };
   startupTimeoutMs?: number;
@@ -63,6 +67,7 @@ export interface RuntimeManagerOptions {
   restartBaseDelayMs?: number;
   activationStabilityMs?: number;
   onError?: (error: Error) => void;
+  onUpdateRecovery?: (reason: RuntimeUpdateRecoveryReason) => void;
 }
 
 const execFileAsync = promisify(execFile);
@@ -80,8 +85,8 @@ export class RuntimeManager {
   private readonly token = randomBytes(32).toString('hex');
   private readonly approvalKeyPair = generateKeyPairSync('ed25519');
   private readonly updater: RuntimeUpdater;
-  private readonly options: Required<Omit<RuntimeManagerOptions, 'command' | 'onError'>>
-    & Pick<RuntimeManagerOptions, 'command' | 'onError'>;
+  private readonly options: Required<Omit<RuntimeManagerOptions, 'command' | 'onError' | 'onUpdateRecovery'>>
+    & Pick<RuntimeManagerOptions, 'command' | 'onError' | 'onUpdateRecovery'>;
 
   constructor(
     private readonly appPath: string,
@@ -106,6 +111,7 @@ export class RuntimeManager {
       restartBaseDelayMs: options.restartBaseDelayMs ?? 250,
       activationStabilityMs: options.activationStabilityMs ?? 2_000,
       onError: options.onError,
+      onUpdateRecovery: options.onUpdateRecovery,
     };
   }
 
@@ -311,7 +317,7 @@ export class RuntimeManager {
             const value = JSON.parse(stdout.slice(0, lineEnd)) as RuntimeReady;
             if (value.event !== 'ready') throw new Error('Runtime returned an invalid readiness event.');
             if (value.protocolVersion !== PROTOCOL_VERSION) {
-              throw new Error(
+              throw new RuntimeProtocolIncompatibilityError(
                 `Runtime protocol is incompatible: desktop expects ${PROTOCOL_VERSION}, Runtime reported ${String(value.protocolVersion)}.`,
               );
             }
@@ -337,7 +343,7 @@ export class RuntimeManager {
       if (!response.ok) throw new Error(`Runtime health check failed with HTTP ${response.status}.`);
       const health = await response.json() as RuntimeInfo;
       if (health.protocolVersion !== PROTOCOL_VERSION) {
-        throw new Error(
+        throw new RuntimeProtocolIncompatibilityError(
           `Runtime protocol is incompatible: desktop expects ${PROTOCOL_VERSION}, health reported ${String(health.protocolVersion)}.`,
         );
       }
@@ -384,6 +390,13 @@ export class RuntimeManager {
         this.reportError(new Error(
           `Runtime update failed and the previous version was restored: ${error instanceof Error ? error.message : String(error)}`,
         ));
+        try {
+          this.options.onUpdateRecovery?.(
+            error instanceof RuntimeProtocolIncompatibilityError ? 'incompatible_protocol' : 'activation_failed',
+          );
+        } catch (noticeError) {
+          this.reportError(noticeError);
+        }
         return launched.ready;
       } catch (rollbackError) {
         throw new AggregateError(

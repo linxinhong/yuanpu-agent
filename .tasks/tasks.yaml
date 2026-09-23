@@ -929,6 +929,68 @@ tasks:
       branch: null
       evidence: []
       follow_up_candidates: []
+  - id: TASK-030
+    title: "修复 SEA 更新回退后的用户提示"
+    status: in_progress
+    goal: "修复 TASK-021 的 D21-01：已安全回退的不兼容 Runtime 更新应在打包 App 中明确告知用户。"
+    scope:
+      in: ["Runtime 更新回退事件到受信任渲染进程的最小桥接", "可关闭的用户可见提示", "隔离打包版回归探针"]
+      out: ["改变 SEA 更新或 SQLite 回滚策略", "生产签名、Windows/Linux 验收", "在修复卡内宣称 TASK-021 整体完成"]
+    constraints: ["仅传递脱敏的错误类别和固定文案，不向渲染进程暴露原始 stderr、路径或凭据", "恢复成功继续打开 App，退出仍清理 Runtime 子进程", "完成须集成并验证于 main"]
+    forbidden: ["用日志代替用户可见提示", "触碰真实机器人配置或测试会话", "覆盖用户既有改动"]
+    acceptance:
+      - type: assertion
+        expect: "不兼容的已暂存 Runtime 启动失败并成功回退时，打包 App 明确显示更新不兼容且已恢复，用户可关闭提示，原任务数据可见"
+      - type: assertion
+        expect: "正常启动不显示误导性提示；其他回退错误不泄漏原始诊断；失败回退不妨碍 App 打开或改变更新策略"
+      - type: assertion
+        expect: "D21-01 的隔离打包 App 探针在当前修复 revision 重跑并通过，TASK-021 独立验收仍按原边界记录"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-020"]
+    risk_level: L2
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: [".tasks/verification/TASK-021/results.md 的 D21-01", "apps/desktop/src/runtime-manager.ts 的 startInternal/reportError；apps/desktop/src/main.ts、preload.ts；apps/app/src/main.tsx", "使用 apps/desktop/test/task-021-packaged-electron-app-probe.mjs 的隔离场景复验，不接入真实机器人"]
+    escalation_conditions: ["若需修改 Runtime 协议或回滚持久化策略，先说明契约冲突"]
+    result:
+      owner: "codex-d21sep23-12136-12136"
+      attempts: 0
+      claimed_at: "2026-09-23T12:10:24.852Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-030"
+      branch: "task/task-030-runtime-recovery-notice"
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-031
+    title: "隔离验证 Pi v0.87.1 内核同步"
+    status: ready
+    goal: "验证从当前 Pi 0.86.1 镜像升级到官方 v0.87.1 对 Yuanpu 构建、Runtime、SEA 与关键业务入口的兼容性，为是否正式升级提供证据。"
+    scope:
+      in: ["以官方 v0.87.1 tag 和精确 commit 制作隔离同步候选", "对比 Pi 公共接口与 Yuanpu 适配边界", "在候选树执行构建、类型、单测、SEA 与受控入口烟测并记录差异"]
+      out: ["直接更新 main 的 Pi 镜像或用户运行中的 App", "调用真实模型或企业微信进行未经授权的外部测试", "用一次绿灯代替跨平台发布验收"]
+    constraints: ["保留当前 docs/pi-upstream.json 的 0.86.1 基线；同步仅在一次性任务工作树进行", "不改写兄弟 ../pi checkout，来源必须是官方 v0.87.1 tag", "若需要适配代码，先记录具体冲突并另设实现边界，不在验证卡内混入修复"]
+    forbidden: ["从可变 main HEAD 冒充 v0.87.1", "将上游生成文件或未锁定模型数据误记为版本差异", "覆盖用户现有工作树"]
+    acceptance:
+      - type: assertion
+        expect: "记录当前 0.86.1 与候选 v0.87.1 的准确 commit、变更范围、对 Yuanpu Pi 适配面的影响及可复现的隔离同步命令"
+      - type: assertion
+        expect: "候选树完成 pnpm check、pnpm build:native、pnpm smoke:native 与受控桌面/IM/计划核心入口回归；失败逐项归因，未运行平台如实标记"
+      - type: assertion
+        expect: "形成升级建议与未验证风险，不修改 main Pi 镜像、不触碰真实用户数据；如要正式升级，另行授权集成"
+    dependencies: []
+    risk_level: L3
+    recommended_model: "gpt-5.6 sol"
+    investigation_hints: ["docs/pi-integration.md、docs/pi-upstream.json、scripts/sync-pi-packages.mjs 为同步边界；候选 tag 为 https://github.com/earendil-works/pi/releases/tag/v0.87.1", "先隔离检出准确 tag，再从隔离工作树运行 pnpm sync:pi，检查镜像目录、共享 tsconfig 与 bundle helper 的差异", "按 closest Pi/Yuanpu 适配测试 → pnpm check → native 构建与烟测 → 隔离 App/Runtime 入口探针递进"]
+    escalation_conditions: ["若候选需要变更 Runtime/协议/数据迁移或用户凭据才可继续验证，记录边界并请求单独实施决定"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
   - id: TASK-023
     title: "确定微信 ClawBot 适配架构与安全边界"
     status: pending
