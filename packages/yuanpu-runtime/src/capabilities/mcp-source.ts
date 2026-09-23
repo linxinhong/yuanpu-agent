@@ -88,6 +88,17 @@ public static class YuanpuJob {
     public UIntPtr PeakProcessMemoryUsed;
     public UIntPtr PeakJobMemoryUsed;
   }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct BasicAccounting {
+    public long TotalUserTime;
+    public long TotalKernelTime;
+    public long ThisPeriodTotalUserTime;
+    public long ThisPeriodTotalKernelTime;
+    public uint TotalPageFaultCount;
+    public uint TotalProcesses;
+    public uint ActiveProcesses;
+    public uint TotalTerminatedProcesses;
+  }
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
   public static extern IntPtr CreateJobObject(IntPtr securityAttributes, string name);
   [DllImport("kernel32.dll")]
@@ -96,6 +107,8 @@ public static class YuanpuJob {
   public static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length, out uint returnedLength);
   [DllImport("kernel32.dll")]
   public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+  [DllImport("kernel32.dll")]
+  public static extern bool TerminateJobObject(IntPtr job, uint exitCode);
   [DllImport("kernel32.dll")]
   public static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
   [DllImport("kernel32.dll")]
@@ -112,6 +125,20 @@ public static class YuanpuJob {
       }
       ExtendedLimits limits = (ExtendedLimits)Marshal.PtrToStructure(info, typeof(ExtendedLimits));
       return (limits.BasicLimitInformation.LimitFlags & 0x2000) != 0;
+    } finally {
+      Marshal.FreeHGlobal(info);
+    }
+  }
+  public static uint ActiveProcessCount(IntPtr job) {
+    uint size = (uint)Marshal.SizeOf(typeof(BasicAccounting));
+    IntPtr info = Marshal.AllocHGlobal((int)size);
+    try {
+      uint returnedLength;
+      if (!QueryInformationJobObject(job, 1, info, size, out returnedLength)) {
+        throw new InvalidOperationException("QueryInformationJobObject accounting failed");
+      }
+      BasicAccounting accounting = (BasicAccounting)Marshal.PtrToStructure(info, typeof(BasicAccounting));
+      return accounting.ActiveProcesses;
     } finally {
       Marshal.FreeHGlobal(info);
     }
@@ -148,6 +175,9 @@ try {
   [Console]::Out.Flush()
   $waitResult = [YuanpuJob]::WaitForSingleObject($process, [uint32]::MaxValue)
   Trace-McpStage "wait-result-$waitResult"
+  Trace-McpStage ("active-processes-" + [YuanpuJob]::ActiveProcessCount($job))
+  if (-not [YuanpuJob]::TerminateJobObject($job, 1)) { throw 'TerminateJobObject failed' }
+  Trace-McpStage 'job-terminated'
 } catch {
   Trace-McpStage ('wait-error-' + $_.Exception.GetType().Name)
   throw
