@@ -7,6 +7,7 @@ import {
   createNotificationCapabilitySource,
   createYuanpuCapabilityTools,
   createYuanpuMcpServer,
+  requestRecordedTerminalRunNotification,
   requestTerminalRunNotification,
 } from '../dist/index.mjs';
 
@@ -124,4 +125,37 @@ test('closing the Runtime resolves pending requests and prevents later delivery'
   const after = await router.request({ title: 'After quit', body: 'Never deliver', kind: 'reminder' });
   assert.equal(after.status, 'unavailable');
   assert.equal(events.length, 1);
+});
+
+test('scheduled notification bookkeeping failures do not alter a terminal Agent run', async () => {
+  const run = {
+    runId: 'scheduled-run',
+    owner: { entryPoint: 'scheduler' },
+    context: { conversation: { conversationId: 'scheduled-conversation' } },
+    status: 'succeeded',
+  };
+  const router = new HostNotificationRouter({ createId: ids() });
+  const events = [];
+  router.subscribe(undefined, (event) => events.push(event));
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    assert.doesNotThrow(() => requestRecordedTerminalRunNotification(router, {
+      beginNotification() { throw new Error('disk unavailable'); },
+      finishNotification() { throw new Error('unexpected finish'); },
+    }, run));
+    assert.equal(events.length, 1);
+    router.acknowledge({ eventId: events[0].eventId, status: 'accepted' });
+    let began = 0;
+    assert.doesNotThrow(() => requestRecordedTerminalRunNotification(router, {
+      beginNotification() { began += 1; },
+      finishNotification() { throw new Error('disk unavailable'); },
+    }, run));
+    assert.equal(began, 1);
+    router.acknowledge({ eventId: events[1].eventId, status: 'accepted' });
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    console.error = originalError;
+    router.close();
+  }
 });

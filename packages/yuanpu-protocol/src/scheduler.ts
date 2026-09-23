@@ -69,6 +69,7 @@ export interface ScheduleHistoryRecord {
   deliveryStatus?: AgentDeliveryStatus;
   deliveryAttempts?: number;
   deliveryError?: string;
+  notificationStatus?: 'pending' | 'submitted' | 'suppressed' | 'unavailable' | 'failed' | 'result_unknown';
   createdAt: string;
   updatedAt: string;
 }

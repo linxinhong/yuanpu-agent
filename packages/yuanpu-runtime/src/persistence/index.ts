@@ -267,6 +267,15 @@ const migrations: readonly Migration[] = [{
 
     CREATE INDEX yp_channel_private_contacts_bound_target
       ON yp_channel_private_contacts(bound_target_id);
+
+    CREATE TABLE yp_schedule_notification_receipts (
+      run_id TEXT PRIMARY KEY REFERENCES yp_agent_runs(run_id),
+      status TEXT NOT NULL CHECK (status IN (
+        'pending', 'submitted', 'suppressed', 'unavailable', 'failed', 'result_unknown'
+      )),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
   `,
 }];
 

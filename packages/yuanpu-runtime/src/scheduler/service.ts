@@ -170,6 +170,7 @@ export class PersistentScheduler {
   static async open(options: PersistentSchedulerOptions): Promise<PersistentScheduler> {
     const scheduler = new PersistentScheduler(options);
     scheduler.#store.recoverDeliveries(scheduler.#now().toISOString());
+    scheduler.#store.recoverNotifications(scheduler.#now().toISOString());
     if (!options.deferInitialTick) await scheduler.tick();
     return scheduler;
   }

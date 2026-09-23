@@ -17,7 +17,7 @@ import {
   openYuanpuMetadataDatabase,
   PersistentAgentService,
   HostNotificationRouter,
-  requestTerminalRunNotification,
+  requestRecordedTerminalRunNotification,
   PersistentScheduler,
   validateCapabilityConfig,
   detectMcpOwnershipConflicts,
@@ -508,10 +508,7 @@ async function serve(): Promise<void> {
     maximumConcurrentRuns: 4,
     maximumQueuedRuns: 100,
     onRunStateChanged: (run) => {
-      const receipt = requestTerminalRunNotification(notificationRouter, run);
-      void receipt?.catch((error) => {
-        console.error('Terminal run notification failed:', error instanceof Error ? error.message : String(error));
-      });
+      requestRecordedTerminalRunNotification(notificationRouter, metadata.schedules, run);
     },
   });
   const desktopCaller: AuthenticatedAgentCaller = {

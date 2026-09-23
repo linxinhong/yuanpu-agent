@@ -9,7 +9,7 @@ import {
   PersistentScheduler,
   digestChannelValue,
   openYuanpuMetadataDatabase,
-  requestTerminalRunNotification,
+  requestRecordedTerminalRunNotification,
 } from '@yuanpu-agent/runtime-kit';
 import { RUNTIME_ROUTES, SCHEDULE_CONTRACT_VERSION } from '@yuanpu-agent/protocol';
 
@@ -28,8 +28,20 @@ test('authenticated HTTP binds an observed private sender, accepts the schedule,
   let now = new Date('2026-09-23T00:00:00.000Z');
   let executions = 0;
   const notifications = [];
+  let nativeStatus = 'submitted';
   const notificationRouter = new HostNotificationRouter();
-  notificationRouter.subscribe(undefined, (event) => notifications.push(event));
+  notificationRouter.subscribe(undefined, (event) => {
+    notifications.push(event);
+    notificationRouter.acknowledge({
+      eventId: event.eventId,
+      status: 'accepted',
+      notification: {
+        requestId: event.payload.requestId,
+        status: nativeStatus,
+        userVisibility: 'unknown',
+      },
+    });
+  });
   const sends = [];
   let proactiveResult = { status: 'accepted' };
   let transportReady = true;
@@ -39,7 +51,9 @@ test('authenticated HTTP binds an observed private sender, accepts the schedule,
       executions += 1;
       return { kind: 'completed', output: { message: 'scheduled result', tools: [] } };
     } },
-    onRunStateChanged: (run) => { void requestTerminalRunNotification(notificationRouter, run); },
+    onRunStateChanged: (run) => requestRecordedTerminalRunNotification(
+      notificationRouter, metadata.schedules, run, () => now,
+    ),
     now: () => now,
   });
   const transport = {
@@ -151,6 +165,7 @@ test('authenticated HTTP binds an observed private sender, accepts the schedule,
   transportReady = true;
   await scheduler.tick();
   await eventually(() => scheduler.history(created.body.scheduleId)[0]?.deliveryStatus === 'delivered');
+  assert.equal(scheduler.history(created.body.scheduleId)[0].notificationStatus, 'submitted');
   assert.equal(executions, initialExecutions + 1);
   assert.equal(notifications.length, initialNotifications + 1);
   assert.equal(notifications.at(-1).payload.kind, 'run_succeeded');
@@ -162,11 +177,23 @@ test('authenticated HTTP binds an observed private sender, accepts the schedule,
   now = new Date('2026-09-23T00:02:00.000Z');
   await scheduler.tick();
   await eventually(() => scheduler.history(failed.body.scheduleId)[0]?.deliveryStatus === 'failed');
+  assert.equal(scheduler.history(failed.body.scheduleId)[0].notificationStatus, 'submitted');
   assert.equal(executions, initialExecutions + 2);
   assert.equal(notifications.length, initialNotifications + 2);
   assert.equal(sends.length, 2);
   await scheduler.tick();
   assert.equal(sends.length, 2);
+
+  nativeStatus = 'failed';
+  proactiveResult = { status: 'accepted' };
+  const nativeFailed = await api(RUNTIME_ROUTES.schedules, 'POST', scheduleInput(binding.body.routeId, '2026-09-23T00:02:30.000Z'));
+  assert.equal(nativeFailed.status, 201);
+  now = new Date('2026-09-23T00:02:30.000Z');
+  await scheduler.tick();
+  await eventually(() => scheduler.history(nativeFailed.body.scheduleId)[0]?.deliveryStatus === 'delivered');
+  assert.equal(scheduler.history(nativeFailed.body.scheduleId)[0].notificationStatus, 'failed');
+  assert.equal(executions, initialExecutions + 3);
+  assert.equal(sends.length, 3);
 
   const pending = await api(RUNTIME_ROUTES.schedules, 'POST', scheduleInput(binding.body.routeId, '2026-09-23T00:03:00.000Z'));
   assert.equal(pending.status, 201);
@@ -175,6 +202,6 @@ test('authenticated HTTP binds an observed private sender, accepts the schedule,
   now = new Date('2026-09-23T00:03:00.000Z');
   await scheduler.tick();
   await eventually(() => scheduler.history(pending.body.scheduleId)[0]?.triggerStatus === 'submission_failed');
-  assert.equal(sends.length, 2);
-  assert.equal(executions, initialExecutions + 2);
+  assert.equal(sends.length, 3);
+  assert.equal(executions, initialExecutions + 3);
 });

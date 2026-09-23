@@ -14,6 +14,7 @@ import type {
   CapabilitySourceExecuteInput,
 } from '../capabilities/contracts.js';
 import type { CapabilitySource } from '../capabilities/index.js';
+import type { SchedulerStore } from '../scheduler/store.js';
 
 export interface NotificationRequestInput {
   title: string;
@@ -181,6 +182,41 @@ export function requestTerminalRunNotification(
     conversationId: run.context.conversation.conversationId,
     runId: run.runId,
   });
+}
+
+/** Record the native-host submission result independently of scheduled IM delivery. */
+export function requestRecordedTerminalRunNotification(
+  router: HostNotificationRouter,
+  store: Pick<SchedulerStore, 'beginNotification' | 'finishNotification'>,
+  run: AgentRunRecord,
+  now: () => Date = () => new Date(),
+): void {
+  if (run.status !== 'succeeded' && run.status !== 'failed') return;
+  const scheduled = run.owner.entryPoint === 'scheduler';
+  let recording = false;
+  if (scheduled) {
+    try {
+      store.beginNotification(run.runId, now().toISOString());
+      recording = true;
+    } catch {
+      console.error('Scheduled notification receipt could not be initialized.');
+    }
+  }
+  const finish = (status: 'submitted' | 'suppressed' | 'unavailable' | 'failed'): void => {
+    if (!recording) return;
+    try {
+      store.finishNotification(run.runId, status, now().toISOString());
+    } catch {
+      // A later startup records any unresolved receipt as unknown.
+      console.error('Scheduled notification receipt could not be persisted.');
+    }
+  };
+  try {
+    const receipt = requestTerminalRunNotification(router, run);
+    void receipt?.then((result) => finish(result.status)).catch(() => finish('failed'));
+  } catch {
+    finish('failed');
+  }
 }
 
 const notifyUserCapability: CapabilityDefinition = {

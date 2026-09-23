@@ -46,10 +46,12 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_channel_inbound',
     'yp_channel_outbound',
     'yp_channel_pairings',
+    'yp_channel_private_contacts',
     'yp_conversation_bindings',
     'yp_delivery_attempts',
     'yp_inbound_deduplication',
     'yp_runtime_metadata',
+    'yp_schedule_notification_receipts',
     'yp_schedule_triggers',
     'yp_schedules',
     'yp_schema_migrations',
@@ -115,6 +117,77 @@ test('schema isolates subjects and requires durable approval/effect checkpoints'
     /CHECK constraint failed/,
   );
   database.close();
+});
+
+test('an unresolved scheduled native receipt becomes unknown after restart', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-notification-recovery-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  const now = '2026-09-23T00:00:00.000Z';
+  const first = openYuanpuMetadataDatabase(path);
+  const inspection = new DatabaseSync(path);
+  inspection.prepare(`
+    INSERT INTO yp_agent_runs(
+      run_id, entry_point, authority_id, subject_id, idempotency_key,
+      request_fingerprint, input_digest, request_metadata_json, status,
+      external_effect_state, created_at, updated_at
+    ) VALUES ('scheduled-run', 'scheduler', 'local-runtime', 'local-scheduler',
+      'scheduled-trigger', ?, ?, '{}', 'succeeded', 'none', ?, ?)
+  `).run('a'.repeat(64), 'b'.repeat(64), now, now);
+  inspection.close();
+  first.schedules.beginNotification('scheduled-run', now);
+  first.close();
+
+  const reopened = openYuanpuMetadataDatabase(path);
+  reopened.schedules.recoverNotifications('2026-09-23T00:01:00.000Z');
+  reopened.schedules.finishNotification('scheduled-run', 'submitted', '2026-09-23T00:02:00.000Z');
+  reopened.close();
+  const recovered = new DatabaseSync(path, { readOnly: true });
+  assert.equal(
+    recovered.prepare('SELECT status FROM yp_schedule_notification_receipts WHERE run_id = ?')
+      .get('scheduled-run').status,
+    'result_unknown',
+  );
+  recovered.close();
+});
+
+test('upgrades populated schema v4 metadata without losing pairings', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-v4-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  const now = '2026-09-23T00:00:00.000Z';
+  openYuanpuMetadataDatabase(path).close();
+  const v4 = new DatabaseSync(path);
+  v4.exec(`
+    DROP TABLE yp_schedule_notification_receipts;
+    DROP TABLE yp_channel_private_contacts;
+    DELETE FROM yp_schema_migrations WHERE version = 5;
+    PRAGMA user_version = 4;
+  `);
+  v4.prepare(`
+    INSERT INTO yp_channel_connections(
+      provider, connection_id, provider_account_digest, credential_binding_digest, created_at
+    ) VALUES ('wecom', 'legacy-connection', ?, ?, ?)
+  `).run('a'.repeat(64), 'b'.repeat(64), now);
+  v4.prepare(`
+    INSERT INTO yp_channel_pairings(provider, connection_id, sender_digest, created_at)
+    VALUES ('wecom', 'legacy-connection', ?, ?)
+  `).run('c'.repeat(64), now);
+  v4.close();
+
+  const upgraded = openYuanpuMetadataDatabase(path);
+  assert.equal(upgraded.schemaVersion, 5);
+  assert.equal(upgraded.channels.isPaired('wecom', 'legacy-connection', 'c'.repeat(64)), true);
+  upgraded.close();
+  const inspection = new DatabaseSync(path, { readOnly: true });
+  assert.equal(
+    inspection.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table' AND name IN ('yp_channel_private_contacts', 'yp_schedule_notification_receipts')
+    `).get().count,
+    2,
+  );
+  inspection.close();
 });
 
 test('refuses a symbolic-link database target', async (context) => {

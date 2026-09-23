@@ -118,6 +118,32 @@ function rowToDelivery(row: DeliveryRow): AgentDeliveryRecord & { lastError?: st
 export class SchedulerStore {
   constructor(private readonly database: DatabaseSync) {}
 
+  beginNotification(runId: string, now: string): void {
+    this.database.prepare(`
+      INSERT INTO yp_schedule_notification_receipts(run_id, status, created_at, updated_at)
+      VALUES (?, 'pending', ?, ?)
+      ON CONFLICT(run_id) DO NOTHING
+    `).run(runId, now, now);
+  }
+
+  finishNotification(
+    runId: string,
+    status: 'submitted' | 'suppressed' | 'unavailable' | 'failed',
+    now: string,
+  ): void {
+    this.database.prepare(`
+      UPDATE yp_schedule_notification_receipts SET status = ?, updated_at = ?
+      WHERE run_id = ? AND status = 'pending'
+    `).run(status, now, runId);
+  }
+
+  recoverNotifications(now: string): void {
+    this.database.prepare(`
+      UPDATE yp_schedule_notification_receipts SET status = 'result_unknown', updated_at = ?
+      WHERE status = 'pending'
+    `).run(now);
+  }
+
   #transaction<T>(operation: () => T): T {
     this.database.exec('BEGIN IMMEDIATE');
     try {
@@ -429,11 +455,13 @@ export class SchedulerStore {
         o.output_json,
         d.status AS delivery_status,
         d.attempts AS delivery_attempts,
-        d.last_error AS delivery_error
+        d.last_error AS delivery_error,
+        n.status AS notification_status
       FROM yp_schedule_triggers t
       LEFT JOIN yp_agent_runs r ON r.run_id = t.run_id
       LEFT JOIN yp_agent_run_outputs o ON o.run_id = t.run_id
       LEFT JOIN yp_delivery_attempts d ON d.run_id = t.run_id
+      LEFT JOIN yp_schedule_notification_receipts n ON n.run_id = t.run_id
       WHERE t.schedule_id = ?
       ORDER BY t.scheduled_at DESC, t.trigger_key DESC
       LIMIT ?
@@ -446,6 +474,7 @@ export class SchedulerStore {
       delivery_status: AgentDeliveryStatus | null;
       delivery_attempts: number | null;
       delivery_error: string | null;
+      notification_status: ScheduleHistoryRecord['notificationStatus'] | null;
     }>;
     return rows.map((row) => ({
       triggerKey: row.trigger_key,
@@ -466,6 +495,7 @@ export class SchedulerStore {
       ...(row.delivery_status ? { deliveryStatus: row.delivery_status } : {}),
       ...(row.delivery_attempts !== null ? { deliveryAttempts: row.delivery_attempts } : {}),
       ...(row.delivery_error ? { deliveryError: row.delivery_error } : {}),
+      ...(row.notification_status ? { notificationStatus: row.notification_status } : {}),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
