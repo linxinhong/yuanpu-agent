@@ -3,12 +3,14 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { AgentRunStore } from './agent-run-store.js';
+import { AssistantLinkStore } from './assistant-link-store.js';
 import { ChannelStore } from '../channels/store.js';
 import { SchedulerStore } from '../scheduler/store.js';
 
 export * from './agent-run-store.js';
+export * from './assistant-link-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 5;
+export const YUANPU_METADATA_SCHEMA_VERSION = 6;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -277,6 +279,32 @@ const migrations: readonly Migration[] = [{
       updated_at TEXT NOT NULL
     ) STRICT;
   `,
+}, {
+  version: 6,
+  sql: `
+    CREATE TABLE yp_desktop_assistant_link (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      contact_id TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      previous_pi_session_id TEXT NOT NULL,
+      linked_pi_session_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE yp_assistant_mirror (
+      mirror_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES yp_agent_runs(run_id),
+      part TEXT NOT NULL CHECK (part IN ('user', 'assistant')),
+      target_id TEXT NOT NULL,
+      content TEXT,
+      content_digest TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'accepted', 'failed', 'unknown')),
+      failure_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (run_id, part)
+    ) STRICT;
+  `,
 }];
 
 function applyMigrations(database: DatabaseSync): number {
@@ -316,12 +344,14 @@ export class YuanpuMetadataDatabase {
   readonly driver = YUANPU_SQLITE_DRIVER;
   readonly schemaVersion: number;
   readonly agentRuns: AgentRunStore;
+  readonly assistantLink: AssistantLinkStore;
   readonly channels: ChannelStore;
   readonly schedules: SchedulerStore;
 
   constructor(private readonly database: DatabaseSync) {
     this.schemaVersion = applyMigrations(database);
     this.agentRuns = new AgentRunStore(database);
+    this.assistantLink = new AssistantLinkStore(database);
     this.channels = new ChannelStore(database);
     this.schedules = new SchedulerStore(database);
   }

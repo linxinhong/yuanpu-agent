@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 import type { NotificationNavigationTarget } from './host-events.js';
 import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
@@ -40,7 +40,34 @@ export const RUNTIME_ROUTES = {
   pluginMcpConflicts: '/v1/plugins/mcp-conflicts',
   capabilityApprovals: '/v1/capabilities/approvals',
   capabilityApprovalDecision: '/v1/capabilities/approvals/decision',
+  assistantLink: '/v1/assistant/link',
+  assistantMirrors: '/v1/assistant/mirrors',
+  desktopTranscript: '/v1/desktop/transcript',
 } as const;
+
+export type DesktopConversationSurface = 'work' | 'assistant';
+export type DesktopTranscriptSurface = DesktopConversationSurface | 'assistantArchive';
+
+export interface DesktopTranscriptMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  at: string;
+}
+
+export interface AssistantLinkStatus {
+  linked: boolean;
+  contactId?: string;
+  connectionId?: string;
+}
+
+export interface AssistantMirrorStatus {
+  mirrorId: string;
+  runId: string;
+  part: 'user' | 'assistant';
+  status: 'pending' | 'delivering' | 'accepted' | 'failed' | 'unknown';
+  failureCode?: string;
+}
 
 export interface RuntimeInfo {
   version: string;
@@ -256,7 +283,13 @@ export interface DesktopBridge {
   runtimeRecoveryNotice(): Promise<RuntimeRecoveryNotice | undefined>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
-  submitDesktopMessage(message: string): Promise<AgentRunReceipt>;
+  submitDesktopMessage(message: string, surface?: DesktopConversationSurface): Promise<AgentRunReceipt>;
+  getDesktopTranscript(surface: DesktopTranscriptSurface): Promise<DesktopTranscriptMessage[]>;
+  getAssistantLink(): Promise<AssistantLinkStatus>;
+  bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;
+  unbindAssistantContact(): Promise<AssistantLinkStatus>;
+  listAssistantMirrors(runId: string): Promise<AssistantMirrorStatus[]>;
+  retryAssistantMirror(mirrorId: string): Promise<AssistantMirrorStatus>;
   getAgentRun(runId: string): Promise<AgentRunRecord>;
   getPrivateImRunSummary(runId: string): Promise<PrivateImRunSummary>;
   cancelAgentRun(runId: string): Promise<AgentRunCancellationReceipt>;

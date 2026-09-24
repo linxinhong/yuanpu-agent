@@ -39,9 +39,9 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
   }
 
   async execute(input: AgentRunExecutionInput): Promise<AgentRunExecutionResult> {
-    const bindingId = input.run.context.conversation.sessionBindingId;
-    if (!bindingId) throw new Error('Agent run does not have a persisted Pi session binding.');
-    let pooled = this.#sessions.get(bindingId);
+    if (!input.run.context.conversation.sessionBindingId) throw new Error('Agent run does not have a persisted Pi session binding.');
+    const sessionKey = input.piSessionId;
+    let pooled = this.#sessions.get(sessionKey);
     if (!pooled) {
       pooled = {
         active: 0,
@@ -58,16 +58,21 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
           piSession: { id: input.piSessionId, directory: this.#options.sessionsPath },
         }),
       };
-      this.#sessions.set(bindingId, pooled);
+      this.#sessions.set(sessionKey, pooled);
     } else {
-      this.#sessions.delete(bindingId);
-      this.#sessions.set(bindingId, pooled);
+      this.#sessions.delete(sessionKey);
+      this.#sessions.set(sessionKey, pooled);
     }
     pooled.active += 1;
     try {
       const result = await (await pooled.promise).prompt(input.input, {
         runId: input.run.runId,
         signal: input.signal,
+        context: {
+          conversationId: input.run.context.conversation.conversationId,
+          workspaceId: input.run.context.workspaceId,
+          userId: input.run.owner.identity.subjectId,
+        },
       });
       if (result.pendingApprovalRequestId) {
         const approval = this.#options.approvals.get(result.pendingApprovalRequestId);

@@ -6,6 +6,11 @@ import {
   type CapabilityApprovalDecisionResult,
   type CapabilityApprovalSummary,
   type ChatResponse,
+  type DesktopConversationSurface,
+  type DesktopTranscriptSurface,
+  type DesktopTranscriptMessage,
+  type AssistantLinkStatus,
+  type AssistantMirrorStatus,
   type InstalledPlugin,
   type LocalSkillList,
   type McpOwnershipConflict,
@@ -616,15 +621,41 @@ export class RuntimeManager {
     });
   }
 
-  submitDesktopMessage(message: string): Promise<AgentRunReceipt> {
+  submitDesktopMessage(message: string, surface: 'work' | 'assistant' = 'work'): Promise<AgentRunReceipt> {
     if (typeof message !== 'string' || !message.trim()) {
       throw new Error('A non-empty message is required.');
     }
     return this.request(RUNTIME_ROUTES.chatSubmit, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, surface }),
     });
+  }
+
+  getDesktopTranscript(surface: DesktopTranscriptSurface): Promise<DesktopTranscriptMessage[]> {
+    return this.request(`${RUNTIME_ROUTES.desktopTranscript}?surface=${encodeURIComponent(surface)}`);
+  }
+
+  getAssistantLink(): Promise<AssistantLinkStatus> {
+    return this.request(RUNTIME_ROUTES.assistantLink);
+  }
+
+  bindAssistantContact(contactId: string): Promise<AssistantLinkStatus> {
+    return this.request(RUNTIME_ROUTES.assistantLink, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contactId }),
+    });
+  }
+
+  unbindAssistantContact(): Promise<AssistantLinkStatus> {
+    return this.request(RUNTIME_ROUTES.assistantLink, { method: 'DELETE' });
+  }
+
+  listAssistantMirrors(runId: string): Promise<AssistantMirrorStatus[]> {
+    return this.request(`${RUNTIME_ROUTES.assistantMirrors}?runId=${encodeURIComponent(runId)}`);
+  }
+
+  retryAssistantMirror(mirrorId: string): Promise<AssistantMirrorStatus> {
+    return this.request(`${RUNTIME_ROUTES.assistantMirrors}/${encodeURIComponent(mirrorId)}/retry`, { method: 'POST' });
   }
 
   searchPlugins(query: string): Promise<PluginSearchResult[]> {

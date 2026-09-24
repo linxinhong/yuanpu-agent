@@ -20,8 +20,29 @@ import {
 import { Type } from 'typebox';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { DesktopTranscriptMessage } from '@yuanpu-agent/protocol';
 
 export const PI_UPSTREAM_VERSION = '0.86.1';
+
+/** Read only the visible text branch; never expose tool arguments or model diagnostics. */
+export function readYuanpuChatTranscript(
+  cwd: string,
+  piSessionId: string,
+  directory: string,
+): DesktopTranscriptMessage[] {
+  const path = SessionManager.findById(cwd, piSessionId, directory);
+  if (!path) return [];
+  const session = SessionManager.open(path, directory, cwd);
+  return session.getBranch().flatMap((entry): DesktopTranscriptMessage[] => {
+    if (entry.type !== 'message' || (entry.message.role !== 'user' && entry.message.role !== 'assistant')) return [];
+    const content = entry.message.content;
+    const text = typeof content === 'string'
+      ? content
+      : content.filter((block) => block.type === 'text').map((block) => block.text).join('\n');
+    if (!text.trim()) return [];
+    return [{ id: entry.id, role: entry.message.role, text, at: entry.timestamp }];
+  }).slice(-100);
+}
 
 const searchParameters = Type.Object({
   query: Type.Optional(Type.String()),
@@ -231,7 +252,7 @@ export interface CreateYuanpuChatOptions {
 
 export interface YuanpuChatSession {
   readonly sessionId: string;
-  prompt(message: string, options?: { runId?: string; signal?: AbortSignal }): Promise<YuanpuChatResult>;
+  prompt(message: string, options?: { runId?: string; signal?: AbortSignal; context?: Pick<CapabilityContext, 'conversationId' | 'workspaceId' | 'userId'> }): Promise<YuanpuChatResult>;
   abort(): Promise<void>;
   dispose(): void;
 }
@@ -322,10 +343,11 @@ export async function createYuanpuChatSession(
   let queue: Promise<void> = Promise.resolve();
   const runPrompt = async (
     message: string,
-    options: { runId?: string; signal?: AbortSignal } = {},
+    options: { runId?: string; signal?: AbortSignal; context?: Pick<CapabilityContext, 'conversationId' | 'workspaceId' | 'userId'> } = {},
   ): Promise<YuanpuChatResult> => {
     if (options.signal?.aborted) throw new DOMException('Agent run was cancelled.', 'AbortError');
     capabilityContext.runId = options.runId;
+    if (options.context) Object.assign(capabilityContext, options.context);
     let text = '';
     let modelFailed = false;
     const toolStates = new Map<string, 'completed' | 'failed'>();

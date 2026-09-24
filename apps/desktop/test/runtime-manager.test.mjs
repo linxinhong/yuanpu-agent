@@ -141,7 +141,7 @@ test('rejects an incompatible Runtime protocol with an explicit error and no res
   const { manager, eventFile } = await createManager(context, 'ready-protocol-mismatch');
   await assert.rejects(
     manager.start(),
-    /desktop expects 3, Runtime reported 999/,
+    /desktop expects 4, Runtime reported 999/,
   );
   await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   assert.equal((await events(eventFile)).filter((event) => event.event === 'start').length, 1);

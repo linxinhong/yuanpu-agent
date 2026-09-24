@@ -441,19 +441,16 @@ export class PersistentAgentService implements AgentService {
 
   #dispatch(): void {
     while (!this.#closed && this.#activeExecutionCount() < this.#maximumConcurrentRuns) {
-      const next = this.#store.listQueued().find((candidate) => {
-        const bindingId = candidate.run.context.conversation.sessionBindingId;
-        return bindingId && !this.#activeBindings.has(bindingId);
-      });
+      const next = this.#store.listQueued().find((candidate) => !this.#activeBindings.has(candidate.piSessionId));
       if (!next) return;
       const claimed = this.#store.claimQueued(next.run.runId, this.#now().toISOString());
       if (!claimed) continue;
-      const bindingId = claimed.run.context.conversation.sessionBindingId!;
-      this.#activeBindings.add(bindingId);
+      const piSessionId = claimed.piSessionId;
+      this.#activeBindings.add(piSessionId);
       this.#emit(claimed.run);
       const worker = this.#execute(claimed).finally(() => {
         if (!this.#waitingBindings.has(claimed.run.runId)) {
-          this.#activeBindings.delete(bindingId);
+          this.#activeBindings.delete(piSessionId);
         }
         this.#activeWorkers.delete(worker);
         this.#notifySlotWaiters();
@@ -491,7 +488,7 @@ export class PersistentAgentService implements AgentService {
         const waiting = this.#store.markWaitingApproval(result.approval, this.#now().toISOString());
         this.#waitingBindings.set(
           claimed.run.runId,
-          claimed.run.context.conversation.sessionBindingId!,
+          claimed.piSessionId,
         );
         this.#scheduleApprovalExpiry(result.approval);
         this.#rememberOutput(claimed.run.runId, result.output);
@@ -576,9 +573,9 @@ export class PersistentAgentService implements AgentService {
     const settlement = this.#approvalSettlements.get(runId);
     this.#approvalSettlements.delete(runId);
     settlement?.resolve();
-    const bindingId = this.#waitingBindings.get(runId);
+    const piSessionId = this.#waitingBindings.get(runId);
     this.#waitingBindings.delete(runId);
-    if (bindingId) this.#activeBindings.delete(bindingId);
+    if (piSessionId) this.#activeBindings.delete(piSessionId);
     this.#notifySlotWaiters();
     this.#scheduleDispatch();
   }

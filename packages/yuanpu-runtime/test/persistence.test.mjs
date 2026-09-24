@@ -42,6 +42,7 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_agent_run_outputs',
     'yp_agent_run_queue_payloads',
     'yp_agent_runs',
+    'yp_assistant_mirror',
     'yp_channel_connections',
     'yp_channel_inbound',
     'yp_channel_outbound',
@@ -49,6 +50,7 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_channel_private_contacts',
     'yp_conversation_bindings',
     'yp_delivery_attempts',
+    'yp_desktop_assistant_link',
     'yp_inbound_deduplication',
     'yp_runtime_metadata',
     'yp_schedule_notification_receipts',
@@ -159,9 +161,11 @@ test('upgrades populated schema v4 metadata without losing pairings', async (con
   openYuanpuMetadataDatabase(path).close();
   const v4 = new DatabaseSync(path);
   v4.exec(`
+    DROP TABLE yp_assistant_mirror;
+    DROP TABLE yp_desktop_assistant_link;
     DROP TABLE yp_schedule_notification_receipts;
     DROP TABLE yp_channel_private_contacts;
-    DELETE FROM yp_schema_migrations WHERE version = 5;
+    DELETE FROM yp_schema_migrations WHERE version >= 5;
     PRAGMA user_version = 4;
   `);
   v4.prepare(`
@@ -176,7 +180,7 @@ test('upgrades populated schema v4 metadata without losing pairings', async (con
   v4.close();
 
   const upgraded = openYuanpuMetadataDatabase(path);
-  assert.equal(upgraded.schemaVersion, 5);
+  assert.equal(upgraded.schemaVersion, 6);
   assert.equal(upgraded.channels.isPaired('wecom', 'legacy-connection', 'c'.repeat(64)), true);
   upgraded.close();
   const inspection = new DatabaseSync(path, { readOnly: true });

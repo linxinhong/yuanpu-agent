@@ -15,6 +15,7 @@ import {
   CapabilityArtifactManager,
   capabilityManifestDigest,
   openYuanpuMetadataDatabase,
+  readYuanpuChatTranscript,
   PersistentAgentService,
   HostNotificationRouter,
   requestRecordedTerminalRunNotification,
@@ -42,6 +43,7 @@ import {
   type NotificationTargetValidation,
   type WecomConnectionSummary,
   type WecomConnectionConfigInput,
+  type AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
@@ -501,6 +503,7 @@ async function serve(): Promise<void> {
   });
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
+  metadata.assistantLink.markInterruptedMirrorsUnknown();
   const agentExecutor = new RuntimeAgentExecutor({
     getCapabilityClient: () => mcp,
     approvals,
@@ -516,6 +519,7 @@ async function serve(): Promise<void> {
       api: home.config.api,
     },
   });
+  let onAssistantRunChanged: (run: AgentRunRecord) => void = () => undefined;
   const agentService = await PersistentAgentService.open({
     store: metadata.agentRuns,
     executor: agentExecutor,
@@ -524,6 +528,7 @@ async function serve(): Promise<void> {
     maximumQueuedRuns: 100,
     onRunStateChanged: (run) => {
       requestRecordedTerminalRunNotification(notificationRouter, metadata.schedules, run);
+      onAssistantRunChanged(run);
     },
   });
   const desktopCaller: AuthenticatedAgentCaller = {
@@ -539,6 +544,46 @@ async function serve(): Promise<void> {
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
   const wecomChannels: ChannelRouter[] = [];
+  let mirrorWorker: Promise<void> | undefined;
+  let mirrorRequested = false;
+  const processAssistantMirrors = (): Promise<void> => {
+    if (mirrorWorker) { mirrorRequested = true; return mirrorWorker; }
+    mirrorWorker = (async () => {
+      for (const mirror of metadata.assistantLink.pendingMirrors()) {
+        if (!mirror.content) continue;
+        if (mirror.part === 'assistant'
+          && metadata.assistantLink.mirror(mirror.runId, 'user')?.status !== 'accepted') continue;
+        if (!metadata.assistantLink.claimMirror(mirror.mirrorId)) continue;
+        const channel = wecomChannels.find((item) => item.canDeliverScheduled(mirror.targetId));
+        const result = channel
+          ? await channel.sendScheduled(mirror.targetId, mirror.content, AbortSignal.timeout(15_000))
+            .catch(() => ({ status: 'unknown' as const, code: 'transport_uncertain' }))
+          : { status: 'failed' as const, code: 'target_unavailable' };
+        metadata.assistantLink.finishMirror(
+          mirror.mirrorId,
+          result.status === 'accepted' ? 'accepted' : result.status === 'unknown' ? 'unknown' : 'failed',
+          result.status === 'accepted' ? undefined : 'code' in result ? result.code : 'connection_unavailable',
+        );
+      }
+    })().finally(() => {
+      mirrorWorker = undefined;
+      if (mirrorRequested) {
+        mirrorRequested = false;
+        void processAssistantMirrors().catch(() => undefined);
+      }
+    });
+    return mirrorWorker;
+  };
+  onAssistantRunChanged = (run) => {
+    if (run.owner.entryPoint !== 'desktop' || run.context.conversation.conversationId !== 'assistant'
+      || run.status !== 'succeeded' || !run.output?.message) return;
+    try {
+      const link = metadata.assistantLink.current();
+      if (!link) return;
+      metadata.assistantLink.queueMirror(run.runId, 'assistant', link.targetId, run.output.message);
+      void processAssistantMirrors().catch(() => undefined);
+    } catch { /* A revoked link cannot receive a mirrored message. */ }
+  };
   let wecomStartupDiagnostic: WecomConnectionSummary['diagnostic'] | undefined;
   let wecomReconfiguring = false;
   const wecomDiagnosticFor = (error: unknown): WecomConnectionSummary['diagnostic'] => {
@@ -672,17 +717,31 @@ async function serve(): Promise<void> {
     if (!isRecord(body) || typeof body.message !== 'string' || !body.message.trim()) {
       return { error: 'A non-empty message is required.' } as const;
     }
+    if (body.surface !== undefined && body.surface !== 'work' && body.surface !== 'assistant') {
+      return { error: 'Unknown desktop conversation surface.' } as const;
+    }
+    let assistantLink;
+    try {
+      assistantLink = body.surface === 'assistant' ? metadata.assistantLink.current() : undefined;
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) } as const;
+    }
     const submission = await agentService.submit(desktopCaller, {
       contractVersion: AGENT_CONTRACT_VERSION,
       entryPoint: 'desktop',
       identity: desktopCaller.identity,
       workspaceId: home.config.workingDirectory,
-      conversation: { namespace: 'desktop', conversationId: 'default' },
+      conversation: { namespace: 'desktop', conversationId: body.surface === 'assistant' ? 'assistant' : 'default' },
       input: { type: 'text', text: body.message.trim() },
       idempotencyKey: randomUUID(),
       delivery: { kind: 'desktop' },
     });
-    return submission.accepted ? { receipt: submission } as const : { error: submission.message } as const;
+    if (!submission.accepted) return { error: submission.message } as const;
+    if (assistantLink && !submission.duplicate) {
+      metadata.assistantLink.queueMirror(submission.runId, 'user', assistantLink.targetId, body.message.trim());
+      void processAssistantMirrors().catch(() => undefined);
+    }
+    return { receipt: submission } as const;
   };
 
   let shuttingDown = false;
@@ -922,6 +981,102 @@ async function serve(): Promise<void> {
         const result = await submitDesktopMessage(request);
         response.statusCode = 'error' in result ? 400 : 202;
         response.end(JSON.stringify('error' in result ? { error: result.error } : result.receipt));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.desktopTranscript && request.method === 'GET') {
+        const surface = url.searchParams.get('surface');
+        if (surface !== 'work' && surface !== 'assistant' && surface !== 'assistantArchive') {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Unknown desktop conversation surface.' }));
+          return;
+        }
+        if (surface !== 'work') {
+          try {
+            const link = metadata.assistantLink.current();
+            if (surface === 'assistantArchive' && !link) throw new Error('原桌面会话归档仅在绑定期间可查看。');
+          } catch (error) {
+            response.statusCode = 409;
+            response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            return;
+          }
+        }
+        const piSessionId = surface === 'assistantArchive'
+          ? metadata.assistantLink.archivedAssistantSessionId()
+          : metadata.assistantLink.sessionId(surface === 'work' ? 'default' : 'assistant');
+        response.end(JSON.stringify(piSessionId
+          ? readYuanpuChatTranscript(home.config.workingDirectory, piSessionId, home.sessionsPath)
+          : []));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.assistantLink) {
+        try {
+          if (request.method === 'GET') {
+            const link = metadata.assistantLink.current();
+            response.end(JSON.stringify(link
+              ? { linked: true, contactId: link.contactId, connectionId: link.connectionId }
+              : { linked: false }));
+            return;
+          }
+          if (request.method === 'PUT') {
+            const body = await readJsonBody(request);
+            if (!isRecord(body) || typeof body.contactId !== 'string' || body.contactId.length > 200) {
+              throw new Error('Invalid contact id.');
+            }
+            const link = metadata.assistantLink.bind(body.contactId, home.config.workingDirectory);
+            agentExecutor.reset();
+            response.end(JSON.stringify({ linked: true, contactId: link.contactId, connectionId: link.connectionId }));
+            return;
+          }
+          if (request.method === 'DELETE') {
+            metadata.assistantLink.unbind();
+            agentExecutor.reset();
+            response.end(JSON.stringify({ linked: false }));
+            return;
+          }
+        } catch (error) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+          return;
+        }
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.assistantMirrors && request.method === 'GET') {
+        const runId = url.searchParams.get('runId') ?? '';
+        const run = runId.length <= 200 ? await agentService.get(desktopCaller, runId) : undefined;
+        if (!run || run.owner.entryPoint !== 'desktop' || run.context.conversation.conversationId !== 'assistant') {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Assistant run not found.' }));
+          return;
+        }
+        response.end(JSON.stringify((['user', 'assistant'] as const).flatMap((part) => {
+          const mirror = metadata.assistantLink.mirror(runId, part);
+          return mirror ? [{ mirrorId: mirror.mirrorId, runId, part, status: mirror.status,
+            ...(mirror.failureCode ? { failureCode: mirror.failureCode } : {}) }] : [];
+        })));
+        return;
+      }
+      const mirrorRetry = url.pathname.match(/^\/v1\/assistant\/mirrors\/([^/]+)\/retry$/);
+      if (mirrorRetry && request.method === 'POST') {
+        const mirror = metadata.assistantLink.mirrorById(decodeURIComponent(mirrorRetry[1]!));
+        const run = mirror ? await agentService.get(desktopCaller, mirror.runId) : undefined;
+        const link = metadata.assistantLink.current();
+        if (!mirror || !run || run.owner.entryPoint !== 'desktop'
+          || run.context.conversation.conversationId !== 'assistant'
+          || !link || mirror.targetId !== link.targetId) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Mirror delivery is unavailable.' }));
+          return;
+        }
+        if (!metadata.assistantLink.retryMirror(mirror.mirrorId)) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ error: 'Only confirmed failures can be retried.' }));
+          return;
+        }
+        void processAssistantMirrors().catch(() => undefined);
+        response.end(JSON.stringify({ mirrorId: mirror.mirrorId, runId: mirror.runId,
+          part: mirror.part, status: 'pending' }));
         return;
       }
 
@@ -1547,6 +1702,7 @@ async function serve(): Promise<void> {
     parentMonitor = installParentProcessMonitor(parentPid, shutdown);
     try {
       await reloadWecomChannels();
+      void processAssistantMirrors().catch(() => undefined);
     } catch (error) {
       console.warn(`[wecom] ${wecomDiagnosticFor(error)}`);
     }

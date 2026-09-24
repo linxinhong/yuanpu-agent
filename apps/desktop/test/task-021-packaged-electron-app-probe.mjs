@@ -196,7 +196,7 @@ try {
     baseUrl: `http://127.0.0.1:${providerPort}/v1`, api: 'openai-completions',
   }));
   const first = await start();
-  assert.equal((await evaluate(first, 'window.yuanpu.runtimeInfo()')).protocolVersion, 3);
+  assert.equal((await evaluate(first, 'window.yuanpu.runtimeInfo()')).protocolVersion, 4);
   assert.equal(await evaluate(first, 'window.yuanpu.runtimeRecoveryNotice().then((notice) => notice === undefined)'), true);
   assert.equal(await evaluate(first, "document.querySelector('.runtime-recovery-notice') === null"), true);
   const input = {

@@ -163,7 +163,7 @@ try {
   }));
 
   const first = await start(executable);
-  assert.equal((await evaluate(first, 'window.yuanpu.runtimeInfo()')).protocolVersion, 3);
+  assert.equal((await evaluate(first, 'window.yuanpu.runtimeInfo()')).protocolVersion, 4);
   const created = await evaluate(first, `window.yuanpu.createSchedule(${JSON.stringify({
     contractVersion: 1, name: scheduleName, prompt: 'synthetic', workspaceId: workspace,
     timing: { kind: 'once', at: '2099-01-01T00:00:00.000Z' },

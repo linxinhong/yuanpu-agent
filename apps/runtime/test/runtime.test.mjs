@@ -507,7 +507,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.deepEqual(scheduleHistory, []);
   assert.deepEqual(health, {
     version: '0.1.0',
-    protocolVersion: 3,
+    protocolVersion: 4,
     piVersion: '0.86.1',
     mcpTools: ['search_capabilities', 'execute_capability'],
     configRoot: home,

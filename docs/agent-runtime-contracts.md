@@ -6,8 +6,8 @@ type or table declaration alone is still not evidence that a provider exists.
 
 ## Compatibility boundary
 
-- `PROTOCOL_VERSION` remains 3. The existing authenticated `POST /v1/chat` request and
-  `ChatResponse` are unchanged and remain the desktop compatibility path.
+- `PROTOCOL_VERSION` is 4 for the desktop work/assistant conversation and binding APIs.
+  The existing authenticated `POST /v1/chat` request and `ChatResponse` remain available.
 - The additive execution DTOs use `AGENT_CONTRACT_VERSION = 1`; host events independently use
   `HOST_EVENT_CONTRACT_VERSION = 1`. Consumers reject unknown versions with an observable error.
 - Runtime exposes the live AgentService to its authenticated desktop host at `POST /v1/agent/runs`,
@@ -195,6 +195,13 @@ retained in `yp_agent_run_outputs` so delivery can resume after restart. These w
 in the user-owned `automation.sqlite`; logs and task metadata must not copy prompt/output content.
 Product-configurable history cleanup remains a future policy and must remove trigger, output, and
 delivery records consistently.
+The optional desktop Assistant binding points its desktop conversation at one already-paired WeCom
+private Pi session. The former desktop Pi session ID remains in local metadata and can be read as a
+read-only archive while linked; unlink restores that session. Work keeps a separate conversation.
+The binding and mirrored-delivery status live in `automation.sqlite`. Mirror content is kept only
+until the provider accepts it, or while a confirmed failure is available for manual retry. An
+uncertain delivery is never retried automatically. Pi conversation files remain the source of chat
+history; the transcript API reads only desktop Work, current Assistant, and its linked archive.
 Runtime reuses at most 16 Pi session objects in an idle LRU pool. Eviction disposes only the in-memory
 session/runtime resources; the binding's Pi session remains persisted and reopens on later use.
 Tests use real files, including migration over a pre-existing fixture. The native smoke executes the
