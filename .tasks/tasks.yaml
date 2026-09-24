@@ -863,7 +863,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-021
     title: "App 多入口与升级完整业务验收"
-    status: in_progress
+    status: done
     goal: "证明用户从配置到 IM/定时任务执行、结果导航及升级恢复的完整体验；原生通知另行验收。"
     scope:
       in: ["桌面端完整用户旅程和打包应用","App 生命周期、SEA 升级与持久数据兼容的跨平台回归"]
@@ -892,10 +892,18 @@ tasks:
       owner: "codex-t019sep23-12136-12136"
       attempts: 0
       claimed_at: "2026-09-23T11:08:20.618Z"
-      completed_at: null
+      completed_at: "2026-09-24T06:29:27.143Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-task-019"
       branch: "task/task-021-business-acceptance"
-      evidence: []
+      evidence:
+        - {type: "assertion", check: "current-version one-user App, IM and scheduled delivery journey", status: "passed", summary: "On macOS arm64 product baseline 9055da0, the connected pre-paired one-user App received a fresh private message, produced one succeeded Agent run and accepted reply, and the user confirmed seeing it. A new one-time 13:30 plan had one succeeded run and one delivered IM attempt; the user confirmed seeing the scheduled message. Task detail, run conversation and return navigation worked. Integrated main 953e235 keeps the same product source. See .tasks/verification/TASK-021/results.md."}
+        - {type: "assertion", check: "three App exit and restart states", status: "passed", summary: "Integrated main f4ee5fc on macOS arm64: waiting-plan restart produced one trigger/run/request (runner 1790230925572933000); active run recovered as result_unknown without replay (1790230943539185000); controlled IM send in flight recovered outbound unknown with one Agent execution and one send, and UI retained distinct delivery status (1790230956992773000). All isolated fixtures; formal WeCom write-boundary race not claimed."}
+        - {type: "assertion", check: "version-distinct SEA activation, rollback and session compatibility", status: "passed", summary: "Integrated main f4ee5fc macOS package built by runner 1790230743783321000. Four real packaged App launches activated a checksum-verified test SEA version 0.1.1-test.021, retained task/run/binding and continued Pi conversation context; incompatible and general failed candidates rolled back with preserved conversation context and sanitized dismissible notices. Runner 1790230858914821000. Future official release, remote manifest and schema-changing migration not claimed."}
+        - {type: "assertion", check: "macOS, Windows and Linux executable packaged App evidence", status: "passed", summary: "macOS arm64 integrated main two-launch packaged App run 1790230897062364000 passed; Linux x64 and Windows x64 target-runner packaged App jobs both passed GitHub Actions 35962315706 at 9619b14. Subsequent commits to main f4ee5fc did not change product code, the cross-platform probe or workflow. Each synthetic journey checked desktop run, schedule UI, restart persistence and one model request. Production signing and live WeCom on Windows/Linux remain unverified."}
+        - {type: "assertion", check: "independent review of bounded claims and platform limits", status: "passed", summary: "Independent read-only reviewer audited TASK-021 card, live/fixture evidence, Windows/Linux run 35962315706, the versioned SEA/session/rollback probe and seven integrated-main runner records at f4ee5fc. It found no remaining card-scenario blocker, verified user dirty files were preserved, and required explicit limits for signing, notifications, future release and formal WeCom in-flight sends. Full record in .tasks/verification/TASK-021/results.md."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0 at integrated main f4ee5fc: full build, Yuanpu typechecks and tests passed; runner 1790230655865251000. Main evidence commit 953e235 changed only report/memory."}
+        - {type: "memory", check: "TASK-021 handoff and verification report", status: "passed", summary: "Integrated .tasks/memory/TASK-021.md and .tasks/verification/TASK-021/results.md at main 953e235 record source revisions, environment modes, exact commands, independent audit and all remaining non-release-ready boundaries."}
+        - {type: "boundary", check: "production release trust and deferred native notifications", status: "unverified", summary: "No valid production signing/trust root was provided; neither CI nor ad-hoc package proves distribution trust. Native notification UI/display/click is excluded to TASK-029. This is an explicit retained release gap, not a waived or passed TASK-021 claim."}
       follow_up_candidates: []
   - id: TASK-029
     title: "补齐提醒界面与签名版原生通知验收"
@@ -1107,7 +1115,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-023
     title: "确定微信 ClawBot 适配架构与安全边界"
-    status: pending
+    status: ready
     goal: "在企业微信首发链路完成后，证明腾讯微信 ClawBot 能否在不引入独立常驻网关的前提下安全接入 Yuanpu，并固定可执行适配契约。"
     scope:
       in: ["腾讯官方 openclaw-weixin 与 iLink 协议/实现核验","二维码授权、凭据、长轮询、会话与本地缓存边界","Yuanpu 自有 adapter、复用代码或受管 OpenClaw Gateway 的架构取舍","最小协议 fixture 与失效模式验证"]
