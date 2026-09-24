@@ -2,6 +2,9 @@ name: TASK-021 Packaged App Verification
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - task/task-021-business-acceptance
 
 permissions:
   contents: read
