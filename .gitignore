@@ -18,3 +18,4 @@ packages/ai/src/providers/data/
 !.tasks/memory/
 !.tasks/memory/*.md
 /.worktrees/
+.zvec-grep/
