@@ -60,4 +60,12 @@
 - [Desktop Bundle 35966874652](https://github.com/linxinhong/yuanpu-agent/actions/runs/35966874652)：`46787b9` 上三平台均完成打包；新增探针从 electron-builder 的 `release/*-unpacked/resources` 而非开发输出目录取 SEA 与冻结 Python。在空 PATH 下 macOS/Linux PASS。Windows 搜索、调用和错误保真已输出正确 JSON，但进程在 30 秒内未退出，探针 FAIL：空 PATH 同时移除了 MCP 清理依赖的 `taskkill`。本地已将 Windows 探针 PATH 缩为 System32，尚未运行 hosted 复测，故 Windows 此项保持 **UNVERIFIED/FAIL（探针）**，不能据 JSON 输出算 PASS。
 - 探针使用打包阶段的 unpacked 资源，尚未安装或解压上传的 DMG/ZIP/AppImage/EXE，也没有断网；它仅缩小 S4 的证据缺口，不满足 S4/S6 完整目标机验收。
 - 独立非实现者复核认为当前 S1、SEA 更新三平台 smoke 有新增证据；S2/S3 和旧 npm 兼容仍主要依靠既有回归；S5 能力包更新/回滚、Windows 文件占用，S6 三平台无 Python/断网安装，S7 当前版真实 UI 全链路，以及生产签名、系统提示仍缺当前完整证据。总体 **BLOCKED / NOT PASS**。
-- 过程偏差：任务卡约束“本轮不自动提交或推送”；为运行 hosted CI 已将 `46787b9` 提交并推送至专用 `task/task-008-release-verification` 分支，未集成 main。后续修正和本记录仅留本地，不再自动提交、推送或集成。
+- 过程偏差：任务卡约束“本轮不自动提交或推送”；为运行 hosted CI 已先将 `46787b9` 提交并推送至专用 `task/task-008-release-verification` 分支，未集成 main。发现约束后停止推送，直至收到下述用户明确授权。
+
+### 授权后复测
+
+- 用户随后明确授权仅将 Windows 探针修正及验收记录推至专用任务分支复测，不集成 main 或发布。修正 `6b78bea` 把 Windows 子进程 PATH 限制为 System32，供进程清理使用，仍不包含 Python/uv 目录。
+- [Desktop Bundle 35968187462](https://github.com/linxinhong/yuanpu-agent/actions/runs/35968187462)：`6b78bea` 上 Linux x64、macOS arm64、Windows x64 三 job 的打包、打包资源探针、制品上传均 PASS。Windows 首轮超时确认为探针把 `taskkill` 从 PATH 移除后的环境伪影；修正后退出成功。它证明三平台 unpacked App 资源的 SEA/冻结 MCP 在无 Python PATH 下可搜索、执行、传递错误，不证明已在干净目标机安装或断网。
+- [Desktop Bundle 35967830883](https://github.com/linxinhong/yuanpu-agent/actions/runs/35967830883)：当前产品 `main` `710a5e8` 三平台打包与制品上传均 PASS；该默认 workflow 不含新的无 Python 探针。测试分支 `6b78bea` 与 main 的产品源码一致，只多验收探针和记录。
+- 同一 `main` 本机执行 `pnpm dev` 启动真实 Electron/Vite/Runtime，界面显示 Runtime 已连接；一条无敏感内容的普通对话由 Pi 完成并在界面显示回答及“已完成”运行状态。这是当前版普通 Agent 对话 smoke，不是 S7 技能安装/审批/回滚验收。技能搜索当前报“宿主未配置能力制品信任根”，因此该开发宿主上的完整 S7 仍未完成。
+- 结论保持 **BLOCKED / NOT PASS / 不可发布**：三平台无系统 Python 的打包资源探针已通过，但三平台从分发安装包在无 Python、断外网目标环境完成安装和调用、当前版真实 S7 全旅程、旧 npm 配置保留及 Windows 文件占用/遗留进程实机核验、生产信任链与平台签名/系统提示仍缺。不得把这些未验证项折算为 CI PASS。
