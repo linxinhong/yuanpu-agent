@@ -282,7 +282,7 @@ try {
     status: 'passed', packagedAppLaunches: 4, persistedScheduleVisible: true,
     stagedSeaConfirmed: true, incompatibleCandidateRolledBack: true,
     visibleIncompatibilityNotice, genericFailureSanitized: true, runtimeChildrenStopped: true,
-    desktopConversationRetained: true, disabledConnectionRetained: true, providerRequests,
+    desktopRunAndBindingRetained: true, disabledConnectionRetained: true, providerRequests,
   }));
 } finally {
   for (const app of apps) {
