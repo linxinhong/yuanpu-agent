@@ -17,6 +17,22 @@ const home = join(root, 'home');
 const userData = join(root, 'user-data');
 const workspace = join(root, 'workspace');
 const apps = [];
+let providerRequests = 0;
+const provider = createServer(async (request, response) => {
+  if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+    response.writeHead(404).end();
+    return;
+  }
+  for await (const _chunk of request) { /* Synthetic prompt only. */ }
+  providerRequests += 1;
+  response.writeHead(200, { 'content-type': 'text/event-stream' });
+  const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({
+    id: 'task-021-packaged', object: 'chat.completion.chunk', created: 1,
+    model: 'fixture-model', choices: [{ index: 0, delta, finish_reason }],
+  })}\n\n`;
+  response.write(chunk({ role: 'assistant', content: 'Synthetic packaged reply.' }));
+  response.end(chunk({}, 'stop') + 'data: [DONE]\n\n');
+});
 
 async function eventually(check, message, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
@@ -85,7 +101,7 @@ function alive(pid) {
 async function start() {
   const port = await freePort();
   const child = spawn(executable, [`--user-data-dir=${userData}`, `--remote-debugging-port=${port}`], {
-    env: { ...process.env, YUANPU_HOME: home, YUANPU_NOTIFICATIONS_ENABLED: '0' },
+    env: { ...process.env, YUANPU_HOME: home, YUANPU_NOTIFICATIONS_ENABLED: '0', TASK_021_PROVIDER_KEY: 'fixture-only' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const diagnostics = [];
@@ -136,13 +152,15 @@ async function stop(app) {
 }
 
 try {
+  const providerPort = await freePort();
+  await new Promise((done) => provider.listen(providerPort, '127.0.0.1', done));
   await mkdir(join(home, 'app'), { recursive: true });
   await mkdir(userData, { recursive: true });
   await mkdir(workspace, { recursive: true });
   await writeFile(join(home, 'app', 'config.json'), JSON.stringify({
     schemaVersion: 1, provider: 'task-021-fixture', model: 'fixture-model',
-    apiKeyEnv: 'TASK_021_UNUSED_KEY', workingDirectory: workspace,
-    baseUrl: 'http://127.0.0.1:9/v1', api: 'openai-completions',
+    apiKeyEnv: 'TASK_021_PROVIDER_KEY', workingDirectory: workspace,
+    baseUrl: `http://127.0.0.1:${providerPort}/v1`, api: 'openai-completions',
   }));
   const first = await start();
   assert.equal((await evaluate(first, 'window.yuanpu.runtimeInfo()')).protocolVersion, 3);
@@ -154,6 +172,18 @@ try {
   };
   const created = await evaluate(first, `window.yuanpu.createSchedule(${JSON.stringify(input)})`);
   assert.equal((await evaluate(first, 'window.yuanpu.listSchedules()')).length, 1);
+  const connection = await evaluate(first, `window.yuanpu.saveWecomConnection(${JSON.stringify({
+    connectionId: 'imc_task021_packaged', botId: 'synthetic-bot', enabled: false,
+  })})`);
+  assert.equal(connection.status, 'disabled');
+  const chat = await evaluate(first, "window.yuanpu.chat('Synthetic packaged conversation')");
+  assert.equal(chat.message.includes('Synthetic packaged reply.'), true);
+  assert.equal(providerRequests, 1);
+  const initialDatabase = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'), { readOnly: true });
+  const desktopRun = initialDatabase.prepare("SELECT run_id, status FROM yp_agent_runs WHERE entry_point = 'desktop' ORDER BY created_at DESC LIMIT 1").get();
+  assert.equal(desktopRun?.status, 'succeeded');
+  assert.equal(initialDatabase.prepare("SELECT COUNT(*) AS count FROM yp_conversation_bindings WHERE entry_point = 'desktop'").get().count, 1);
+  initialDatabase.close();
   await eventually(async () => evaluate(first, "Array.from(document.querySelectorAll('.nav-item')).some((button) => button.textContent.includes('定时任务'))"), 'Packaged renderer navigation did not mount.');
   assert.equal(await evaluate(first, "document.querySelector('.runtime-recovery-notice') === null"), true);
   await evaluate(first, "Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('定时任务')).click()");
@@ -176,6 +206,9 @@ try {
   assert.equal(active.version, '0.1.0');
   assert.equal(active.executable, join(canonicalUserData, 'runtime', 'versions', '0.1.0', 'YuanpuAgentRuntime'));
   assert.equal((await evaluate(second, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
+  assert.equal((await evaluate(second, `window.yuanpu.getAgentRun(${JSON.stringify(desktopRun.run_id)})`)).status, 'succeeded');
+  assert.equal((await evaluate(second, 'window.yuanpu.listWecomConnections()')).connections.length, 1);
+  assert.equal(providerRequests, 1);
   await eventually(async () => evaluate(second, "Array.from(document.querySelectorAll('.nav-item')).some((button) => button.textContent.includes('定时任务'))"), 'Restarted packaged navigation did not mount.');
   assert.equal(await evaluate(second, "document.querySelector('.runtime-recovery-notice') === null"), true);
   await evaluate(second, "Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('定时任务')).click()");
@@ -184,6 +217,8 @@ try {
   await assert.rejects(readFile(join(canonicalUserData, 'runtime', 'activation-pending.json')), { code: 'ENOENT' });
   const database = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'), { readOnly: true });
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM yp_schedules').get().count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM yp_conversation_bindings WHERE entry_point = 'desktop'").get().count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM yp_agent_runs WHERE entry_point = 'desktop' AND status = 'succeeded'").get().count, 1);
   database.close();
   await stop(second);
 
@@ -201,6 +236,7 @@ try {
   const rolledBack = JSON.parse(await readFile(join(canonicalUserData, 'runtime', 'current.json'), 'utf8'));
   assert.deepEqual(rolledBack, active);
   assert.equal((await evaluate(third, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
+  assert.equal((await evaluate(third, `window.yuanpu.getAgentRun(${JSON.stringify(desktopRun.run_id)})`)).status, 'succeeded');
   assert.equal(third.diagnostics.join('').includes('Runtime protocol is incompatible'), true);
   assert.equal(await evaluate(third,
     "window.yuanpu.runtimeRecoveryNotice().then((notice) => notice?.kind === 'incompatible_protocol')"), true);
@@ -229,6 +265,7 @@ try {
   const fourth = await start();
   assert.deepEqual(JSON.parse(await readFile(join(canonicalUserData, 'runtime', 'current.json'), 'utf8')), active);
   assert.equal((await evaluate(fourth, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
+  assert.equal((await evaluate(fourth, `window.yuanpu.getAgentRun(${JSON.stringify(desktopRun.run_id)})`)).status, 'succeeded');
   assert.equal(fourth.diagnostics.join('').includes(genericMarker), true);
   assert.equal(await evaluate(fourth,
     "window.yuanpu.runtimeRecoveryNotice().then((notice) => notice?.kind === 'activation_failed')"), true);
@@ -245,6 +282,7 @@ try {
     status: 'passed', packagedAppLaunches: 4, persistedScheduleVisible: true,
     stagedSeaConfirmed: true, incompatibleCandidateRolledBack: true,
     visibleIncompatibilityNotice, genericFailureSanitized: true, runtimeChildrenStopped: true,
+    desktopConversationRetained: true, disabledConnectionRetained: true, providerRequests,
   }));
 } finally {
   for (const app of apps) {
@@ -256,5 +294,7 @@ try {
       if (command.includes(root) || command.includes(bundledSea)) process.kill(app.runtimePid, 'SIGKILL');
     }
   }
+  provider.closeAllConnections();
+  await new Promise((done) => provider.close(done));
   await rm(root, { recursive: true, force: true });
 }
