@@ -1321,7 +1321,7 @@ tasks:
 
   - id: TASK-036
     title: "按 Muse 参考框架交付 Yuanpu 聊天 UI"
-    status: in_progress
+    status: done
     goal: "以用户已查看的浅色三栏预览为基线，完成可用于真实桌面对话的 Yuanpu UI，并保留技能、连接与定时任务的现有业务行为。"
     scope:
       in: ["左侧导航、中央聊天与固定输入栏、右侧会话动态及运行面板", "消息、授权、取消、错误恢复与响应式布局", "技能、连接、定时任务的浅色适配与导航回归", "Electron 标题栏适配、真实桥接验收与交付证据", "Yuanpu Pi 适配层传递模型错误，避免 UI 假成功"]
@@ -1354,8 +1354,15 @@ tasks:
       owner: "codex-ui-sep24-30665"
       attempts: 0
       claimed_at: "2026-09-24T02:13:40.183Z"
-      completed_at: null
+      completed_at: "2026-09-24T02:38:39.551Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-ui"
       branch: "task/task-036-muse-ui"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated UI implementation", status: "passed", summary: "Implementation c151456 and 49af3bd fast-forward integrated into main 886f067; memory and navigation evidence committed at 6911279. Shared renderer, light theme and macOS shell delivered; existing user changes preserved."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0, main 886f067: full build, app/desktop/runtime typechecks and all tests passed. Runner .git/coding-owner/1790217363497491000.json; includes Pi HTTP failure regression and desktop tests."}
+        - {type: "verification", check: "browser task and recovery acceptance", status: "passed", summary: "Main 886f067 at localhost:5173: IME Enter, duplicate-send lock, same-run polling recovery, retained draft, approval readiness and send lock, cancellation with late poll passed. Runner 1790217383483447000; four pages axe WCAG A/AA 0 violations/0 incomplete."}
+        - {type: "verification", check: "real Electron bridge and live model approval", status: "passed", summary: "Code identical to 49af3bd: isolated Electron/Runtime/Python plus configured LongCat-2.0 completed ordinary reply, one-time approved echo and denied echo. Approved result rendered once; denied call failed, not completed. Separate local-provider fixture verified model failure, cancel, duplicate-send prevention, persisted management data and exit child cleanup. Runners 1790217204991895000 / 1790217206296491000."}
+        - {type: "verification", check: "responsive and native shell", status: "passed", summary: "1440x900, 1280x800, 1024x768 and 390x844: composer reachable, no horizontal overflow, modal Escape and focus restoration passed. Native macOS AX showed traffic-light controls and live bridge. Committed screenshots/results in docs/frontend/evidence/task-036; CDP images exclude native window controls."}
+        - {type: "boundary", check: "unverified environments and review", status: "unverified", summary: "No Windows/Linux native or signed-package acceptance, real IM delivery, or independent reviewer claim. Runtime protocol and approval signing unchanged; this is UI delivery with the documented minimal Pi error-reporting correction."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-036.md at 6911279 names source/test revisions, reusable entry points, failure causes, commands, limitations and recheck triggers."}
       follow_up_candidates: []
