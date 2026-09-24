@@ -1,8 +1,8 @@
-# App 多入口与升级完整业务验收（TASK-021）—进行中
+# App 多入口与升级完整业务验收（TASK-021）—集成验收通过
 
 - 关键词：业务验收、企业微信私聊、定时任务、App 重启、SEA 升级、跨平台。
 - 记录日期：2026-09-24；分支 `task/task-021-business-acceptance`；worktree `.worktrees/codex-task-019`。证据在 `.tasks/verification/TASK-021/results.md`；任务状态以 `.tasks/tasks.yaml` 为准。
-- 最新产品基线：local main `9055da0`；TASK-021 分支已加入只读/合成验收探针和证据，未修改产品源码。Node 24.15.0 / pnpm 11.22.0，macOS arm64；主工作区有他人未提交文件，未纳入任务分支。
+- 集成基线：main `f4ee5fc`（产品源码仍为 `9055da0`）；TASK-021 只加入验收探针和证据，未修改产品源码。Node 24.15.0 / pnpm 11.22.0，macOS arm64；主工作区有他人未提交文件，未纳入任务提交。
 
 ## 已验证的边界
 
@@ -17,4 +17,4 @@
 - 当前版本单实例 App 已完成新的真实单人私聊及一次性定时任务复验：入站/出站/IM 运行计数 6/6/6 → 7/7/7，最新关联运行成功且回复被 SDK 接受，用户确认收到；13:30 的任务恰好一条触发/成功运行/已送达，用户确认看到；App 中任务详情→运行会话→返回任务详情正常。详见报告“Current-revision real one-user regression”。没有重新配置凭据、读取消息正文或扩展到第二用户。前一次“未收到”发生在旧监听到时前后，发送时间无法确认，不能判为产品缺陷。
 - Windows/Linux 各自 GitHub runner 从 `9619b14` 构建并实际两次启动打包 App，合成桌面对话、任务创建与重启后的计划/运行/绑定保留通过（run `35962315706`）；macOS 同探针 runner `1790229316121974000.json` 通过。不是两平台真实企微或签名验收。
 - macOS 打包 App 隔离探针把当前 Runtime bundle 封装成不同版本的真实 SEA，手工暂存、激活并在失败候选回退后继续同一合成 Pi 会话；第三次模型请求仍携带升级前和升级后上下文，runner `1790230351003725000.json` 通过。它不代表未来正式 release、远程 manifest 或真实 schema 迁移。生产签名/信任缺口与 TASK-029 通知仍明确保留。
-- 独立只读复核未发现剩余卡片场景缺口；TASK-021 分支最终 `pnpm check` 通过（runner `1790230459514347000.json`）。后续须在集成 main 上复核、更新本文件与验收报告，并通过任务工具执行 `preflight`/`complete`；在那之前不得标 done 或宣称可发布。
+- 独立只读复核未发现剩余卡片场景缺口；TASK-021 分支最终 `pnpm check` 通过（runner `1790230459514347000.json`）。集成 main `f4ee5fc` 后，`pnpm check`、`pnpm package:desktop`、四次启动 SEA 升级/回退与会话连续性、两次启动普通持久性、三种退出重启回归全部通过（详见报告末节和 `.git/coding-owner/` 的七个 runner）。Windows/Linux CI `35962315706` 的跨平台探针和产品代码与 main 相同，可沿用该目标 runner 证据。独立复核再次检查集成版，无剩余场景阻塞。登记状态以 `.tasks/tasks.yaml` 为准；完成仅代表本卡所述验收边界，不宣称可生产发布。
