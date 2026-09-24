@@ -30,3 +30,7 @@
 ## 验证发现的最小边界修正
 
 受控模型 HTTP 400 经真实 Electron/Runtime 提交后，Pi 适配层曾返回“完成”并使运行误标成功。补充 `packages/yuanpu-runtime/src/pi/index.ts` 对最终 assistant 错误状态的传递，沿用现有 failed 协议与通用脱敏文案；不修改 Pi 上游。对应回归由本卡 Electron 探针覆盖。
+
+## 输入区后续调整（2026-09-24）
+
+用户提供两层输入卡片参考，并明确选择“先改布局，接入已有功能”。输入区改为上方多行编辑、下方发送与换行提示；移除 textarea 内层蓝色矩形焦点框，由外部圆角边框表达焦点。保留已有发送、忙碌锁、IME 和错误恢复；未新增无对应桥接接口的模型、权限、语音或上下文菜单。截图见 [1440](../evidence/task-036/composer-layout-1440.png)、[390](../evidence/task-036/composer-layout-390.png)。

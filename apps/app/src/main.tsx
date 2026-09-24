@@ -1310,12 +1310,14 @@ function ChatPanel({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="向 YuanpuAgent 发送消息…"
-              rows={1}
+              placeholder="今天帮你做些什么？"
+              rows={3}
             />
-            <button type="button" onClick={() => void sendMessage()} disabled={!input.trim() || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>
+            <div className="composer-toolbar">
+              <span className="composer-hint">{busy ? '任务执行中' : 'Enter 发送 · Shift + Enter 换行'}</span>
+              <button type="button" onClick={() => void sendMessage()} disabled={!input.trim() || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>
+            </div>
           </div>
-          <p>Enter 发送 · Shift + Enter 换行 · 配置模型与密钥后即可开始</p>
         </div>
       </div>
       {activityOpen && (

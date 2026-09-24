@@ -50,3 +50,7 @@ pnpm check
 ## 集成后验证
 
 main `886f067`（实现代码与 `49af3bd` 一致）上 `pnpm check` PASS，记录 `.git/coding-owner/1790217363497491000.json`；主预览 5173 上浏览器恢复/授权/取消回归 PASS，记录 `1790217383483447000.json`。原工作区用户改动保留，环境自动写入的空 pnpmfileChecksum 已移除；这些用户文档差异不属于本卡源码。
+
+## 输入区后续调整验证（2026-09-24）
+
+在 main 工作树上完成两层输入布局。1440×900 与 390×844 实际浏览器截图无横向溢出，390 下输入区底边 776px 小于视口 844px；聚焦 textarea 的 outline 为 none，外框保留焦点样式。Shift+Enter 实测插入换行，Enter 发送后清空输入；已有 task-036-chat-probe 全部 PASS。两个视口 axe WCAG A/AA 均 0 violations / 0 incomplete；app typecheck 与 pnpm check PASS。此项为 TASK-036 完成后的布局微调工作树验证，未冒称原提交包含该变更。

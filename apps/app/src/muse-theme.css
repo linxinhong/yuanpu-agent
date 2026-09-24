@@ -160,31 +160,57 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 
 .composer-wrap { padding: 0 24px 16px; background: #fcfcfc; }
 .composer {
+  display: flex;
   width: min(100%, 1100px);
-  min-height: 62px;
-  align-items: center;
-  border: 1px solid #e8ecf0;
-  border-radius: 32px;
-  padding: 7px 8px 7px 20px;
+  min-height: 156px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  border: 1px solid #e2e3e5;
+  border-radius: 28px;
+  padding: 16px 16px 12px;
   background: #fff;
-  box-shadow: 0 4px 20px rgb(22 33 43 / 10%);
+  box-shadow: 0 6px 24px rgb(22 33 43 / 5%);
 }
-.composer:focus-within { border-color: #9ac8ef; }
-.composer textarea { min-height: 40px; max-height: 120px; padding: 10px 2px; color: #1f2b34; font-size: 14px; }
-.composer textarea::placeholder { color: #9aa4af; }
+.composer:focus-within {
+  border-color: #a4adb5;
+  box-shadow: 0 0 0 1px rgb(70 85 98 / 10%), 0 6px 24px rgb(22 33 43 / 5%);
+}
+.composer textarea {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 72px;
+  max-height: 180px;
+  border: 0;
+  border-radius: 0;
+  padding: 0 4px;
+  color: #20252b;
+  background: transparent;
+  font-size: 15px;
+  line-height: 1.6;
+  resize: none;
+}
+/* The enclosing composer carries focus; a second rectangle clips its rounded shape. */
+.composer textarea:focus, .composer textarea:focus-visible { outline: none; box-shadow: none; }
+.composer textarea::placeholder { color: #85898e; }
+.composer-toolbar { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 12px; }
+.composer-hint { padding-left: 4px; color: #69717a; font-size: 11px; }
 .composer button {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
   place-items: center;
   align-self: center;
+  border: 0;
   border-radius: 50%;
   padding: 0;
-  color: #245578;
-  background: #d9ecff;
+  color: #fff;
+  background: #293238;
 }
-.composer button svg { width: 23px; height: 23px; }
-.composer button:disabled { opacity: .55; }
+.composer button svg { width: 22px; height: 22px; }
+.composer button:disabled { color: #fff; background: #d1d1d1; opacity: 1; }
 .composer-wrap > p { margin-top: 8px; color: #606c77; }
 
 .activity-panel {
@@ -313,7 +339,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   .conversation-inner { width: calc(100% - 32px); padding-top: 20px; }
   .message.user, .message.assistant, .message.error { max-width: 92%; }
   .composer-wrap { padding: 0 10px 10px; }
-  .composer { min-height: 54px; }
+  .composer { min-height: 136px; border-radius: 23px; padding: 13px 13px 10px; }
+  .composer textarea { min-height: 58px; font-size: 14px; }
+  .composer-hint { font-size: 10px; }
   .composer-wrap > p { display: none; }
   .runtime-recovery-notice { left: 12px; }
 }
