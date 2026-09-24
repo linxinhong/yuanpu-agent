@@ -1318,3 +1318,44 @@ tasks:
         - {type: "verification", check: "real configured Electron startup", status: "passed", summary: "Using the enabled single-user local WeCom connection, development Electron, renderer and Runtime child remained running beyond one minute with no readiness JSON error. Real message and native notification acceptance remain TASK-019."}
         - {type: "memory", check: "task handoff", status: "passed", summary: "Integrated .tasks/memory/TASK-028.md records trigger, fix boundary, commands, real startup limits and next TASK-019 checks."}
       follow_up_candidates: []
+
+  - id: TASK-036
+    title: "按 Muse 参考框架交付 Yuanpu 聊天 UI"
+    status: in_progress
+    goal: "以用户已查看的浅色三栏预览为基线，完成可用于真实桌面对话的 Yuanpu UI，并保留技能、连接与定时任务的现有业务行为。"
+    scope:
+      in: ["左侧导航、中央聊天与固定输入栏、右侧会话动态及运行面板", "消息、授权、取消、错误恢复与响应式布局", "技能、连接、定时任务的浅色适配与导航回归", "Electron 标题栏适配、真实桥接验收与交付证据"]
+      out: ["新增 Gmail/Notion 等连接能力", "新增 Runtime 协议、历史会话持久化或实时工具事件协议", "重做其他页面业务结构", "Pi 上游、打包分发及系统通知平台验收"]
+    constraints: ["权威方案见 docs/frontend/tasks/muse-chat-redesign.md；复用已接受预览，不另起视觉方案", "先核对并保留当前未提交 UI 实现与用户改动，禁止以历史截图声称当前版本通过", "沿用 DesktopBridge 与宿主一次性授权边界；浏览器 fixture 和真实 Electron 证据分别记录", "同一实施者负责 main.tsx、styles.css/muse-theme.css 与桌面标题栏，避免共享文件并行冲突", "仅集成并在 main 验证后标 done；建卡不自动提交或推送"]
+    forbidden: ["把示意的 Gmail 卡片、工具活动或连接状态作为真实功能", "绕过授权或在渲染进程直接访问 Runtime 凭据", "用截图、模拟数据或构建成功替代真实桌面对话验收"]
+    acceptance:
+      - type: assertion
+        expect: "用户进入聊天页时看到已接受的浅色三栏层级；可在四个导航入口间切换，右栏动态/运行可切换、收起和重新打开；1440×900、1280×800、1024×768、390×844 下输入栏和主要操作可达，无页面横向溢出，抽屉可用键盘关闭并恢复焦点"
+      - type: assertion
+        expect: "真实 Electron bridge 下发送消息仅创建一次运行，发送中阻止重复提交；排队、运行、等待授权与终态按真实返回值展示，工具结果仅在接口确有结果时出现；失败保留可重试输入且无永久忙碌状态"
+      - type: assertion
+        expect: "用户对待授权调用选择允许一次或拒绝时，结果与宿主一致；取消运行显示真实终态，迟到轮询不复活已结束任务；切换页面、窗口缩放和长内容不遮挡审批及取消操作"
+      - type: assertion
+        expect: "技能、连接、定时任务的现有列表/详情/主要操作仍可使用，通知定位的既有运行详情入口仍可达；空记录、断桥及接口错误有可理解的状态与恢复路径"
+      - type: assertion
+        expect: "记录当前 revision、工作区差异、视口、操作、预期/实际结果和截图；浏览器 fixture、真实 Runtime/模型及未验证平台明确区分；macOS 原生标题栏可拖动且交通灯不遮挡导航，其他平台无依赖 macOS 控件才能使用的操作"
+      - type: command
+        run: "pnpm --filter @yuanpu-agent/app typecheck"
+      - type: command
+        run: "pnpm --filter @yuanpu-agent/desktop test"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-020"]
+    risk_level: L2
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["入口 apps/app/src/main.tsx 的 App、ChatPanel 与 AppIcon，styles.css 和 muse-theme.css；桌面窗口 apps/desktop/src/main.ts；协议复用 packages/yuanpu-protocol/src/index.ts 的 DesktopBridge 和 src/agent.ts", "预检 git diff；已有 UI 草稿尚未提交。核对 submitDesktopMessage/getAgentRun/cancelAgentRun/decideCapabilityApproval 和通知 navigationTarget；当前右栏为本会话内存状态，不宣称持久历史或实时工具订阅", "设计及证据入口 docs/frontend/tasks/muse-chat-redesign.md、.tasks/ui/muse-chat-redesign/proposal.md；后者与 images 目前受 .gitignore 忽略，交付前须提供可持久审阅的已脱敏证据，不默默改变忽略规则", "验证阶梯：先 app typecheck 和受影响状态场景，再 desktop test，最后 pnpm check 与浏览器/Electron 操作验收；已有 apps/desktop/test/renderer-security.test.mjs、notification-host.test.mjs 和 packages/yuanpu-runtime/test/agent-service.test.mjs 可复用；只有修改原生或更新路径才增加 native smoke", "真实模型验证需要已配置可用模型；优先隔离 YUANPU_HOME，审批使用无外部副作用的受控能力。无环境时保留 unverified，不请求真实外部消息发送或扩大授权"]
+    escalation_conditions: ["若既有桥接契约无法支持目标行为，先记录最小缺口并调整该边界，不借 UI 卡扩展 Runtime 架构", "若需要改变已接受三栏结构或新增业务入口，补充可见方案和决定后再做依赖修改"]
+    result:
+      owner: "codex-ui-sep24-30665"
+      attempts: 0
+      claimed_at: "2026-09-24T02:13:40.183Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/codex-ui"
+      branch: "task/task-036-muse-ui"
+      evidence: []
+      follow_up_candidates: []
