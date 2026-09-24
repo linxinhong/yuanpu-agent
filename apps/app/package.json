@@ -6,12 +6,17 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "theme:export": "node themes/export-theme.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.103.2",
     "@yuanpu-agent/protocol": "workspace:*",
+    "marked": "18.0.11",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-router": "^8.4.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.2",

@@ -1,0 +1,35 @@
+/* Yuanpu's light palette. Components use semantic tokens, not palette literals. */
+:root {
+  color-scheme: light;
+
+  --yp-app-backdrop: #fff;
+  --yp-sidebar-surface: #fff;
+  --yp-canvas-surface: #fff;
+  --yp-canvas-grid: none;
+  --yp-brand-text: #818b95;
+  --yp-surface: #fff;
+  --yp-surface-subtle: #fcfcfc;
+  --yp-surface-tinted: #f5f7f5;
+  --yp-text: #0f1115;
+  --yp-text-muted: #61666b;
+  --yp-text-action: #77828d;
+  --yp-text-subtle: #818b95;
+  --yp-text-tinted: #66746c;
+  --yp-border: #e7e9ed;
+  --yp-border-control: #e5e9ed;
+  --yp-border-subtle: #e7ebef;
+  --yp-border-tinted: #e0e6e2;
+  --yp-action-hover: #f0f3f6;
+
+  --yp-accent: #51866a;
+  --yp-accent-ink: #183a2b;
+  --yp-accent-text: #4d7860;
+  --yp-accent-soft: #eaf6ee;
+  --yp-accent-fill: #e3f3e8;
+  --yp-accent-icon: #b9dfc4;
+  --yp-success: #38a867;
+  --yp-redaction-active: #2d9362;
+
+  --yp-user-bubble: #eaf4ff;
+  --yp-user-text: #1e2c3d;
+}

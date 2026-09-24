@@ -1,0 +1,147 @@
+/* Opt-in test palette inspired by the supplied MindLink screenshot. */
+:root[data-yuanpu-theme='mindlink'] {
+  --yp-app-backdrop: #eae8e5;
+  --yp-sidebar-surface: #eae8e5;
+  --yp-canvas-surface: #fffdfa;
+  --yp-canvas-grid: none;
+  --yp-brand-text: #252220;
+  --yp-surface: #fffdfa;
+  --yp-surface-subtle: #fffdfa;
+  --yp-surface-tinted: #f4f0eb;
+  --yp-text: #211f1d;
+  --yp-text-muted: #716d69;
+  --yp-text-action: #7e7975;
+  --yp-text-subtle: #918b85;
+  --yp-text-tinted: #69625d;
+  --yp-border: #dedbd7;
+  --yp-border-control: #ddd9d4;
+  --yp-border-subtle: #e9e5df;
+  --yp-border-tinted: #d8d1c9;
+  --yp-action-hover: #f0ece7;
+
+  --yp-accent: #9d3331;
+  --yp-accent-ink: #702725;
+  --yp-accent-text: #8d3834;
+  --yp-accent-soft: #f3e7e4;
+  --yp-accent-fill: #efdeda;
+  --yp-accent-icon: #c98b84;
+  --yp-success: #9d3331;
+  --yp-redaction-active: #2d9362;
+  --yp-user-bubble: #f4ece8;
+  --yp-user-text: #2b2522;
+}
+
+:root[data-yuanpu-theme='mindlink'] .page-host {
+  padding: 50px 0 7px;
+  background: var(--yp-app-backdrop);
+}
+:root[data-yuanpu-theme='mindlink'] .chat-panel,
+:root[data-yuanpu-theme='mindlink'] .simple-page,
+:root[data-yuanpu-theme='mindlink'] .settings-page,
+:root[data-yuanpu-theme='mindlink'] .management-panel,
+:root[data-yuanpu-theme='mindlink'] .plugin-panel {
+  overflow: hidden;
+  border: 1px solid var(--yp-border);
+  border-radius: 5px;
+  background-color: var(--yp-canvas-surface);
+}
+:root[data-yuanpu-theme='mindlink'] .chat-panel,
+:root[data-yuanpu-theme='mindlink'] .simple-page,
+:root[data-yuanpu-theme='mindlink'] .settings-page {
+  background-color: #f9f8f5;
+  background-image: linear-gradient(rgb(249 248 245 / 86%), rgb(249 248 245 / 86%)), url('./assets/xuan-paper-tile.jpg');
+  background-repeat: repeat;
+  background-size: auto, 300px 300px;
+}
+:root[data-yuanpu-theme='mindlink'] .chat-main,
+:root[data-yuanpu-theme='mindlink'] .chat-panel.is-empty .chat-main,
+:root[data-yuanpu-theme='mindlink'] .composer-wrap,
+:root[data-yuanpu-theme='mindlink'] .chat-panel.is-empty .composer-wrap {
+  background: transparent;
+}
+:root[data-yuanpu-theme='mindlink'] .chat-panel { position: relative; overflow: visible; }
+:root[data-yuanpu-theme='mindlink'] .chat-main { position: relative; grid-template-rows: minmax(0, 1fr) auto; }
+:root[data-yuanpu-theme='mindlink'] .chat-header {
+  position: absolute;
+  z-index: 5;
+  top: -50px;
+  right: 0;
+  left: 0;
+  min-height: 50px;
+  height: 50px;
+  flex-wrap: nowrap;
+  padding: 0 11px 0 52px;
+  background: var(--yp-app-backdrop);
+}
+:root[data-yuanpu-theme='mindlink'] .chat-heading { gap: 10px; }
+:root[data-yuanpu-theme='mindlink'] .chat-title-pill { min-height: 29px; border-color: var(--yp-border-control); background: var(--yp-canvas-surface); box-shadow: none; font-size: 12px; }
+:root[data-yuanpu-theme='mindlink'] .chat-rename-preview { color: var(--yp-text-action); }
+:root[data-yuanpu-theme='mindlink'] .runtime-meta { flex: 0 0 auto; }
+:root[data-yuanpu-theme='mindlink'] .panel-toggle { width: 30px; height: 30px; min-height: 30px; justify-content: center; border: 0; border-radius: 7px; padding: 0; color: var(--yp-text-action); background: transparent; }
+:root[data-yuanpu-theme='mindlink'] .panel-toggle:hover { color: var(--yp-text); background: var(--yp-action-hover); }
+:root[data-yuanpu-theme='mindlink'] .panel-toggle[aria-expanded='true'],
+:root[data-yuanpu-theme='mindlink'] .panel-toggle[aria-expanded='true']:hover { color: var(--yp-accent-ink); background: transparent; }
+:root[data-yuanpu-theme='mindlink'] .panel-toggle svg { width: 18px; height: 18px; }
+:root[data-yuanpu-theme='mindlink'] .panel-maximize-toggle[aria-pressed='true'],
+:root[data-yuanpu-theme='mindlink'] .panel-maximize-toggle[aria-pressed='true']:hover { color: var(--yp-accent-ink); background: transparent; }
+:root[data-yuanpu-theme='mindlink'] .panel-toggle-label { display: none; }
+:root[data-yuanpu-theme='mindlink'] .assistant-channel-state { flex: 0 1 28%; min-width: 0; max-width: 28%; overflow: hidden; margin: 0; white-space: nowrap; }
+:root[data-yuanpu-theme='mindlink'] .sidebar {
+  border-right: 0;
+  background: var(--yp-sidebar-surface);
+}
+:root[data-yuanpu-theme='mindlink'] .app-shell { background: var(--yp-app-backdrop); }
+:root[data-yuanpu-theme='mindlink'] .brand-rail { background: var(--yp-app-backdrop); }
+:root[data-yuanpu-theme='mindlink'] .brand-showcase-yuanpu { display: none; }
+:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink { display: flex; min-height: 250px; justify-content: flex-end; gap: 14px; }
+:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-name { color: var(--yp-brand-text); text-orientation: upright; font-size: 20px; font-weight: 500; letter-spacing: .08em; }
+:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-roman { writing-mode: vertical-rl; text-orientation: sideways; color: var(--yp-brand-text); font-size: 16px; letter-spacing: .14em; }
+:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-seal { width: 48px; height: 48px; max-width: none; }
+:root[data-yuanpu-theme='mindlink'] .chat-panel.is-empty .conversation-inner { padding-bottom: 0; }
+:root[data-yuanpu-theme='mindlink'] .chat-panel.is-empty .composer-wrap { margin-bottom: 0; }
+:root[data-yuanpu-theme='mindlink'] .empty-chat-heading,
+:root[data-yuanpu-theme='mindlink'] .empty-chat > p { display: none; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-welcome { display: flex; flex-direction: column; align-items: center; margin: 0 auto 27vh; opacity: .3; }
+:root[data-yuanpu-theme='mindlink'] .work-mode .mindlink-welcome { display: none; }
+:root[data-yuanpu-theme='mindlink'] .work-mode.is-empty .chat-main { position: relative; }
+:root[data-yuanpu-theme='mindlink'] .work-mode.is-empty .chat-header,
+:root[data-yuanpu-theme='mindlink'] .work-mode.is-empty .conversation,
+:root[data-yuanpu-theme='mindlink'] .work-mode.is-empty .composer-wrap { position: relative; z-index: 1; }
+:root[data-yuanpu-theme='mindlink'] .chat-panel.right-panel-maximized .chat-main .composer-wrap { position: absolute; z-index: 6; top: auto; right: 24px; bottom: 20px; left: 24px; margin: 0; }
+:root[data-yuanpu-theme='mindlink'] .work-mode:not(.is-empty) .conversation-inner { position: relative; isolation: isolate; }
+:root[data-yuanpu-theme='mindlink'] .work-mode:not(.is-empty) .conversation-inner > :not(.mindlink-work-background-track) { position: relative; z-index: 1; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-work-background-track { display: block; position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-work-background { display: flex; position: absolute; z-index: 0; top: 46%; left: 50%; flex-direction: column; align-items: center; opacity: .3; pointer-events: none; transform: translate(-50%, -50%); }
+:root[data-yuanpu-theme='mindlink'] .mindlink-work-background img { width: 120px; height: 120px; margin-bottom: 12px; object-fit: contain; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-work-background strong { color: var(--yp-brand-text); font-family: 'Songti SC', 'Noto Serif CJK SC', serif; font-size: 35px; font-weight: 500; letter-spacing: .09em; white-space: nowrap; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-work-background span { margin-top: 9px; color: var(--yp-brand-text); font-family: Georgia, serif; font-size: 13px; letter-spacing: .55em; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-welcome img { width: 120px; height: 120px; margin-bottom: 12px; object-fit: contain; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-welcome strong { color: var(--yp-brand-text); font-family: 'Songti SC', 'Noto Serif CJK SC', serif; font-size: 35px; font-weight: 500; letter-spacing: .09em; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-welcome span { margin-top: 9px; color: var(--yp-brand-text); font-family: Georgia, serif; font-size: 13px; letter-spacing: .55em; }
+:root[data-yuanpu-theme='mindlink'] .nav-item:hover { background: #dedbd7; }
+:root[data-yuanpu-theme='mindlink'] .nav-item.active,
+:root[data-yuanpu-theme='mindlink'] .sidebar-footer.settings-trigger.active {
+  color: var(--yp-accent-ink);
+  background: var(--yp-accent-soft);
+}
+@media (min-width: 781px) {
+  :root[data-yuanpu-theme='mindlink'] .chat-panel.activity-open .chat-header { right: calc(-1 * var(--yp-right-panel-width, 320px)); }
+  :root[data-yuanpu-theme='mindlink'] .chat-panel.right-panel-maximized.activity-open .chat-header { right: 0; left: 0; }
+}
+@media (min-width: 1101px) {
+  :root[data-yuanpu-theme='mindlink'] .chat-panel.list-open .chat-header { left: -260px; }
+}
+@media (min-width: 781px) and (max-width: 1100px) {
+  :root[data-yuanpu-theme='mindlink'] .chat-panel.list-open .chat-header { left: -240px; }
+}
+@media (max-width: 780px) {
+  :root[data-yuanpu-theme='mindlink'] .page-host { padding: 0; }
+  :root[data-yuanpu-theme='mindlink'] .chat-panel { overflow: hidden; }
+  :root[data-yuanpu-theme='mindlink'] .chat-main { grid-template-rows: auto minmax(0, 1fr) auto; }
+  :root[data-yuanpu-theme='mindlink'] .chat-header { position: relative; top: auto; right: auto; left: auto; height: auto; min-height: 56px; padding: 8px 15px; background: transparent; }
+  :root[data-yuanpu-theme='mindlink'] .chat-breadcrumb,
+  :root[data-yuanpu-theme='mindlink'] .chat-rename-preview { display: none; }
+  :root[data-yuanpu-theme='mindlink'] .assistant-channel-state { display: none; }
+  :root[data-yuanpu-theme='mindlink'] .chat-panel.right-panel-maximized .chat-header { position: absolute; z-index: 5; top: 0; right: 0; left: 0; height: 56px; background: var(--yp-app-backdrop); }
+  :root[data-yuanpu-theme='mindlink'] .chat-panel.right-panel-maximized .activity-panel { padding-top: 56px; }
+}
