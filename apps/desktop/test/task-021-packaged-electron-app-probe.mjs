@@ -1,29 +1,38 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { promisify } from 'node:util';
+
+import { SEA_SENTINEL_FUSE } from '../../runtime/scripts/native/lib.mjs';
+
+const execFileAsync = promisify(execFile);
 
 const appBundle = resolve(
   process.env.TASK_021_PACKAGED_APP_PATH || resolve(import.meta.dirname, '../release/mac-arm64/YuanpuAgent.app'),
 );
 const executable = join(appBundle, 'Contents', 'MacOS', 'YuanpuAgent');
 const bundledSea = join(appBundle, 'Contents', 'Resources', 'runtime', 'YuanpuAgentRuntime-darwin-arm64');
+const versionedSeaVersion = '0.1.1-test.021';
 const root = await mkdtemp(join(tmpdir(), 'yuanpu-task-021-packaged-app-'));
 const home = join(root, 'home');
 const userData = join(root, 'user-data');
 const workspace = join(root, 'workspace');
 const apps = [];
 let providerRequests = 0;
+const providerBodies = [];
 const provider = createServer(async (request, response) => {
   if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
     response.writeHead(404).end();
     return;
   }
-  for await (const _chunk of request) { /* Synthetic prompt only. */ }
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  providerBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
   providerRequests += 1;
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({
@@ -50,6 +59,30 @@ async function freePort() {
   const port = server.address().port;
   await new Promise((done) => server.close(done));
   return port;
+}
+
+async function buildVersionedSea() {
+  const source = await readFile(resolve(import.meta.dirname, '../../runtime/dist/index.cjs'), 'utf8');
+  assert.equal(source.split('0.1.0').length - 1, 7,
+    'Unexpected built Runtime version literal count before isolated SEA construction.');
+  const versionedSource = join(root, 'versioned-runtime.cjs');
+  const seaBlob = join(root, 'versioned-runtime.blob');
+  const seaConfig = join(root, 'versioned-sea-config.json');
+  const executable = join(root, 'versioned-runtime');
+  await writeFile(versionedSource, source.replaceAll('0.1.0', versionedSeaVersion));
+  await writeFile(seaConfig, JSON.stringify({
+    main: versionedSource, output: seaBlob, disableExperimentalSEAWarning: true,
+    useCodeCache: false, useSnapshot: false,
+  }));
+  await execFileAsync(process.execPath, ['--experimental-sea-config', seaConfig]);
+  await copyFile(process.execPath, executable);
+  await execFileAsync('codesign', ['--remove-signature', executable]);
+  const postject = resolve(import.meta.dirname, '../../runtime/node_modules/postject/dist/cli.js');
+  await execFileAsync(process.execPath, [postject, executable, 'NODE_SEA_BLOB', seaBlob,
+    '--sentinel-fuse', SEA_SENTINEL_FUSE, '--macho-segment-name', 'NODE_SEA']);
+  await execFileAsync('codesign', ['--sign', '-', '--force', executable]);
+  assert.equal((await execFileAsync(executable, ['--version'])).stdout.trim(), versionedSeaVersion);
+  return executable;
 }
 
 async function cdpSocket(url) {
@@ -194,21 +227,27 @@ try {
   const stagedRoot = join(canonicalUserData, 'runtime', '.staging');
   await mkdir(stagedRoot, { recursive: true });
   const stagedSea = join(stagedRoot, 'runtime');
-  await copyFile(bundledSea, stagedSea);
+  await copyFile(await buildVersionedSea(), stagedSea);
   await writeFile(join(stagedRoot, 'staged.json'), JSON.stringify({
-    version: '0.1.0', filename: 'runtime',
+    version: versionedSeaVersion, filename: 'runtime',
     sha256: createHash('sha256').update(await readFile(stagedSea)).digest('hex'),
   }));
   const second = await start();
   assert.equal(await evaluate(second, 'window.yuanpu.runtimeRecoveryNotice().then((notice) => notice === undefined)'), true);
   assert.equal(await evaluate(second, "document.querySelector('.runtime-recovery-notice') === null"), true);
   const active = JSON.parse(await readFile(join(canonicalUserData, 'runtime', 'current.json'), 'utf8'));
-  assert.equal(active.version, '0.1.0');
-  assert.equal(active.executable, join(canonicalUserData, 'runtime', 'versions', '0.1.0', 'YuanpuAgentRuntime'));
+  assert.equal(active.version, versionedSeaVersion);
+  assert.equal(active.executable, join(canonicalUserData, 'runtime', 'versions', versionedSeaVersion, 'YuanpuAgentRuntime'));
   assert.equal((await evaluate(second, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
   assert.equal((await evaluate(second, `window.yuanpu.getAgentRun(${JSON.stringify(desktopRun.run_id)})`)).status, 'succeeded');
   assert.equal((await evaluate(second, 'window.yuanpu.listWecomConnections()')).connections.length, 1);
   assert.equal(providerRequests, 1);
+  const continuedChat = await evaluate(second, "window.yuanpu.chat('Synthetic packaged continuation')");
+  assert.equal(continuedChat.message.includes('Synthetic packaged reply.'), true);
+  assert.equal(providerRequests, 2);
+  const continuedContext = JSON.stringify(providerBodies[1].messages);
+  assert.equal(continuedContext.includes('Synthetic packaged conversation'), true);
+  assert.equal(continuedContext.includes('Synthetic packaged reply.'), true);
   await eventually(async () => evaluate(second, "Array.from(document.querySelectorAll('.nav-item')).some((button) => button.textContent.includes('定时任务'))"), 'Restarted packaged navigation did not mount.');
   assert.equal(await evaluate(second, "document.querySelector('.runtime-recovery-notice') === null"), true);
   await evaluate(second, "Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('定时任务')).click()");
@@ -218,7 +257,7 @@ try {
   const database = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'), { readOnly: true });
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM yp_schedules').get().count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM yp_conversation_bindings WHERE entry_point = 'desktop'").get().count, 1);
-  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM yp_agent_runs WHERE entry_point = 'desktop' AND status = 'succeeded'").get().count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM yp_agent_runs WHERE entry_point = 'desktop' AND status = 'succeeded'").get().count, 2);
   database.close();
   await stop(second);
 
@@ -277,12 +316,21 @@ try {
   await evaluate(fourth, "document.querySelector('.runtime-recovery-notice button[aria-label=\"关闭 Runtime 更新提示\"]').click()");
   await eventually(async () => evaluate(fourth, "document.querySelector('.runtime-recovery-notice') === null"),
     'Generic Runtime recovery notice could not be dismissed.');
+  const recoveredChat = await evaluate(fourth, "window.yuanpu.chat('Synthetic packaged after rollback')");
+  assert.equal(recoveredChat.message.includes('Synthetic packaged reply.'), true);
+  assert.equal(providerRequests, 3);
+  const recoveredContext = JSON.stringify(providerBodies[2].messages);
+  assert.equal(recoveredContext.includes('Synthetic packaged conversation'), true);
+  assert.equal(recoveredContext.includes('Synthetic packaged continuation'), true);
   await stop(fourth);
   console.log(JSON.stringify({
     status: 'passed', packagedAppLaunches: 4, persistedScheduleVisible: true,
-    stagedSeaConfirmed: true, incompatibleCandidateRolledBack: true,
+    stagedSeaConfirmed: true, versionDistinctSeaConfirmed: true,
+    incompatibleCandidateRolledBack: true,
     visibleIncompatibilityNotice, genericFailureSanitized: true, runtimeChildrenStopped: true,
-    desktopRunAndBindingRetained: true, disabledConnectionRetained: true, providerRequests,
+    desktopRunAndBindingRetained: true, sessionContextContinued: true,
+    rollbackSessionContextContinued: true,
+    disabledConnectionRetained: true, providerRequests,
   }));
 } finally {
   for (const app of apps) {
