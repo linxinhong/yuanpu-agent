@@ -285,6 +285,7 @@ try {
         assert.ok(run.output?.message.includes('UI-036-approved'));
         assert.equal(await renderer.evaluate('Array.from(document.querySelectorAll(".message.assistant .message-body p")).filter(p => p.textContent.includes("UI-036-approved")).length'), 1);
       }
+      if (decision === 'denied') assert.equal(run.output?.tools.some(tool => tool.name === 'execute_capability' && tool.status === 'completed'), false);
       assert.ok((await body()).includes(decision === 'approved' ? '已允许一次' : '已拒绝授权'));
       await shot('live-approval-' + decision);
     }

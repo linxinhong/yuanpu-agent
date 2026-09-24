@@ -338,10 +338,10 @@ export async function createYuanpuChatSession(
         text += event.assistantMessageEvent.delta;
       }
       if (event.type === 'tool_execution_end') {
-        toolStates.set(event.toolName, event.isError ? 'failed' : 'completed');
         const details = event.result?.details as {
           capabilityError?: { error?: unknown; approvalRequestId?: unknown };
         } | undefined;
+        toolStates.set(event.toolName, event.isError || details?.capabilityError ? 'failed' : 'completed');
         if (
           details?.capabilityError?.error === 'needs_approval'
           && typeof details.capabilityError.approvalRequestId === 'string'
