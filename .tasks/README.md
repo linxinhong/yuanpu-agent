@@ -18,3 +18,5 @@ YuanpuAgent 面向桌面工作场景：用户在 Electron 中与 Pi 对话，通
 检索：沿用评审的源码证据，并用 scoped rg 核对 capabilities、packages、Pi 适配及 runtime 装配的确切符号；本会话未提供可用的 ZG 检索入口，未创建索引。证据入口见设计文档“当前事实”。
 
 实施者更新受影响文档与 result.evidence；只有集成并在 main 验证后才能标 done。阶段验收必须由非该阶段主要实现者执行，记录版本、环境、命令及 pass/fail/unverified；无环境不得以构建通过替代验收。当前没有授权自动提交或推送。
+
+2026-09-24 UI 方向：按用户选定的 Muse 浅色三栏预览完成聊天 UI，见[按 Muse 参考框架交付 Yuanpu 聊天 UI（TASK-036）](../docs/frontend/tasks/muse-chat-redesign.md)与[验收证据](../docs/frontend/evidence/task-036/results.md)；状态以注册表为准。
