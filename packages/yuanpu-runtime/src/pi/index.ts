@@ -327,9 +327,13 @@ export async function createYuanpuChatSession(
     if (options.signal?.aborted) throw new DOMException('Agent run was cancelled.', 'AbortError');
     capabilityContext.runId = options.runId;
     let text = '';
+    let modelFailed = false;
     const toolStates = new Map<string, 'completed' | 'failed'>();
     let pendingApprovalRequestId: string | undefined;
     const unsubscribe = session.subscribe((event) => {
+      if (event.type === 'message_end' && event.message.role === 'assistant') {
+        modelFailed = event.message.stopReason === 'error';
+      }
       if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
         text += event.assistantMessageEvent.delta;
       }
@@ -352,6 +356,8 @@ export async function createYuanpuChatSession(
     options.signal?.addEventListener('abort', abort, { once: true });
     try {
       await session.prompt(message);
+      if (options.signal?.aborted) throw new DOMException('Agent run was cancelled.', 'AbortError');
+      if (modelFailed) throw new Error('模型请求失败，请检查模型配置或稍后重试。');
       return {
         message: text.trim() || '完成。',
         tools: [...toolStates].map(([name, status]) => ({ name, status })),

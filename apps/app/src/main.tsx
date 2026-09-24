@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
@@ -24,6 +25,7 @@ import type {
 import { ConnectionManagement, ScheduleManagement } from './management.js';
 
 import './styles.css';
+import './muse-theme.css';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
 type ChatMessage = {
@@ -33,6 +35,44 @@ type ChatMessage = {
   tools?: ToolState[];
 };
 type AppView = 'chat' | 'skills' | 'connections' | 'schedules';
+type ActivityEvent = {
+  id: number;
+  runId: string;
+  title: string;
+  detail?: string;
+  at: string;
+  tone: 'active' | 'done' | 'warning' | 'error';
+};
+
+function runStatusLabel(status: AgentRunRecord['status']): string {
+  return {
+    queued: '等待执行',
+    running: '正在执行',
+    waiting_approval: '等待授权',
+    succeeded: '已完成',
+    failed: '执行失败',
+    cancelled: '已取消',
+    interrupted: '执行中断',
+    result_unknown: '结果未知',
+  }[status];
+}
+
+function activityTime(at: string): string {
+  return new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'send' }) {
+  const paths = {
+    chat: <path d="M20 11.5c0 4.2-3.8 7.5-8.5 7.5-1.4 0-2.7-.3-3.8-.8L3 20l1.4-4.1A7.2 7.2 0 0 1 3 11.5C3 7.4 6.8 4 11.5 4S20 7.4 20 11.5Z" />,
+    skills: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><path d="M17 13.5v7m-3.5-3.5h7" /></>,
+    connections: <><path d="m9 15-2 2a3.2 3.2 0 0 1-4.5-4.5l4-4A3.2 3.2 0 0 1 11 8" /><path d="m15 9 2-2a3.2 3.2 0 0 1 4.5 4.5l-4 4A3.2 3.2 0 0 1 13 16" /><path d="m8.5 15.5 7-7" /></>,
+    schedules: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.4 2" /></>,
+    menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
+    panel: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>,
+    send: <><path d="M12 19V5m-5 5 5-5 5 5" /></>,
+  } satisfies Record<AppView | 'menu' | 'panel' | 'send', ReactNode>;
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
 
 function privateImDeliveryLabel(status: PrivateImRunSummary['replyDeliveryStatus']): string {
   return {
@@ -850,19 +890,74 @@ function ChatPanel({
   const [runtime, setRuntime] = useState({ connected: false, piVersion: '—' });
   const [approvals, setApprovals] = useState<CapabilityApprovalSummary[]>([]);
   const [approvalBusy, setApprovalBusy] = useState<string>();
+  const [readyApprovals, setReadyApprovals] = useState<Set<string>>(new Set());
+  const resolvedApprovals = useRef(new Set<string>());
+  const [locationRetry, setLocationRetry] = useState(0);
   const [locatedRun, setLocatedRun] = useState<AgentRunRecord | 'loading' | 'error'>();
   const [privateImSummary, setPrivateImSummary] = useState<PrivateImRunSummary | 'loading'>();
   const [activeRunId, setActiveRunId] = useState<string>();
   const [activeRunStatus, setActiveRunStatus] = useState<AgentRunRecord['status']>();
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(() => window.innerWidth > 1100);
+  const [activityTab, setActivityTab] = useState<'activity' | 'run'>('activity');
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
+  const [lastRun, setLastRun] = useState<AgentRunRecord>();
+  const [runRecovery, setRunRecovery] = useState<{ runId: string; text: string }>();
+  const [bridgeError, setBridgeError] = useState(false);
+  const sending = useRef(false);
+  const settledRuns = useRef(new Map<string, AgentRunRecord>());
+  const activityDialog = useRef<HTMLDialogElement>(null);
+  const activityToggle = useRef<HTMLButtonElement>(null);
+  const restoreActivityFocus = useRef(false);
+  const nextActivityId = useRef(1);
   const nextId = useRef(2);
   const conversation = useRef<HTMLDivElement>(null);
   const desktop = window.yuanpu;
 
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 1100px)');
+    const compact = window.matchMedia('(max-width: 780px)');
+    const handleWidthChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setActivityOpen(false);
+    };
+    narrow.addEventListener('change', handleWidthChange);
+    compact.addEventListener('change', handleWidthChange);
+    return () => {
+      narrow.removeEventListener('change', handleWidthChange);
+      compact.removeEventListener('change', handleWidthChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const dialog = activityDialog.current;
+    if (activityOpen && active && dialog) {
+      if (window.matchMedia('(max-width: 1100px)').matches) dialog.showModal();
+      else dialog.open = true;
+      return () => dialog.close();
+    }
+    if (!activityOpen && active && restoreActivityFocus.current) {
+      activityToggle.current?.focus();
+      restoreActivityFocus.current = false;
+    }
+  }, [activityOpen, active]);
+
+  function recordActivity(runId: string, title: string, tone: ActivityEvent['tone'], detail?: string, at = new Date().toISOString()) {
+    const event = { id: nextActivityId.current++, runId, title, tone, detail, at };
+    setActivityEvents((current) => [...current, event]);
+  }
+
   async function refreshApprovals() {
     if (!desktop) return [];
     const pendingApprovals = await desktop.listCapabilityApprovals();
-    setApprovals(pendingApprovals);
+    const ready = await Promise.all(pendingApprovals.map(async (approval) => {
+      if (!approval.runId) return approval.requestId;
+      const run = await desktop.getAgentRun(approval.runId);
+      return run.status === 'waiting_approval' && run.pendingApproval?.approvalRequestId === approval.requestId
+        ? approval.requestId : undefined;
+    }));
+    setBridgeError(false);
+    setReadyApprovals(new Set(ready.filter((id): id is string => Boolean(id))));
+    setApprovals(pendingApprovals.filter((approval) => !resolvedApprovals.current.has(approval.requestId)));
     return pendingApprovals;
   }
 
@@ -875,8 +970,9 @@ function ChatPanel({
 
   useEffect(() => {
     if (!desktop || !active) return;
-    void refreshApprovals();
-    const timer = window.setInterval(() => void refreshApprovals(), 1_500);
+    const refresh = () => void refreshApprovals().catch(() => setBridgeError(true));
+    refresh();
+    const timer = window.setInterval(refresh, 1_500);
     return () => window.clearInterval(timer);
   }, [desktop, active]);
 
@@ -899,15 +995,18 @@ function ChatPanel({
       () => { if (!cancelled) setPrivateImSummary(undefined); },
     );
     return () => { cancelled = true; };
-  }, [desktop, navigationTarget?.runId]);
+  }, [desktop, navigationTarget?.runId, locationRetry]);
 
   useEffect(() => {
     if (!desktop || !active || !navigationTarget?.runId || !locatedRun || typeof locatedRun === 'string') return;
     if (['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(locatedRun.status)) return;
+    let stale = false;
     const timer = window.setInterval(() => {
-      void desktop.getAgentRun(navigationTarget.runId!).then(setLocatedRun).catch(() => setLocatedRun('error'));
+      void desktop.getAgentRun(navigationTarget.runId!).then((run) => {
+        if (!stale) setLocatedRun(settledRuns.current.get(run.runId) ?? run);
+      }).catch(() => { if (!stale) setLocatedRun('error'); });
     }, 1_200);
-    return () => window.clearInterval(timer);
+    return () => { stale = true; window.clearInterval(timer); };
   }, [desktop, active, navigationTarget?.runId, locatedRun]);
 
   useEffect(() => {
@@ -929,51 +1028,85 @@ function ChatPanel({
     }
   }, [navigationTarget?.runId, locatedRun]);
 
+  async function observeRun(runId: string, text: string) {
+    if (!desktop) return;
+    let lastSeenStatus: AgentRunRecord['status'] | undefined;
+    try {
+      while (true) {
+        const fetched = await desktop.getAgentRun(runId);
+        const run = settledRuns.current.get(runId) ?? fetched;
+        const terminal = ['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(run.status);
+        if (terminal) settledRuns.current.set(runId, run);
+        setLastRun(run);
+        setActiveRunStatus(run.status);
+        if (run.status !== lastSeenStatus) {
+          const tone: ActivityEvent['tone'] = run.status === 'succeeded' ? 'done'
+            : ['failed', 'interrupted', 'result_unknown'].includes(run.status) ? 'error'
+              : ['waiting_approval', 'cancelled'].includes(run.status) ? 'warning' : 'active';
+          recordActivity(run.runId, runStatusLabel(run.status), tone, run.failure?.message, run.updatedAt);
+          lastSeenStatus = run.status;
+        }
+        if (terminal) {
+          run.output?.tools.forEach((tool) => recordActivity(run.runId,
+            tool.status === 'completed' ? '工具调用完成' : '工具调用失败',
+            tool.status === 'completed' ? 'done' : 'error', tool.name, run.updatedAt));
+          setMessages((current) => [...current, {
+            id: nextId.current++, role: run.status === 'succeeded' ? 'assistant' : 'error',
+            text: run.status === 'succeeded' ? run.output?.message ?? '任务已完成；可在运行记录中查看结果。'
+              : run.failure?.message ?? `任务结束：${runStatusLabel(run.status)}`,
+            tools: run.output?.tools.map((tool) => ({ name: tool.name, status: tool.status })),
+          }]);
+          if (run.status !== 'succeeded') setInput((current) => current || text);
+          setRunRecovery(undefined);
+          setActiveRunId(undefined);
+          setActiveRunStatus(undefined);
+          return;
+        }
+        await new Promise((resolveWait) => window.setTimeout(resolveWait, 900));
+      }
+    } catch (error) {
+      // The accepted run may still be executing. Resume observation, never resubmit it.
+      setRunRecovery({ runId, text });
+      recordActivity(runId, '状态获取失败', 'error', formatError(error));
+    }
+  }
+
+  async function resumeRun() {
+    if (!runRecovery || sending.current) return;
+    sending.current = true;
+    setBusy(true);
+    try { await observeRun(runRecovery.runId, runRecovery.text); }
+    finally { sending.current = false; setBusy(false); }
+  }
+
   async function sendMessage() {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || sending.current || runRecovery) return;
+    sending.current = true;
     setMessages((current) => [...current, { id: nextId.current++, role: 'user', text }]);
     setInput('');
     setBusy(true);
+    setLastRun(undefined);
+    setActiveRunStatus(undefined);
     try {
       if (!desktop) {
-        const result = {
-            message: '这是浏览器预览回复。通过 Electron 启动后，消息会交给 Pi coding-agent。',
-            tools: text.toLowerCase().includes('echo')
-              ? [{ name: 'yuanpu.echo', status: 'completed' as const }]
-              : [],
-          };
-        setMessages((current) => [...current, { id: nextId.current++, role: 'assistant', text: result.message, tools: result.tools }]);
+        setMessages((current) => [...current, { id: nextId.current++, role: 'assistant',
+          text: '这是浏览器预览回复。通过 Electron 启动后，消息会交给 Pi coding-agent。' }]);
       } else {
         const receipt = await desktop.submitDesktopMessage(text);
         setActiveRunId(receipt.runId);
-        let terminal = false;
-        while (!terminal) {
-          const run = await desktop.getAgentRun(receipt.runId);
-          setActiveRunStatus(run.status);
-          terminal = ['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(run.status);
-          if (terminal) {
-            setMessages((current) => [...current, {
-              id: nextId.current++,
-              role: run.status === 'succeeded' ? 'assistant' : 'error',
-              text: run.status === 'succeeded'
-                ? run.output?.message ?? '任务已完成；可在运行记录中查看结果。'
-                : run.failure?.message ?? `任务结束：${run.status}`,
-              tools: run.output?.tools.map((tool) => ({ name: tool.name, status: tool.status })),
-            }]);
-          } else {
-            await new Promise((resolveWait) => window.setTimeout(resolveWait, 900));
-          }
-        }
+        setActiveRunStatus(receipt.status);
+        recordActivity(receipt.runId, '已提交任务', 'done');
+        await observeRun(receipt.runId, text);
       }
     } catch (error) {
       setMessages((current) => [...current, { id: nextId.current++, role: 'error', text: formatError(error) }]);
-      setInput(text);
+      recordActivity('submission', '提交失败', 'error', formatError(error));
+      setInput((current) => current || text);
     } finally {
-      await refreshApprovals().catch(() => []);
-      setActiveRunId(undefined);
-      setActiveRunStatus(undefined);
+      sending.current = false;
       setBusy(false);
+      void refreshApprovals().catch(() => setBridgeError(true));
     }
   }
 
@@ -983,9 +1116,12 @@ function ChatPanel({
     try {
       const receipt = await desktop.cancelAgentRun(runId);
       if (receipt.result === 'not_found') throw new Error('任务不可用或无权取消。');
-      if (navigationTarget?.runId === runId) {
-        setLocatedRun(await desktop.getAgentRun(runId));
+      const run = await desktop.getAgentRun(runId);
+      if (['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(run.status)) {
+        settledRuns.current.set(runId, run);
       }
+      if (navigationTarget?.runId === runId) setLocatedRun(run);
+      if (runRecovery?.runId === runId) await resumeRun();
     } catch (error) {
       setMessages((current) => [...current, { id: nextId.current++, role: 'error', text: `取消失败：${formatError(error)}` }]);
     } finally {
@@ -997,17 +1133,25 @@ function ChatPanel({
     approval: CapabilityApprovalSummary,
     decision: 'approved' | 'denied',
   ) {
-    if (!desktop || approvalBusy) return;
+    if (!desktop || approvalBusy || !readyApprovals.has(approval.requestId)) return;
     setApprovalBusy(approval.requestId);
     try {
       const result = await desktop.decideCapabilityApproval(approval.requestId, decision);
+      resolvedApprovals.current.add(approval.requestId);
       setApprovals((current) => current.filter((item) => item.requestId !== approval.requestId));
+      if (approval.runId && [activeRunId, lastRun?.runId, navigationTarget?.runId].includes(approval.runId)) {
+        recordActivity(approval.runId, decision === 'approved' ? '已允许一次' : '已拒绝授权', decision === 'approved' ? 'done' : 'warning', approval.capabilityId);
+      }
       if (decision === 'denied') {
         setMessages((current) => [...current, {
           id: nextId.current++,
           role: 'assistant',
           text: `已拒绝能力 ${approval.capabilityId} 的本次调用，没有执行外部操作。`,
         }]);
+        return;
+      }
+      if (approval.runId === activeRunId) {
+        await refreshApprovals();
         return;
       }
       setMessages((current) => [...current, {
@@ -1023,137 +1167,208 @@ function ChatPanel({
         text: `审批处理失败：${formatError(error)}`,
       }]);
     } finally {
-      setBusy(false);
       setApprovalBusy(undefined);
     }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       void sendMessage();
     }
   }
 
+  const visibleRun = navigationTarget?.runId
+    ? (locatedRun && typeof locatedRun !== 'string' ? locatedRun : undefined)
+    : lastRun;
+  const currentStatus = visibleRun?.status ?? (navigationTarget?.runId ? undefined : activeRunStatus);
+  const visibleEvents = navigationTarget?.runId
+    ? activityEvents.filter((event) => event.runId === navigationTarget.runId)
+    : activityEvents;
+
   return (
-    <section className={`chat-panel ${active ? '' : 'view-hidden'}`} aria-hidden={!active}>
-      <header className="chat-header">
-        <div className="runtime-state">
-          <span className={`status-dot ${runtime.connected ? 'online' : ''}`} />
-          <div>
-            <strong>{runtime.connected ? '本地 Runtime 已连接' : desktop ? '正在连接 Runtime' : '浏览器预览模式'}</strong>
-            <span>{runtime.connected ? '对话仅在本机处理' : 'Electron 中启用真实 Pi 对话'}</span>
+    <section className={`chat-panel ${activityOpen ? 'activity-open' : 'activity-closed'} ${active ? '' : 'view-hidden'}`} aria-hidden={!active}>
+      <div className="chat-main">
+        <header className="chat-header">
+          <div className="chat-heading">
+            <span className="chat-title-pill"><AppIcon name="menu" />聊天</span>
+            <div className="runtime-state">
+              <span className={`status-dot ${runtime.connected ? 'online' : ''}`} />
+              <div>
+                <strong>{bridgeError ? 'Runtime 连接中断' : runtime.connected ? '本地 Runtime 已连接' : desktop ? '正在连接 Runtime' : '浏览器预览模式'}</strong>
+                <span>{runtime.connected ? '由本地助手调用已配置模型' : 'Electron 中启用真实 Pi 对话'}</span>
+              </div>
+            </div>
+          </div>
+          <div className="runtime-meta">
+            <span>Pi {runtime.piVersion}</span>
+            <span className="mcp-count">2 个 MCP 元工具</span>
+            {navigationTarget && (
+              <span role="status">
+                {locatedRun === 'loading' || (locatedRun === 'error' && privateImSummary === 'loading')
+                  ? '正在加载任务记录…'
+                  : privateImSummary && privateImSummary !== 'loading'
+                    ? `企业微信 · ${privateImSummary.runStatus} · ${privateImDeliveryLabel(privateImSummary.replyDeliveryStatus)}`
+                  : locatedRun === 'error'
+                    ? '任务记录不可用'
+                    : locatedRun
+                      ? `${locatedRun.owner.entryPoint === 'scheduler' ? '定时任务' : locatedRun.owner.entryPoint === 'im' ? '企业微信' : '桌面'} · ${locatedRun.status} · 会话 ${locatedRun.context.conversation.conversationId}`
+                      : `已定位会话 ${navigationTarget.conversationId}`}
+              </span>
+            )}
+            {locatedRun === 'error' && <button type="button" className="runtime-link" onClick={() => setLocationRetry((value) => value + 1)}>重新获取任务</button>}
+            {scheduleOrigin && <button type="button" className="runtime-link" onClick={onReturnToSchedules}>返回定时任务</button>}
+            {locatedRun && typeof locatedRun !== 'string' && ['queued', 'running', 'waiting_approval'].includes(locatedRun.status) && locatedRun.owner.entryPoint !== 'im' && (
+              <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(locatedRun.runId)}>取消运行</button>
+            )}
+            <button ref={activityToggle} hidden={activityOpen} type="button" className="panel-toggle" aria-label="打开会话动态" onClick={() => { restoreActivityFocus.current = true; setActivityOpen(true); }}><AppIcon name="panel" /></button>
+          </div>
+        </header>
+
+        <div className="conversation" ref={conversation} aria-live="polite">
+          <div className="conversation-inner">
+            {locatedRun && typeof locatedRun !== 'string' && (
+              <article className="located-run-card">
+                <div className="approval-heading"><span>运行详情</span><strong>{locatedRun.owner.entryPoint === 'scheduler' ? '定时任务' : locatedRun.owner.entryPoint === 'im' ? '企业微信会话' : '桌面对话'}</strong></div>
+                <dl>
+                  <div><dt>运行状态</dt><dd>{locatedRun.status}</dd></div>
+                  {locatedRun.owner.entryPoint === 'im' && <div><dt>回复投递</dt><dd>{privateImSummary && privateImSummary !== 'loading' ? privateImDeliveryLabel(privateImSummary.replyDeliveryStatus) : '状态暂不可用'}</dd></div>}
+                  <div><dt>会话</dt><dd>{locatedRun.context.conversation.conversationId}</dd></div>
+                  <div><dt>工作区</dt><dd>{locatedRun.context.workspaceId}</dd></div>
+                </dl>
+                {locatedRun.output?.message && <p>{locatedRun.output.message}</p>}
+                {locatedRun.failure && <p role="alert">{locatedRun.failure.message}</p>}
+                {scheduleOrigin && <button type="button" className="runtime-link" onClick={onReturnToSchedules}>返回关联定时任务</button>}
+              </article>
+            )}
+            {locatedRun === 'error' && privateImSummary && privateImSummary !== 'loading' && (
+              <article className="located-run-card">
+                <div className="approval-heading"><span>运行详情</span><strong>企业微信私聊</strong></div>
+                <dl>
+                  <div><dt>运行状态</dt><dd>{privateImSummary.runStatus}</dd></div>
+                  <div><dt>回复投递</dt><dd>{privateImDeliveryLabel(privateImSummary.replyDeliveryStatus)}</dd></div>
+                </dl>
+              </article>
+            )}
+            {messages.map((message) => (
+              <article key={message.id} className={`message ${message.role}`}>
+                <div className="message-label">
+                  {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
+                </div>
+                <div className="message-body">
+                  <p>{message.text}</p>
+                  {message.tools?.map((tool) => (
+                    <div className={`tool-event ${tool.status}`} key={`${message.id}-${tool.name}`}>
+                      <span className="tool-check">{tool.status === 'completed' ? '✓' : '!'}</span>
+                      <span>调用 MCP</span><code>{tool.name}</code>
+                      <small>{tool.status === 'completed' ? '已完成' : '失败'}</small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+            {approvals.map((approval) => (
+              <article className="approval-card" key={approval.requestId}>
+                <div className="approval-heading">
+                  <span>待确认</span>
+                  <strong>外部能力请求一次性授权</strong>
+                </div>
+                <dl>
+                  <div><dt>能力</dt><dd>{approval.capabilityId}</dd></div>
+                  <div><dt>来源</dt><dd>{approval.sourceInstanceId}</dd></div>
+                  <div><dt>版本</dt><dd>{approval.packageVersion ?? '未声明'}</dd></div>
+                  <div><dt>参数摘要</dt><dd><code>{approval.argumentsDigest.slice(0, 16)}…</code></dd></div>
+                </dl>
+                <p>允许只对当前会话、当前参数和当前版本生效一次；刷新或重放不会复用。</p>
+                <div className="approval-actions">
+                  <button type="button" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'denied')}>拒绝</button>
+                  <button type="button" className="primary" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'approved')}>
+                    {approvalBusy === approval.requestId ? '处理中…' : !readyApprovals.has(approval.requestId) ? '正在准备授权…' : '允许一次'}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {busy && (
+              <article className="message assistant pending">
+                <div className="message-label">YuanpuAgent</div>
+                <div className="thinking"><span /><span /><span /> {activeRunStatus === 'waiting_approval' ? '等待授权' : 'Pi 正在处理'}{activeRunId && <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(activeRunId)}>取消任务</button>}</div>
+              </article>
+            )}
           </div>
         </div>
-        <div className="runtime-meta">
-          <span>Pi {runtime.piVersion}</span>
-          <span className="mcp-count">2 个 MCP 元工具</span>
-          {navigationTarget && (
-            <span role="status">
-              {locatedRun === 'loading' || (locatedRun === 'error' && privateImSummary === 'loading')
-                ? '正在加载任务记录…'
-                : privateImSummary && privateImSummary !== 'loading'
-                  ? `企业微信 · ${privateImSummary.runStatus} · ${privateImDeliveryLabel(privateImSummary.replyDeliveryStatus)}`
-                : locatedRun === 'error'
-                  ? '任务记录不可用'
-                  : locatedRun
-                    ? `${locatedRun.owner.entryPoint === 'scheduler' ? '定时任务' : locatedRun.owner.entryPoint === 'im' ? '企业微信' : '桌面'} · ${locatedRun.status} · 会话 ${locatedRun.context.conversation.conversationId}`
-                    : `已定位会话 ${navigationTarget.conversationId}`}
-            </span>
-          )}
-          {scheduleOrigin && <button type="button" className="runtime-link" onClick={onReturnToSchedules}>返回定时任务</button>}
-          {locatedRun && typeof locatedRun !== 'string' && ['queued', 'running', 'waiting_approval'].includes(locatedRun.status) && locatedRun.owner.entryPoint !== 'im' && (
-            <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(locatedRun.runId)}>取消运行</button>
-          )}
-        </div>
-      </header>
 
-      <div className="conversation" ref={conversation} aria-live="polite">
-        <div className="conversation-inner">
-          {locatedRun && typeof locatedRun !== 'string' && (
-            <article className="located-run-card">
-              <div className="approval-heading"><span>运行详情</span><strong>{locatedRun.owner.entryPoint === 'scheduler' ? '定时任务' : locatedRun.owner.entryPoint === 'im' ? '企业微信会话' : '桌面对话'}</strong></div>
-              <dl>
-                <div><dt>运行状态</dt><dd>{locatedRun.status}</dd></div>
-                {locatedRun.owner.entryPoint === 'im' && <div><dt>回复投递</dt><dd>{privateImSummary && privateImSummary !== 'loading' ? privateImDeliveryLabel(privateImSummary.replyDeliveryStatus) : '状态暂不可用'}</dd></div>}
-                <div><dt>会话</dt><dd>{locatedRun.context.conversation.conversationId}</dd></div>
-                <div><dt>工作区</dt><dd>{locatedRun.context.workspaceId}</dd></div>
-              </dl>
-              {locatedRun.output?.message && <p>{locatedRun.output.message}</p>}
-              {locatedRun.failure && <p role="alert">{locatedRun.failure.message}</p>}
-              {scheduleOrigin && <button type="button" className="runtime-link" onClick={onReturnToSchedules}>返回关联定时任务</button>}
-            </article>
-          )}
-          {locatedRun === 'error' && privateImSummary && privateImSummary !== 'loading' && (
-            <article className="located-run-card">
-              <div className="approval-heading"><span>运行详情</span><strong>企业微信私聊</strong></div>
-              <dl>
-                <div><dt>运行状态</dt><dd>{privateImSummary.runStatus}</dd></div>
-                <div><dt>回复投递</dt><dd>{privateImDeliveryLabel(privateImSummary.replyDeliveryStatus)}</dd></div>
-              </dl>
-            </article>
-          )}
-          {messages.map((message) => (
-            <article key={message.id} className={`message ${message.role}`}>
-              <div className="message-label">
-                {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
-              </div>
-              <div className="message-body">
-                <p>{message.text}</p>
-                {message.tools?.map((tool) => (
-                  <div className={`tool-event ${tool.status}`} key={`${message.id}-${tool.name}`}>
-                    <span className="tool-check">{tool.status === 'completed' ? '✓' : '!'}</span>
-                    <span>调用 MCP</span><code>{tool.name}</code>
-                    <small>{tool.status === 'completed' ? '已完成' : '失败'}</small>
-                  </div>
-                ))}
-              </div>
-            </article>
-          ))}
-          {approvals.map((approval) => (
-            <article className="approval-card" key={approval.requestId}>
-              <div className="approval-heading">
-                <span>待确认</span>
-                <strong>外部能力请求一次性授权</strong>
-              </div>
-              <dl>
-                <div><dt>能力</dt><dd>{approval.capabilityId}</dd></div>
-                <div><dt>来源</dt><dd>{approval.sourceInstanceId}</dd></div>
-                <div><dt>版本</dt><dd>{approval.packageVersion ?? '未声明'}</dd></div>
-                <div><dt>参数摘要</dt><dd><code>{approval.argumentsDigest.slice(0, 16)}…</code></dd></div>
-              </dl>
-              <p>允许只对当前会话、当前参数和当前版本生效一次；刷新或重放不会复用。</p>
-              <div className="approval-actions">
-                <button type="button" disabled={Boolean(approvalBusy)} onClick={() => void decideApproval(approval, 'denied')}>拒绝</button>
-                <button type="button" className="primary" disabled={Boolean(approvalBusy)} onClick={() => void decideApproval(approval, 'approved')}>
-                  {approvalBusy === approval.requestId ? '处理中…' : '允许一次'}
-                </button>
-              </div>
-            </article>
-          ))}
-          {busy && (
-            <article className="message assistant pending">
-              <div className="message-label">YuanpuAgent</div>
-              <div className="thinking"><span /><span /><span /> {activeRunStatus === 'waiting_approval' ? '等待授权' : 'Pi 正在处理'}{activeRunId && <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(activeRunId)}>取消任务</button>}</div>
-            </article>
-          )}
+        <div className="composer-wrap">
+          {bridgeError && <p role="status">暂时无法读取授权状态，正在重连…</p>}
+          {runRecovery && <div className="run-recovery" role="alert">
+            <span>无法获取任务状态。任务可能仍在执行，请恢复查看后再发送。</span>
+            <button type="button" disabled={busy} onClick={() => void resumeRun()}>重新获取状态</button>
+            <button type="button" disabled={cancelBusy || busy} onClick={() => void cancelRun(runRecovery.runId)}>取消任务</button>
+          </div>}
+          <div className="composer">
+            <textarea
+              aria-label="消息"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="向 YuanpuAgent 发送消息…"
+              rows={1}
+            />
+            <button type="button" onClick={() => void sendMessage()} disabled={!input.trim() || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>
+          </div>
+          <p>Enter 发送 · Shift + Enter 换行 · 配置模型与密钥后即可开始</p>
         </div>
       </div>
-
-      <div className="composer-wrap">
-        <div className="composer">
-          <textarea
-            aria-label="消息"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="向 YuanpuAgent 发送消息…"
-            rows={1}
-          />
-          <button type="button" onClick={() => void sendMessage()} disabled={!input.trim() || busy}>发送</button>
-        </div>
-        <p>Enter 发送 · Shift + Enter 换行 · 配置模型与密钥后即可开始</p>
-      </div>
+      {activityOpen && (
+        <dialog ref={activityDialog} className="activity-panel" aria-label="当前会话动态" onCancel={() => setActivityOpen(false)}>
+          <button type="button" className="activity-close" aria-label="收起会话动态" onClick={() => { restoreActivityFocus.current = true; setActivityOpen(false); }}>×</button>
+          <div className="assistant-profile">
+            <div className="assistant-avatar" aria-hidden="true">源</div>
+            <strong>Yuanpu Agent</strong>
+            <span>你的本地工作助手</span>
+          </div>
+          <div className="activity-tabs" role="group" aria-label="会话信息">
+            <button type="button" aria-pressed={activityTab === 'activity'} onClick={() => setActivityTab('activity')}>动态</button>
+            <button type="button" aria-pressed={activityTab === 'run'} onClick={() => setActivityTab('run')}>运行</button>
+          </div>
+          {activityTab === 'activity' ? (
+            <div className="activity-content">
+              <div className="activity-section-heading">
+                <h2>当前会话</h2>
+                <span>{currentStatus ? runStatusLabel(currentStatus) : '等待新任务'}</span>
+              </div>
+              {visibleRun && <div className={`activity-current ${visibleRun.status}`}>
+                <span className="activity-current-dot" />
+                <div><strong>{runStatusLabel(visibleRun.status)}</strong><small>{visibleRun.owner.entryPoint === 'scheduler' ? '定时任务' : visibleRun.owner.entryPoint === 'im' ? '企业微信任务' : '桌面对话任务'}</small></div>
+                <time>{activityTime(visibleRun.updatedAt)}</time>
+              </div>}
+              <h3>活动记录</h3>
+              {visibleEvents.length > 0 ? (
+                <ol className="activity-list">
+                  {[...visibleEvents].reverse().map((event) => <li className={`activity-item ${event.tone}`} key={event.id}>
+                    <span className="activity-symbol" aria-hidden="true">{event.tone === 'done' ? '✓' : event.tone === 'error' ? '!' : event.tone === 'warning' ? '·' : '••'}</span>
+                    <div><strong>{event.title}</strong>{event.detail && <small>{event.detail}</small>}<time>{activityTime(event.at)}</time></div>
+                  </li>)}
+                </ol>
+              ) : visibleRun ? (
+                <div className="activity-empty"><strong>{runStatusLabel(visibleRun.status)}</strong><span>该任务的详细过程暂无记录。</span></div>
+              ) : (
+                <div className="activity-empty"><strong>还没有运行记录</strong><span>发送消息后，当前会话的任务状态会显示在这里。</span></div>
+              )}
+            </div>
+          ) : (
+            <div className="activity-content">
+              <h2>最近一次运行</h2>
+              {visibleRun ? <dl className="activity-run-facts">
+                <div><dt>状态</dt><dd>{runStatusLabel(visibleRun.status)}</dd></div>
+                <div><dt>来源</dt><dd>{visibleRun.owner.entryPoint === 'scheduler' ? '定时任务' : visibleRun.owner.entryPoint === 'im' ? '企业微信' : '桌面'}</dd></div>
+                <div><dt>开始</dt><dd>{new Date(visibleRun.createdAt).toLocaleString('zh-CN')}</dd></div>
+                <div><dt>更新</dt><dd>{new Date(visibleRun.updatedAt).toLocaleString('zh-CN')}</dd></div>
+                <div><dt>运行 ID</dt><dd><code>{visibleRun.runId}</code></dd></div>
+              </dl> : <div className="activity-empty"><strong>还没有运行记录</strong><span>任务提交后可在这里查看状态与时间。</span></div>}
+            </div>
+          )}
+        </dialog>
+      )}
     </section>
   );
 }
@@ -1186,55 +1401,53 @@ function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
+        <div className="window-controls-space" aria-hidden="true">
+          {!window.yuanpu && <div className="window-controls-preview"><span /><span /><span /></div>}
+        </div>
         <div className="brand">
           <div className="brand-mark">源</div>
-          <div><strong>YUANPU AGENT</strong><span>本地工作助手</span></div>
         </div>
 
         <nav className="sidebar-nav" aria-label="主导航">
           <button
             className={`nav-item ${view === 'chat' ? 'active' : ''}`}
             type="button"
+            aria-label="聊天"
             aria-current={view === 'chat' ? 'page' : undefined}
             onClick={() => setView('chat')}
           >
-            <span className="conversation-icon" aria-hidden="true" />
-            <span><strong>新对话</strong><small>当前会话</small></span>
+            <AppIcon name="chat" /><span className="nav-label">聊天</span>
           </button>
           <button
             className={`nav-item ${view === 'skills' ? 'active' : ''}`}
             type="button"
+            aria-label="技能"
             aria-current={view === 'skills' ? 'page' : undefined}
             onClick={() => setView('skills')}
           >
-            <span className="plugin-icon" aria-hidden="true">+</span>
-            <span><strong>技能</strong><small>扩展工作能力</small></span>
+            <AppIcon name="skills" /><span className="nav-label">技能</span>
           </button>
           <button
             className={`nav-item ${view === 'connections' ? 'active' : ''}`}
             type="button"
+            aria-label="连接"
             aria-current={view === 'connections' ? 'page' : undefined}
             onClick={() => setView('connections')}
           >
-            <span className="connection-icon" aria-hidden="true">◇</span>
-            <span><strong>连接</strong><small>连接数据与服务</small></span>
+            <AppIcon name="connections" /><span className="nav-label">连接</span>
           </button>
           <button
             className={`nav-item ${view === 'schedules' ? 'active' : ''}`}
             type="button"
+            aria-label="定时任务"
             aria-current={view === 'schedules' ? 'page' : undefined}
             onClick={() => setView('schedules')}
           >
-            <span className="schedule-icon" aria-hidden="true">◷</span>
-            <span><strong>定时任务</strong><small>自动执行的任务</small></span>
+            <AppIcon name="schedules" /><span className="nav-label">定时任务</span>
           </button>
         </nav>
 
-        <div className="sidebar-footer">
-          <span className="footer-label">配置目录</span>
-          <code title={configRoot}>{configRoot}</code>
-          <span className="route-note">Renderer → Electron → SEA</span>
-        </div>
+        <div className="sidebar-footer" role="note" title={`配置目录：${configRoot}`} aria-label={`配置目录：${configRoot}`} />
       </aside>
 
       {runtimeRecoveryNotice && (

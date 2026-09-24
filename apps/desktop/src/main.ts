@@ -56,7 +56,8 @@ function createWindow(): void {
     height: 760,
     minWidth: 800,
     minHeight: 560,
-    backgroundColor: '#0d1117',
+    backgroundColor: '#ffffff',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     title: 'Yuanpu Agent',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),

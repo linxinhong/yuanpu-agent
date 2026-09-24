@@ -120,3 +120,24 @@ test('custom OpenAI-compatible model config is materialized outside Pi upstream 
   assert.equal(models.providers.custom.models[0].id, 'LongCat-2.0');
   assert.equal(models.providers.custom.apiKey, '$LONGCAT_API_KEY');
 });
+
+test('model HTTP failure rejects the prompt instead of returning a false completion', async (context) => {
+  const { createServer } = await import('node:http');
+  const server = createServer((request, response) => {
+    request.resume();
+    response.writeHead(400, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: 'private-provider-diagnostic' } }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
+  const agentDir = await mkdtemp(join(tmpdir(), 'yuanpu-pi-failure-'));
+  context.after(() => rm(agentDir, { recursive: true, force: true }));
+  const chat = await createYuanpuChatSession({
+    capabilityClient: { async search() { return { matches: [] }; }, async execute() { throw new Error('not used'); } },
+    agentDir, cwd: agentDir, provider: 'failure-fixture', model: 'fixture',
+    apiKey: 'fixture-only', apiKeyEnv: 'YUANPU_TEST_FIXTURE_KEY',
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions',
+  });
+  context.after(() => chat.dispose());
+  await assert.rejects(chat.prompt('Synthetic test message'), { message: '模型请求失败，请检查模型配置或稍后重试。' });
+});
