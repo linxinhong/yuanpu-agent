@@ -1,0 +1,59 @@
+name: TASK-021 Packaged App Verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packaged-app:
+    name: Packaged App (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+          - os: windows-2022
+            target: win32-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.4.25'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-pnpmfile
+
+      - name: Build packaged App
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm package:desktop
+
+      - name: Verify packaged App on Linux
+        if: matrix.target == 'linux-x64'
+        run: xvfb-run -a node apps/desktop/test/task-021-platform-app-probe.mjs
+
+      - name: Verify packaged App on Windows
+        if: matrix.target == 'win32-x64'
+        run: node apps/desktop/test/task-021-platform-app-probe.mjs
