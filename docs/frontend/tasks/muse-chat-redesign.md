@@ -2,9 +2,9 @@
 
 ## 决定与交付边界
 
-2026-09-24，用户查看当前浏览器预览后要求“先按这个 UI 进行修改，新建开发卡”。沿用已选 Muse 框架：左侧窄导航、中央聊天与底部输入、右侧可收起会话面板；细节使用 Yuanpu 标识并按真实能力打磨。本次建立开发卡，未将已有草稿认定为正式交付。
+2026-09-24，用户查看当前浏览器预览后要求“先按这个 UI 进行修改，新建开发卡”。沿用已选 Muse 框架：左侧窄导航、中央聊天与底部输入、右侧可收起会话面板；细节使用 Yuanpu 标识并按真实能力打磨。本卡接续既有草稿并完成真实桥接验收。
 
-[既有交互方案与验证记录](../../../.tasks/ui/muse-chat-redesign/proposal.md)保留完整设计来源；[当前实现基线](../../../.tasks/ui/muse-chat-redesign/images/implemented-chat-1440.png)是本轮直接参考，[生成设计](../../../.tasks/ui/muse-chat-redesign/images/design-v001.png)仅用于视觉方向。上述本地图片目前被忽略规则排除；实施交付需保存可持续审阅的脱敏证据。即使图片不可用，本页与注册表的文字契约仍为执行依据。
+[已接受实现基线](../evidence/task-036/accepted-ui-baseline.png)是本轮直接参考，[生成设计](../evidence/task-036/reference-design-v001.png)用于视觉方向；原始方案保留于本地 `.tasks/ui/muse-chat-redesign/proposal.md`。本卡已将基线与最终脱敏截图持久保存于 `docs/frontend/evidence/task-036/`，验收记录见 [results.md](../evidence/task-036/results.md)。
 
 ## 已核实事实与实现入口
 
