@@ -38,6 +38,7 @@ jobs:
     uses: ./.github/workflows/desktop-bundle.yml
     secrets: inherit
     with:
+      artifact-mode: grouped
       artifact-prefix: yuanpu-agent-desktop
       retention-days: 7
 

@@ -3,6 +3,14 @@ name: Desktop Bundle
 on:
   workflow_dispatch:
     inputs:
+      artifact-mode:
+        description: Upload installers directly or as a grouped release artifact
+        required: false
+        type: choice
+        options:
+          - direct
+          - grouped
+        default: direct
       artifact-prefix:
         description: Prefix for uploaded artifact names
         required: false
@@ -15,6 +23,11 @@ on:
         default: 3
   workflow_call:
     inputs:
+      artifact-mode:
+        description: Upload installers directly or as a grouped release artifact
+        required: false
+        type: string
+        default: grouped
       artifact-prefix:
         description: Prefix for uploaded artifact names
         required: false
@@ -82,7 +95,8 @@ jobs:
           YUANPU_ARTIFACT_SIGNING_KEY_ID: ${{ secrets.YUANPU_ARTIFACT_SIGNING_KEY_ID }}
         run: pnpm package:desktop
 
-      - name: Upload desktop artifact
+      - name: Upload grouped desktop artifact for release
+        if: inputs.artifact-mode == 'grouped'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-prefix }}-${{ matrix.target }}
@@ -96,3 +110,57 @@ jobs:
             apps/desktop/release/*.tar.gz
             apps/desktop/release/*.yml
             apps/desktop/release/*.zip
+
+      - name: Upload macOS DMG directly
+        if: inputs.artifact-mode == 'direct' && matrix.target == 'darwin-arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          path: apps/desktop/release/*-mac-arm64.dmg
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+      - name: Upload macOS ZIP directly
+        if: inputs.artifact-mode == 'direct' && matrix.target == 'darwin-arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          path: apps/desktop/release/*-mac-arm64.zip
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+      - name: Upload Windows installer directly
+        if: inputs.artifact-mode == 'direct' && matrix.target == 'win32-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          path: apps/desktop/release/*-win-x64.exe
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+      - name: Upload Windows ZIP directly
+        if: inputs.artifact-mode == 'direct' && matrix.target == 'win32-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          path: apps/desktop/release/*-win-x64.zip
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+      - name: Upload Linux AppImage directly
+        if: inputs.artifact-mode == 'direct' && matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          path: apps/desktop/release/*-linux-x86_64.AppImage
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+      - name: Upload Linux tarball directly
+        if: inputs.artifact-mode == 'direct' && matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          path: apps/desktop/release/*-linux-x64.tar.gz
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
