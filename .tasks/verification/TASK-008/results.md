@@ -51,3 +51,13 @@
 2. 配置生产 Ed25519、Apple Developer ID/公证及 Windows Authenticode 凭据，记录各系统真实安装提示。
 3. 在三平台执行无系统 Python、断外网的安装/调用旅程。
 4. 为 Runtime manifest 增加独立生产信任验证；当前 SHA-256 随同 manifest 获取，不能替代发布者签名和平台代码签名。
+
+## 2026-09-24 当前版本复验（仍 NOT PASS）
+
+- 产品基线：`main` `710a5e8`；验收探针提交 `46787b9`，仅新增打包资源探针及 Desktop Bundle 调用。此前 `bc83168`/`3907f35` 的 macOS 结果是历史证据，不外推到当前三平台。
+- 本机：macOS arm64，Node 24.15.0、pnpm 11.22.0；`pnpm check` PASS。首次在错误的 Node 26/pnpm 9 环境检查出现依赖缺失，随后使用项目指定版本执行 `pnpm install --frozen-lockfile --ignore-pnpmfile` 并重跑通过；错误环境结果不计入验收。
+- [Runtime Bundle 35965998926](https://github.com/linxinhong/yuanpu-agent/actions/runs/35965998926)：`710a5e8` 上 Linux x64、macOS arm64、Windows x64 三 job 均 PASS；包含原生 SEA/冻结 Python 的搜索、执行、错误保真 smoke，以及 Runtime 分阶段更新 smoke。工作流安装 Python/uv 且联网，不代表无系统 Python 或离线安装。
+- [Desktop Bundle 35966874652](https://github.com/linxinhong/yuanpu-agent/actions/runs/35966874652)：`46787b9` 上三平台均完成打包；新增探针从 electron-builder 的 `release/*-unpacked/resources` 而非开发输出目录取 SEA 与冻结 Python。在空 PATH 下 macOS/Linux PASS。Windows 搜索、调用和错误保真已输出正确 JSON，但进程在 30 秒内未退出，探针 FAIL：空 PATH 同时移除了 MCP 清理依赖的 `taskkill`。本地已将 Windows 探针 PATH 缩为 System32，尚未运行 hosted 复测，故 Windows 此项保持 **UNVERIFIED/FAIL（探针）**，不能据 JSON 输出算 PASS。
+- 探针使用打包阶段的 unpacked 资源，尚未安装或解压上传的 DMG/ZIP/AppImage/EXE，也没有断网；它仅缩小 S4 的证据缺口，不满足 S4/S6 完整目标机验收。
+- 独立非实现者复核认为当前 S1、SEA 更新三平台 smoke 有新增证据；S2/S3 和旧 npm 兼容仍主要依靠既有回归；S5 能力包更新/回滚、Windows 文件占用，S6 三平台无 Python/断网安装，S7 当前版真实 UI 全链路，以及生产签名、系统提示仍缺当前完整证据。总体 **BLOCKED / NOT PASS**。
+- 过程偏差：任务卡约束“本轮不自动提交或推送”；为运行 hosted CI 已将 `46787b9` 提交并推送至专用 `task/task-008-release-verification` 分支，未集成 main。后续修正和本记录仅留本地，不再自动提交、推送或集成。
