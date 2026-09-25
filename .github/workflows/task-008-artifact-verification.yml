@@ -1,0 +1,67 @@
+name: TASK-008 Artifact Verification
+
+# Isolated acceptance only. No tag trigger, publishing, production keys or releases.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-upgrade:
+    name: Signed upgrade and rollback (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+          - os: macos-14
+            target: darwin-arm64
+          - os: windows-2022
+            target: win32-x64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.4.25'
+      - name: Verify runner architecture
+        shell: bash
+        run: test "$(node -p "process.platform + '-' + process.arch")" = "${{ matrix.target }}"
+      - name: Install pinned dependencies
+        run: pnpm install --frozen-lockfile --ignore-pnpmfile
+      - name: Build host and native Runtime
+        run: |
+          pnpm build
+          pnpm build:native
+      - name: Build two real frozen versions with disposable test signing key
+        run: node apps/desktop/test/task-008-build-fixtures.mjs "${{ runner.temp }}/task008-fixtures"
+      - name: Verify signed install, failures, running-old upgrade and rollback
+        run: node apps/desktop/test/task-008-real-artifact-journey.mjs "${{ runner.temp }}/task008-fixtures" "${{ runner.temp }}/task008-journey"
+      - name: Upload public test fixtures and sanitized result
+        uses: actions/upload-artifact@v7
+        with:
+          name: task008-development-fixtures-${{ matrix.target }}
+          retention-days: 3
+          if-no-files-found: error
+          # Explicit allowlist: never upload homes, private keys or whole temp dirs.
+          path: |
+            ${{ runner.temp }}/task008-fixtures/metadata/*.json
+            ${{ runner.temp }}/task008-fixtures/0.1.0/manifest.json
+            ${{ runner.temp }}/task008-fixtures/0.1.0/*.tar.gz
+            ${{ runner.temp }}/task008-fixtures/0.1.0/*.sha256
+            ${{ runner.temp }}/task008-fixtures/0.1.0/bundle/**
+            ${{ runner.temp }}/task008-fixtures/0.2.0/manifest.json
+            ${{ runner.temp }}/task008-fixtures/0.2.0/*.tar.gz
+            ${{ runner.temp }}/task008-fixtures/0.2.0/*.sha256
+            ${{ runner.temp }}/task008-journey/result.json
