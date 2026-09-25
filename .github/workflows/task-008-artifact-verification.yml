@@ -3,6 +3,7 @@ name: TASK-008 Artifact Verification
 # Isolated acceptance only. No tag trigger, publishing, production keys or releases.
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
