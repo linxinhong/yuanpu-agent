@@ -32,12 +32,14 @@ pnpm dev
 
 Runtime 使用 Node 的系统主目录解析创建跨平台配置根目录：macOS/Linux 为 `~/.yuanpu`，Windows 为 `%USERPROFILE%\\.yuanpu`。首次启动会创建以下边界：
 
-- `app/config.json`：Yuanpu 全局配置，包括可选的 `catalogUrl`。
-- `agent/`：Pi 配置、凭据、模型缓存、会话、记忆和本地技能。
+- `app/config.json`：Yuanpu 全局配置，包括当前模型的 `provider`、`model` 和可选的 `catalogUrl`。
+- `app/auth.json`：模型供应商的 API Key 与 OAuth 凭据，由设置界面写入。
+- `app/models.json`：按需创建，仅保存自定义模型和端点定义；内置模型由 Pi 模型目录提供。
+- `agent/`：Pi 会话、模型缓存、插件设置、记忆和本地技能。
 - `packages/`：从技能市场安装的能力包及其独立配置。
 - `workflows/`：Yuanpu 工作流数据。
 
-默认模型从 `OPENAI_API_KEY` 读取密钥。可在 `app/config.json` 修改 `provider`、`model`、`apiKeyEnv`、`baseUrl`、`api`、`workingDirectory` 或 `catalogUrl`，然后重启桌面端。`baseUrl` 可接入 OpenAI-compatible 自定义服务；也可使用 Pi 的 `~/.yuanpu/agent/auth.json` 凭据格式。API 密钥不会写入 `config.json`。
+默认模型也可从 `OPENAI_API_KEY` 环境变量读取密钥。请在设置界面的“模型”页面选择内置模型、填写 API Key，或添加自定义端点。`app/config.json` 只保存当前的 `provider` 和 `model`；密钥保存在 `app/auth.json`，自定义端点保存在 `app/models.json`。旧版 `agent/auth.json`、`agent/models.json` 和 `config.json` 中的模型端点字段会在启动时迁移。
 
 本地技能放在 `~/.yuanpu/agent/skills/<name>/SKILL.md`。技能市场安装的是可包含技能、专家角色、工作流、扩展或服务连接的“能力包”，普通用户只需要理解“技能”这一入口。
 

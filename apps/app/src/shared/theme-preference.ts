@@ -1,10 +1,11 @@
-export type RendererTheme = 'yuanpu-light' | 'mindlink';
+export type RendererTheme = 'yuanpu-light' | 'yuanpu-dark' | 'mindlink';
 
 const storageKey = 'yuanpu:theme:v1';
 
 export function readThemePreference(): RendererTheme {
   try {
-    return window.localStorage.getItem(storageKey) === 'mindlink' ? 'mindlink' : 'yuanpu-light';
+    const stored = window.localStorage.getItem(storageKey);
+    return stored === 'mindlink' || stored === 'yuanpu-dark' ? stored : 'yuanpu-light';
   } catch {
     return 'yuanpu-light';
   }

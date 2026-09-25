@@ -2,3 +2,4 @@
 
 YuanpuAgent stores product configuration under `~/.yuanpu/app`, Pi-compatible runtime data under `~/.yuanpu/agent`, installed capability packages under `~/.yuanpu/packages`, and workflow state under `~/.yuanpu/workflows`. We chose explicit roots instead of treating `~/.yuanpu` itself as Pi's Agent directory so Pi-compatible resources remain portable while application updates, marketplace rollbacks, and workflow retention can evolve independently.
 
+Model settings follow the App boundary: `app/config.json` selects the current provider and model, `app/auth.json` stores Pi-compatible credentials, and optional `app/models.json` stores custom provider definitions. Pi's built-in catalog supplies default model definitions. The Agent directory keeps sessions, plugins, skills, memory, and the Pi model cache. On startup, legacy Agent model and credential files migrate to App; a conflicting provider or credential stops migration instead of overwriting either copy.

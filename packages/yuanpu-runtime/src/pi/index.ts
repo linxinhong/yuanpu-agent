@@ -18,7 +18,7 @@ import {
   type ExecuteCapabilityInput,
 } from '../capabilities/contracts.js';
 import { Type } from 'typebox';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DesktopTranscriptMessage } from '@yuanpu-agent/protocol';
 
@@ -240,13 +240,11 @@ export interface CreateYuanpuChatOptions {
   capabilityClient: CapabilityToolClient;
   capabilityContext?: CapabilityContext;
   agentDir: string;
+  modelConfigDir: string;
   cwd: string;
   provider: string;
   model: string;
   apiKey?: string;
-  apiKeyEnv: string;
-  baseUrl?: string;
-  api?: 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
   piSession?: { id: string; directory: string };
 }
 
@@ -268,36 +266,9 @@ async function readMemory(agentDir: string): Promise<string> {
 export async function createYuanpuChatSession(
   options: CreateYuanpuChatOptions,
 ): Promise<YuanpuChatSession> {
-  const modelsPath = options.baseUrl
-    ? join(options.agentDir, 'yuanpu-models.json')
-    : join(options.agentDir, 'models.json');
-  if (options.baseUrl) {
-    await writeFile(modelsPath, `${JSON.stringify({
-      providers: {
-        [options.provider]: {
-          name: options.provider,
-          baseUrl: options.baseUrl,
-          api: options.api ?? 'openai-completions',
-          apiKey: `$${options.apiKeyEnv}`,
-          compat: {
-            supportsDeveloperRole: false,
-            supportsReasoningEffort: false,
-          },
-          models: [{
-            id: options.model,
-            name: options.model,
-            reasoning: false,
-            input: ['text'],
-            contextWindow: 128_000,
-            maxTokens: 32_000,
-          }],
-        },
-      },
-    }, null, 2)}\n`);
-  }
   const modelRuntime = await ModelRuntime.create({
-    authPath: join(options.agentDir, 'auth.json'),
-    modelsPath,
+    authPath: join(options.modelConfigDir, 'auth.json'),
+    modelsPath: join(options.modelConfigDir, 'models.json'),
     modelsStorePath: join(options.agentDir, 'models-store.json'),
   });
   if (options.apiKey) await modelRuntime.setRuntimeApiKey(options.provider, options.apiKey);

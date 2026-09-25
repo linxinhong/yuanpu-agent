@@ -110,6 +110,10 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   );
 
   ipcMain.handle('runtime:info', trustedHandler(() => runtime.info()));
+  ipcMain.handle('settings:models:get', trustedHandler(() => runtime.getModelSettings()));
+  ipcMain.handle('settings:models:catalog', trustedHandler((provider) => runtime.getModelCatalog(provider)));
+  ipcMain.handle('settings:models:save', trustedHandler((input) => runtime.saveModelSettings(input)));
+  ipcMain.handle('settings:models:delete', trustedHandler((provider, model) => runtime.deleteModelSettings(provider, model)));
   ipcMain.handle('runtime:recovery-notice', trustedHandler(() => runtimeRecoveryNotice));
   ipcMain.handle('runtime:greeting', trustedHandler((name: string) => runtime.greeting(name)));
   ipcMain.handle('runtime:chat', trustedHandler((message: string) => runtime.chat(message)));

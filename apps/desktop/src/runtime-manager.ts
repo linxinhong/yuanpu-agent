@@ -21,6 +21,9 @@ import {
   type PluginSearchResult,
   type RuntimeGreeting,
   type RuntimeInfo,
+  type ModelSettings,
+  type ModelCatalog,
+  type SaveModelSettingsInput,
   type RuntimeUpdateState,
   type HostEvent,
   type HostEventReceipt,
@@ -443,6 +446,33 @@ export class RuntimeManager {
 
   info(): Promise<RuntimeInfo> {
     return this.request(RUNTIME_ROUTES.health);
+  }
+
+  getModelSettings(): Promise<ModelSettings> {
+    return this.request(RUNTIME_ROUTES.modelSettings);
+  }
+
+  getModelCatalog(provider?: string): Promise<ModelCatalog> {
+    if (typeof RUNTIME_ROUTES.modelCatalog !== 'string') {
+      throw new Error('模型列表尚未就绪，请重新启动桌面应用。');
+    }
+    return this.request(`${RUNTIME_ROUTES.modelCatalog}${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`);
+  }
+
+  saveModelSettings(input: SaveModelSettingsInput): Promise<ModelSettings> {
+    return this.request(RUNTIME_ROUTES.modelSettings, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  deleteModelSettings(provider: string, model: string): Promise<ModelSettings> {
+    return this.request(RUNTIME_ROUTES.modelSettingsDelete, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider, model }),
+    });
   }
 
   connectHostEvents(handler: (event: HostEvent) => Promise<HostEventReceipt>): void {

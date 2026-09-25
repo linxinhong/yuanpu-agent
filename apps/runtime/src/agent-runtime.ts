@@ -38,6 +38,11 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
     }
   }
 
+  updateChat(chat: RuntimeAgentExecutorOptions['chat']): void {
+    this.#options.chat = chat;
+    this.reset();
+  }
+
   async execute(input: AgentRunExecutionInput): Promise<AgentRunExecutionResult> {
     if (!input.run.context.conversation.sessionBindingId) throw new Error('Agent run does not have a persisted Pi session binding.');
     const sessionKey = input.piSessionId;

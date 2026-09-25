@@ -488,7 +488,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     mcpServers: { docs: { url: 'https://example.test/mcp' } },
   });
   assert.equal(unconfiguredChat.status, 500);
-  assert.match(unconfiguredError.hint, /config\.json/);
+  assert.match(unconfiguredError.hint, /auth\.json/);
   assert.equal(agentSubmissionResponse.status, 200);
   assert.equal(agentSubmission.accepted, true);
   assert.equal(duplicateAgentSubmission.runId, agentSubmission.runId);

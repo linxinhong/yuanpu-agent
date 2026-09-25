@@ -1,11 +1,12 @@
 # Yuanpu renderer theme
 
-`tokens.css` defines the current light palette. `mindlink.css` overrides the same semantic tokens when `data-yuanpu-theme="mindlink"` is set on the root element. The test theme uses the MindLink seal and xuan-paper tile from the local `yuanpu2.0/hermes-agent` desktop project. Import tokens before component CSS, then the optional theme stylesheet after component CSS:
+`tokens.css` defines the built-in light palette. `dark.css` supplies the built-in dark palette, and `mindlink.css` supplies the optional MindLink test theme. The test theme uses the MindLink seal and xuan-paper tile from the local `yuanpu2.0/hermes-agent` desktop project. Import the palette overrides after component CSS:
 
 ```ts
 import '../themes/tokens.css';
 import './muse-theme.css';
 import '../themes/mindlink.css';
+import '../themes/dark.css';
 ```
 
 Use `var(--yp-…)` in renderer CSS. The renderer's Settings page saves the selected theme in local storage and restores it on launch.

@@ -3,6 +3,10 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 const bridge: DesktopBridge = {
   runtimeInfo: () => ipcRenderer.invoke('runtime:info'),
+  getModelSettings: () => ipcRenderer.invoke('settings:models:get'),
+  getModelCatalog: (provider) => ipcRenderer.invoke('settings:models:catalog', provider),
+  saveModelSettings: (input) => ipcRenderer.invoke('settings:models:save', input),
+  deleteModelSettings: (provider, model) => ipcRenderer.invoke('settings:models:delete', provider, model),
   runtimeRecoveryNotice: () => ipcRenderer.invoke('runtime:recovery-notice'),
   greeting: (name) => ipcRenderer.invoke('runtime:greeting', name),
   chat: (message) => ipcRenderer.invoke('runtime:chat', message),

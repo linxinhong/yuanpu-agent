@@ -104,19 +104,21 @@ test('custom OpenAI-compatible model config is materialized outside Pi upstream 
     async execute() { throw new Error('not used'); },
   };
 
+  await writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { custom: {
+    baseUrl: 'https://api.example.test/openai/v1', api: 'openai-completions', apiKey: '$LONGCAT_API_KEY',
+    models: [{ id: 'LongCat-2.0', name: 'LongCat-2.0', reasoning: false, input: ['text'], contextWindow: 128000, maxTokens: 32000 }],
+  } } }));
   const chat = await createYuanpuChatSession({
     capabilityClient,
     agentDir,
+    modelConfigDir: agentDir,
     cwd: agentDir,
     provider: 'custom',
     model: 'LongCat-2.0',
-    apiKeyEnv: 'LONGCAT_API_KEY',
-    baseUrl: 'https://api.example.test/openai/v1',
-    api: 'openai-completions',
   });
   context.after(() => chat.dispose());
 
-  const models = JSON.parse(await readFile(join(agentDir, 'yuanpu-models.json'), 'utf8'));
+  const models = JSON.parse(await readFile(join(agentDir, 'models.json'), 'utf8'));
   assert.equal(models.providers.custom.models[0].id, 'LongCat-2.0');
   assert.equal(models.providers.custom.apiKey, '$LONGCAT_API_KEY');
 });
@@ -132,11 +134,14 @@ test('model HTTP failure rejects the prompt instead of returning a false complet
   context.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
   const agentDir = await mkdtemp(join(tmpdir(), 'yuanpu-pi-failure-'));
   context.after(() => rm(agentDir, { recursive: true, force: true }));
+  await writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { 'failure-fixture': {
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions',
+    models: [{ id: 'fixture', name: 'fixture', reasoning: false, input: ['text'], contextWindow: 128000, maxTokens: 32000 }],
+  } } }));
   const chat = await createYuanpuChatSession({
     capabilityClient: { async search() { return { matches: [] }; }, async execute() { throw new Error('not used'); } },
-    agentDir, cwd: agentDir, provider: 'failure-fixture', model: 'fixture',
-    apiKey: 'fixture-only', apiKeyEnv: 'YUANPU_TEST_FIXTURE_KEY',
-    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions',
+    agentDir, modelConfigDir: agentDir, cwd: agentDir, provider: 'failure-fixture', model: 'fixture',
+    apiKey: 'fixture-only',
   });
   context.after(() => chat.dispose());
   await assert.rejects(chat.prompt('Synthetic test message'), { message: '模型请求失败，请检查模型配置或稍后重试。' });

@@ -3,7 +3,7 @@ import type { UiDestination } from '../ui-registry.js';
 
 type AppView = UiDestination;
 
-export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'lock' | 'edit' }) {
+export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' }) {
   const paths = {
     work: <path d="M20 11.5c0 4.2-3.8 7.5-8.5 7.5-1.4 0-2.7-.3-3.8-.8L3 20l1.4-4.1A7.2 7.2 0 0 1 3 11.5C3 7.4 6.8 4 11.5 4S20 7.4 20 11.5Z" />,
     assistant: <><circle cx="12" cy="7" r="3" /><path d="M5 20v-2a7 7 0 0 1 14 0v2M8 14h8" /></>,
@@ -26,8 +26,7 @@ export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-le
     plus: <path d="M12 4v16M4 12h16" />,
     shield: <path d="M12 2.8 20 6v5.6c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V6z" />,
     'shield-filled': <><path d="M12 2.8 20 6v5.6c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V6z" fill="currentColor" stroke="none" /><path d="m8.5 12 2.3 2.3 4.7-4.7" stroke="var(--yp-surface)" strokeWidth="2" /></>,
-    lock: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></>,
     edit: <><path d="M12 20h8M4 16.5V20h3.5L18.8 8.7l-3.5-3.5L4 16.5Z" /><path d="m13.8 6.7 3.5 3.5" /></>,
-  } satisfies Record<AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'lock' | 'edit', ReactNode>;
+  } satisfies Record<AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit', ReactNode>;
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }

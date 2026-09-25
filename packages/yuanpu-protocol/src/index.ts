@@ -43,7 +43,75 @@ export const RUNTIME_ROUTES = {
   assistantLink: '/v1/assistant/link',
   assistantMirrors: '/v1/assistant/mirrors',
   desktopTranscript: '/v1/desktop/transcript',
+  modelSettings: '/v1/settings/models',
+  modelSettingsDelete: '/v1/settings/models/delete',
+  modelCatalog: '/v1/settings/models/catalog',
 } as const;
+
+export type ModelApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
+
+export interface ModelSettings {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  api: ModelApi;
+  apiKeyEnv: string;
+  credential: 'none' | 'api_key' | 'oauth';
+  providerSuggestions: string[];
+  modelSuggestions: string[];
+  customModels: CustomModelSettings[];
+  customProviders: CustomProviderSettings[];
+  providerCredentials: Record<string, 'none' | 'api_key' | 'oauth'>;
+  providerNames: Record<string, string>;
+}
+
+export interface CustomProviderSettings {
+  id: string;
+  name: string;
+  baseUrl: string;
+  api: ModelApi;
+  apiKeyEnv: string;
+  credential: 'none' | 'api_key' | 'oauth';
+}
+
+export interface CustomModelSettings {
+  provider: string;
+  model: string;
+  name: string;
+  baseUrl: string;
+  api: ModelApi;
+  apiKeyEnv: string;
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+  inputTypes: Array<'text' | 'image'>;
+  thinkingLevelMap?: Record<string, string | number | boolean | null>;
+  credential: 'none' | 'api_key' | 'oauth';
+  active: boolean;
+  source: 'catalog' | 'custom';
+}
+
+export interface ModelCatalog {
+  providers: { id: string; name: string; modelCount: number }[];
+  models: { id: string; name: string; api: string; baseUrl: string }[];
+}
+
+export interface SaveModelSettingsInput {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  api: ModelApi;
+  apiKeyEnv: string;
+  providerName?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  inputTypes?: Array<'text' | 'image'>;
+  thinkingLevelMap?: Record<string, string | number | boolean | null>;
+  apiKey?: string;
+  removeApiKey?: boolean;
+  activate?: boolean;
+}
 
 export type DesktopConversationSurface = 'work' | 'assistant';
 export type DesktopTranscriptSurface = DesktopConversationSurface | 'assistantArchive';
@@ -280,6 +348,10 @@ export interface PluginConfigValidation {
 
 export interface DesktopBridge {
   runtimeInfo(): Promise<RuntimeInfo>;
+  getModelSettings(): Promise<ModelSettings>;
+  getModelCatalog(provider?: string): Promise<ModelCatalog>;
+  saveModelSettings(input: SaveModelSettingsInput): Promise<ModelSettings>;
+  deleteModelSettings(provider: string, model: string): Promise<ModelSettings>;
   runtimeRecoveryNotice(): Promise<RuntimeRecoveryNotice | undefined>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;

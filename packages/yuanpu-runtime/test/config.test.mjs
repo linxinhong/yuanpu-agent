@@ -21,10 +21,67 @@ test('Yuanpu home separates application, Agent, packages, and workflow data', as
   ]);
 
   assert.equal(config.schemaVersion, 1);
-  assert.equal(config.apiKeyEnv, 'OPENAI_API_KEY');
+  assert.equal(config.apiKeyEnv, undefined);
   assert.equal(home.root, root);
   assert.equal(home.configPath, join(root, 'app', 'config.json'));
   assert.equal(home.agentPath, join(root, 'agent'));
+});
+
+test('legacy model files move to app and generated model file is retired', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-model-migration-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'app'), { recursive: true });
+  await mkdir(join(root, 'agent'), { recursive: true });
+  await writeFile(join(root, 'app', 'config.json'), JSON.stringify({
+    schemaVersion: 1, provider: 'custom', model: 'current', apiKeyEnv: 'CUSTOM_KEY',
+    baseUrl: 'https://custom.example/v1', api: 'openai-completions', workingDirectory: root,
+  }));
+  await writeFile(join(root, 'agent', 'auth.json'), JSON.stringify({ custom: { type: 'api_key', key: 'fixture-key' } }));
+  await writeFile(join(root, 'agent', 'yuanpu-models.json'), JSON.stringify({ providers: { custom: {
+    baseUrl: 'https://custom.example/v1', api: 'openai-completions',
+    models: [{ id: 'current' }],
+  } } }));
+  const home = await ensureYuanpuHome(root);
+  const config = JSON.parse(await readFile(home.configPath, 'utf8'));
+  const models = JSON.parse(await readFile(join(home.appPath, 'models.json'), 'utf8'));
+  const auth = JSON.parse(await readFile(join(home.appPath, 'auth.json'), 'utf8'));
+  assert.deepEqual({ provider: config.provider, model: config.model }, { provider: 'custom', model: 'current' });
+  assert.equal(config.baseUrl, undefined);
+  assert.equal(config.apiKeyEnv, undefined);
+  assert.equal(models.providers.custom.baseUrl, 'https://custom.example/v1');
+  assert.equal(auth.custom.key, 'fixture-key');
+  await assert.rejects(access(join(home.agentPath, 'auth.json')), { code: 'ENOENT' });
+  await assert.rejects(access(join(home.agentPath, 'yuanpu-models.json')), { code: 'ENOENT' });
+});
+
+test('a conflicting custom endpoint leaves both configurations intact', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-model-conflict-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'app'), { recursive: true });
+  const configPath = join(root, 'app', 'config.json');
+  const modelsPath = join(root, 'app', 'models.json');
+  await writeFile(configPath, JSON.stringify({
+    schemaVersion: 1, provider: 'custom', model: 'current', workingDirectory: root,
+    baseUrl: 'https://old.example/v1', api: 'openai-completions',
+  }));
+  await writeFile(modelsPath, JSON.stringify({ providers: { custom: {
+    baseUrl: 'https://new.example/v1', api: 'openai-completions', models: [{ id: 'current' }],
+  } } }));
+  await assert.rejects(ensureYuanpuHome(root), /differs between legacy config/);
+  assert.equal(JSON.parse(await readFile(configPath, 'utf8')).baseUrl, 'https://old.example/v1');
+  assert.equal(JSON.parse(await readFile(modelsPath, 'utf8')).providers.custom.baseUrl, 'https://new.example/v1');
+});
+
+test('credential migration refuses to overwrite a different saved key', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-auth-conflict-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'app'), { recursive: true });
+  await mkdir(join(root, 'agent'), { recursive: true });
+  await writeFile(join(root, 'app', 'auth.json'), JSON.stringify({ custom: { type: 'api_key', key: 'new-key' } }));
+  await writeFile(join(root, 'agent', 'auth.json'), JSON.stringify({ custom: { type: 'api_key', key: 'old-key' } }));
+  await assert.rejects(ensureYuanpuHome(root), /Credential custom differs/);
+  assert.equal(JSON.parse(await readFile(join(root, 'app', 'auth.json'), 'utf8')).custom.key, 'new-key');
+  assert.equal(JSON.parse(await readFile(join(root, 'agent', 'auth.json'), 'utf8')).custom.key, 'old-key');
 });
 
 test('Yuanpu home migrates the legacy flat layout without losing package paths', async (context) => {

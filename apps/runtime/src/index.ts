@@ -1,5 +1,6 @@
 import {
   createDemoCapabilitySource,
+  deleteModelSettings,
   createNotificationCapabilitySource,
   CapabilityApprovalStore,
   ManagedMcpCapabilitySource,
@@ -8,6 +9,9 @@ import {
   CAPABILITY_TOOL_NAMES,
   ensureYuanpuHome,
   greeting,
+  getModelCatalog,
+  getModelSettings,
+  saveModelSettings,
   inspectYuanpuExtensions,
   inspectYuanpuSkills,
   PI_UPSTREAM_VERSION,
@@ -43,6 +47,7 @@ import {
   type NotificationTargetValidation,
   type WecomConnectionSummary,
   type WecomConnectionConfigInput,
+  type SaveModelSettingsInput,
   type AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
@@ -510,13 +515,10 @@ async function serve(): Promise<void> {
     sessionsPath: home.sessionsPath,
     chat: {
       agentDir: home.agentPath,
+      modelConfigDir: home.appPath,
       cwd: home.config.workingDirectory,
       provider: home.config.provider,
       model: home.config.model,
-      apiKey: process.env[home.config.apiKeyEnv],
-      apiKeyEnv: home.config.apiKeyEnv,
-      baseUrl: home.config.baseUrl,
-      api: home.config.api,
     },
   });
   let onAssistantRunChanged: (run: AgentRunRecord) => void = () => undefined;
@@ -775,6 +777,40 @@ async function serve(): Promise<void> {
             notificationsEnabled: home.config.notifications?.enabled ?? true,
           }),
         );
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.modelSettings && request.method === 'GET') {
+        response.end(JSON.stringify(await getModelSettings(home)));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.modelCatalog && request.method === 'GET') {
+        response.end(JSON.stringify(await getModelCatalog(url.searchParams.get('provider') ?? undefined)));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.modelSettings && request.method === 'POST') {
+        const settings = await saveModelSettings(home, await readJsonBody(request) as SaveModelSettingsInput);
+        agentExecutor.updateChat({
+          agentDir: home.agentPath,
+          modelConfigDir: home.appPath,
+          cwd: home.config.workingDirectory,
+          provider: home.config.provider,
+          model: home.config.model,
+        });
+        response.end(JSON.stringify(settings));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.modelSettingsDelete && request.method === 'POST') {
+        const body = await readJsonBody(request) as { provider?: string; model?: string };
+        const settings = await deleteModelSettings(home, body.provider!, body.model!);
+        agentExecutor.updateChat({
+          agentDir: home.agentPath,
+          modelConfigDir: home.appPath,
+          cwd: home.config.workingDirectory,
+          provider: home.config.provider,
+          model: home.config.model,
+        });
+        response.end(JSON.stringify(settings));
         return;
       }
 
@@ -1618,12 +1654,12 @@ async function serve(): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       const missingApiKey = message.includes('No API key found');
       const safeMessage = missingApiKey
-        ? `未找到 ${home.config.provider} API 密钥。请设置 ${home.config.apiKeyEnv} 后重启 YuanpuAgent。`
+        ? `未找到 ${home.config.provider} API 密钥。请在设置中的模型页面配置。`
         : message;
       response.end(JSON.stringify({
         error: safeMessage,
         ...(missingApiKey
-          ? { hint: `Check ${home.configPath} and ${home.config.apiKeyEnv}.` }
+          ? { hint: `Check ${join(home.appPath, 'auth.json')} or the provider environment variable.` }
           : {}),
       }));
     }

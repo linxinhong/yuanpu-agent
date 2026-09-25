@@ -147,6 +147,7 @@ export function ChatPanel({
   const settledRuns = useRef(new Map<string, AgentRunRecord>());
   const activityDialog = useRef<HTMLDialogElement>(null);
   const chatPanel = useRef<HTMLElement>(null);
+  const rightPanelDragCleanup = useRef<(() => void) | null>(null);
   const activityToggle = useRef<HTMLButtonElement>(null);
   const restoreActivityFocus = useRef(false);
   const nextActivityId = useRef(1);
@@ -227,6 +228,8 @@ export function ChatPanel({
     observer.observe(panel);
     return () => observer.disconnect();
   }, [active, listOpen]);
+
+  useEffect(() => () => rightPanelDragCleanup.current?.(), []);
 
   useEffect(() => {
     if (surface !== 'work' || !conversationInner.current) return;
@@ -547,7 +550,8 @@ export function ChatPanel({
     const bounds = panel.getBoundingClientRect();
     const max = maxRightPanelWidth(bounds.width, listOpen);
     const requested = bounds.right - clientX;
-    if (requested > max) {
+    if (requested >= max) {
+      setRightPanelWidth(max);
       setRightPanelMaximized(true);
       return;
     }
@@ -558,16 +562,7 @@ export function ChatPanel({
   return (
     <section ref={chatPanel} className={`chat-panel ${surface}-mode ${emptyConversation ? 'is-empty' : ''} ${listOpen ? 'list-open' : 'list-closed'} ${activityOpen ? 'activity-open' : 'activity-closed'} ${rightPanelMaximized ? 'right-panel-maximized' : ''} ${rightPanelResizing ? 'right-panel-resizing' : ''} ${active ? '' : 'view-hidden'}`}
       style={{ '--yp-right-panel-width': `${rightPanelWidth}px` } as CSSProperties} aria-hidden={!active}>
-      {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表预览' : '会话列表预览'}>
-        <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong></div>
-        <div className="conversation-list-current"><span>{archiveOpen ? '原桌面会话' : '当前会话'}</span><small>当前</small></div>
-        <p>历史会话列表尚未接入，此处为界面预览。</p>
-      </aside>}
-      <div className="chat-main">
-        {surface === 'work' && emptyConversation && <div className="mindlink-work-background" aria-hidden="true">
-          <img src={mindlinkSeal} alt="" /><strong>元朴思联</strong><span>MindLink</span>
-        </div>}
-        <header className="chat-header">
+      <header className="chat-header">
           <div className="chat-heading">
             <button type="button" className="chat-list-toggle" title={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}（界面预览）`}
               aria-label={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}（界面预览）`} aria-expanded={listOpen}
@@ -613,7 +608,16 @@ export function ChatPanel({
               {archiveOpen ? '返回已绑定会话' : '查看原桌面会话'}
             </button>}
           </div>}
-        </header>
+      </header>
+      {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表预览' : '会话列表预览'}>
+        <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong></div>
+        <div className="conversation-list-current"><span>{archiveOpen ? '原桌面会话' : '当前会话'}</span><small>当前</small></div>
+        <p>历史会话列表尚未接入，此处为界面预览。</p>
+      </aside>}
+      <div className="chat-main">
+        {surface === 'work' && emptyConversation && <div className="mindlink-work-background" aria-hidden="true">
+          <img src={mindlinkSeal} alt="" /><strong>元朴思联</strong><span>MindLink</span>
+        </div>}
 
         <div className="conversation" ref={conversation} aria-live="polite">
           <div className="conversation-inner" ref={conversationInner}>
@@ -738,7 +742,7 @@ export function ChatPanel({
               onKeyDown={handleKeyDown}
               placeholder={archiveOpen ? '归档只读，请返回已绑定会话继续对话' : '今天帮你做些什么？'}
               disabled={archiveOpen}
-              rows={3}
+              rows={2}
             />
             {attachments.length > 0 && <div className="composer-attachments" aria-label="待发送附件">
               {attachments.map((file, index) => <span key={`${file.name}-${index}`}>{file.name}
@@ -749,13 +753,6 @@ export function ChatPanel({
               <div className="composer-actions">
                 <button type="button" className="composer-utility" title="添加文本附件" aria-label="添加附件" disabled={archiveOpen || busy}
                   onClick={() => attachmentInput.current?.click()}><AppIcon name="plus" /></button>
-                <details className="composer-permissions"><summary><AppIcon name="lock" />默认权限<AppIcon name="chevron" /></summary>
-                  <div className="composer-permission-popover">
-                    <p>当前使用 Runtime 默认权限，能力操作仍按现有审批规则执行。</p>
-                    <label>允许完全访问 <input type="checkbox" disabled /></label>
-                    <small>完全访问需接入 Runtime 策略后才能生效。</small>
-                  </div>
-                </details>
                 <button type="button" className="composer-redaction-preview" title={`脱敏${redactionPreviewEnabled ? '已选中' : '未选中'} · 界面预览，尚未生效`}
                   aria-label={`${redactionPreviewEnabled ? '关闭' : '启用'}脱敏（界面预览，尚未生效）`} aria-pressed={redactionPreviewEnabled}
                   onClick={() => setRedactionPreviewEnabled((value) => !value)}><AppIcon name={redactionPreviewEnabled ? 'shield-filled' : 'shield'} /></button>
@@ -770,20 +767,33 @@ export function ChatPanel({
       {activityOpen && (
         <dialog ref={activityDialog} className="activity-panel" aria-label="当前会话动态" onCancel={() => { setActivityOpen(false); setRightPanelMaximized(false); }}>
           <div className="activity-resize-handle" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" aria-valuemin={260}
-            aria-valuemax={maxRightPanelWidth(window.innerWidth - 100, listOpen)} aria-valuenow={rightPanelWidth} tabIndex={0}
+            aria-valuemax={maxRightPanelWidth(chatPanel.current?.clientWidth ?? window.innerWidth - 50, listOpen)} aria-valuenow={rightPanelWidth} tabIndex={0}
             onPointerDown={(event) => {
               if (window.matchMedia('(max-width: 560px)').matches) return;
+              const panel = chatPanel.current;
+              if (!panel) return;
               event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
+              rightPanelDragCleanup.current?.();
+              const pointerId = event.pointerId;
+              const move = (moveEvent: PointerEvent) => {
+                if (moveEvent.pointerId === pointerId) resizeRightPanel(moveEvent.clientX, panel);
+              };
+              const finish = (finishEvent: PointerEvent) => {
+                if (finishEvent.pointerId !== pointerId) return;
+                rightPanelDragCleanup.current?.();
+                rightPanelDragCleanup.current = null;
+                setRightPanelResizing(false);
+              };
+              window.addEventListener('pointermove', move);
+              window.addEventListener('pointerup', finish);
+              window.addEventListener('pointercancel', finish);
+              rightPanelDragCleanup.current = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', finish);
+                window.removeEventListener('pointercancel', finish);
+              };
               setRightPanelResizing(true);
             }}
-            onPointerMove={(event) => {
-              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-              const panel = event.currentTarget.closest<HTMLElement>('.chat-panel');
-              if (panel) resizeRightPanel(event.clientX, panel);
-            }}
-            onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); setRightPanelResizing(false); }}
-            onPointerCancel={() => setRightPanelResizing(false)}
             onKeyDown={(event) => {
               if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
               event.preventDefault();

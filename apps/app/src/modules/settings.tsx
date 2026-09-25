@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ConnectionManagement } from '../management.js';
+import { ModelSettingsPanel } from './model-settings.js';
 import { applyThemePreference, readThemePreference, type RendererTheme } from '../shared/theme-preference.js';
 
 function formatError(error: unknown): string {
@@ -45,7 +46,7 @@ function AssistantLinkSettings({ active }: { active: boolean }) {
 }
 
 export function SettingsPage({ active, configRoot }: { active: boolean; configRoot: string }) {
-  const [section, setSection] = useState<'general' | 'connections'>('general');
+  const [section, setSection] = useState<'general' | 'models' | 'connections'>('general');
   const [theme, setTheme] = useState<RendererTheme>(readThemePreference);
   const selectTheme = (nextTheme: RendererTheme) => {
     applyThemePreference(nextTheme);
@@ -54,13 +55,15 @@ export function SettingsPage({ active, configRoot }: { active: boolean; configRo
   return <section className={`settings-page ${active ? '' : 'view-hidden'}`} aria-hidden={!active}>
     <aside className="settings-navigation"><span className="eyebrow">YUANPU / SETTINGS</span><h1>设置</h1>
       <button type="button" className={section === 'general' ? 'selected' : ''} onClick={() => setSection('general')}>通用</button>
+      <button type="button" className={section === 'models' ? 'selected' : ''} onClick={() => setSection('models')}>模型</button>
       <button type="button" className={section === 'connections' ? 'selected' : ''} onClick={() => setSection('connections')}>企业微信连接</button>
     </aside>
     <div className="settings-content">
       <div className={`settings-general ${section === 'general' ? '' : 'view-hidden'}`} aria-hidden={section !== 'general'}><h2>通用</h2>
-        <div className="theme-setting"><h3>界面主题</h3><p>选择用于预览的配色。MindLink 为临时测试主题。</p>
+        <div className="theme-setting"><h3>界面主题</h3><p>选择界面配色。MindLink 为临时测试主题。</p>
           <div className="theme-options" role="group" aria-label="界面主题">
-            <button type="button" aria-pressed={theme === 'yuanpu-light'} onClick={() => selectTheme('yuanpu-light')}>元朴浅色</button>
+            <button type="button" aria-pressed={theme === 'yuanpu-light'} onClick={() => selectTheme('yuanpu-light')}>浅色</button>
+            <button type="button" aria-pressed={theme === 'yuanpu-dark'} onClick={() => selectTheme('yuanpu-dark')}>深色</button>
             <button type="button" aria-pressed={theme === 'mindlink'} onClick={() => selectTheme('mindlink')}>MindLink 测试主题</button>
           </div>
         </div>
@@ -69,6 +72,9 @@ export function SettingsPage({ active, configRoot }: { active: boolean; configRo
       <div className={`settings-connections ${section === 'connections' ? '' : 'view-hidden'}`} aria-hidden={section !== 'connections'}>
         <AssistantLinkSettings active={active && section === 'connections'} />
         <ConnectionManagement active={active && section === 'connections'} />
+      </div>
+      <div className={`settings-models-view ${section === 'models' ? '' : 'view-hidden'}`} aria-hidden={section !== 'models'}>
+        <ModelSettingsPanel active={active && section === 'models'} />
       </div>
     </div>
   </section>;

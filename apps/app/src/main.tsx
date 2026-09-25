@@ -8,8 +8,10 @@ import '../themes/tokens.css';
 import './styles.css';
 import './muse-theme.css';
 import '../themes/mindlink.css';
+import '../themes/dark.css';
 
 applyThemePreference(readThemePreference());
+document.documentElement.dataset.yuanpuDesktop = window.yuanpu ? 'true' : 'false';
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false }, mutations: { retry: false } } });
 createRoot(document.getElementById('root')!).render(
   <StrictMode><HashRouter><QueryClientProvider client={queryClient}><App /></QueryClientProvider></HashRouter></StrictMode>,
