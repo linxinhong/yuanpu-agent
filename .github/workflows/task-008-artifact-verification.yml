@@ -47,6 +47,8 @@ jobs:
           pnpm build:native
       - name: Build two real frozen versions with disposable test signing key
         run: node apps/desktop/test/task-008-build-fixtures.mjs "${{ runner.temp }}/task008-fixtures"
+      - name: Verify archive safety regressions
+        run: python -m unittest discover -s apps/python-capabilities/scripts -p "test_archive_bundle.py"
       - name: Verify signed install, failures, running-old upgrade and rollback
         run: node apps/desktop/test/task-008-real-artifact-journey.mjs "${{ runner.temp }}/task008-fixtures" "${{ runner.temp }}/task008-journey"
       - name: Upload public test fixtures and sanitized result

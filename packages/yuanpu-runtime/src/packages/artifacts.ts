@@ -443,7 +443,6 @@ export class CapabilityArtifactManager {
         throw new Error('Artifact entrypoint is missing or outside the package.');
       }
       if (this.platform !== 'win32') await chmod(entrypoint, 0o755);
-      await installOptions.healthCheck(entrypoint, unpacked);
 
       const targetName = `${this.platform}-${this.arch}`;
       const installPath = join(
@@ -458,6 +457,12 @@ export class CapabilityArtifactManager {
       // It must never be trusted in place of the just-verified staging tree.
       if (await exists(installPath)) await rm(installPath, { recursive: true });
       await rename(unpacked, installPath);
+
+      // Run only at the immutable destination: Windows may keep executable/DLL
+      // handles open briefly after exit, preventing a subsequent directory rename.
+      // No state is activated until health succeeds; failure leaves an untrusted
+      // orphan which the next install replaces, while the old version stays active.
+      await installOptions.healthCheck(join(installPath, target.entrypoint), installPath);
 
       const installed: InstalledArtifactVersion = {
         version: manifest.version,

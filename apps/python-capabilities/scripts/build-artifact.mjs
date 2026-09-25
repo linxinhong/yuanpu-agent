@@ -57,15 +57,8 @@ execFileSync('uv', [
 
 // Build machines have Python; target machines consume only the resulting archive.
 execFileSync('uv', [
-  'run', '--project', root, '--frozen', 'python', '-c',
-  [
-    'import pathlib, tarfile, sys',
-    'source=pathlib.Path(sys.argv[1])',
-    'archive=pathlib.Path(sys.argv[2])',
-    "output=tarfile.open(archive, 'w:gz')",
-    'output.add(source, arcname=source.name)',
-    'output.close()',
-  ].join('; '),
+  'run', '--project', root, '--frozen', 'python',
+  join(root, 'scripts', 'archive_bundle.py'),
   frozenRoot,
   archivePath,
 ], { stdio: 'inherit' });
