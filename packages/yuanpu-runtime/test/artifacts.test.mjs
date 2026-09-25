@@ -237,12 +237,23 @@ test('retains immutable versions for Windows-safe rollback and recovers from fai
   const second = signedManifest({
     url: source.url('/artifact'), ...fixture, version: '2.0.0', issuedAt: '2026-09-21T01:00:00.000Z',
   });
+  const destination = join(root, 'packages', 'artifacts', 'builtin.python.echo', '2.0.0', `${process.platform}-${process.arch}`);
   await assert.rejects(
-    instance.install(second, { healthCheck: async () => { throw new Error('crash during switch'); } }),
+    instance.install(second, { healthCheck: async (entrypoint, cwd) => {
+      assert.equal(cwd, destination);
+      assert.equal(entrypoint, join(destination, 'server'));
+      assert.equal((await instance.active('builtin.python.echo')).version, '1.0.0');
+      await writeFile(entrypoint, 'failed-health-orphan');
+      throw new Error('crash during switch');
+    } }),
     /crash during switch/,
   );
   assert.equal((await instance.active('builtin.python.echo')).version, '1.0.0');
-  await instance.install(second, { healthCheck: healthy });
+  await instance.install(second, { healthCheck: async (entrypoint, cwd) => {
+    assert.equal(cwd, destination);
+    assert.equal(await readFile(entrypoint, 'utf8'), 'x'.repeat(12));
+    assert.equal((await instance.active('builtin.python.echo')).version, '1.0.0');
+  } });
   assert.equal((await instance.rollback('builtin.python.echo', '1.0.0')).version, '1.0.0');
   assert.equal(await readFile(join(root, 'packages', 'artifacts', 'builtin.python.echo', '2.0.0', `${process.platform}-${process.arch}`, 'server'), 'utf8'), 'x'.repeat(12));
 });
