@@ -19,7 +19,8 @@ class ArchiveBundleTests(unittest.TestCase):
 
     def link(self, target, path, directory=False):
         try:
-            path.symlink_to(target, target_is_directory=directory)
+            # Windows reparse-point targets require native separators.
+            path.symlink_to(pathlib.Path(target), target_is_directory=directory)
         except OSError as error:
             if getattr(error, "winerror", None) == 1314:
                 self.skipTest("Creating Windows symlinks requires privilege")
