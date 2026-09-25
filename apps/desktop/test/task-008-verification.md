@@ -58,6 +58,18 @@ provider. It uses a temporary Yuanpu home and does not read the user's provider
 credentials. A previous live-provider TASK-036 run is historical supporting
 evidence only, not a substitute for this revision's desktop probe.
 
+For the complete current skills-page journey, first generate both signed versions
+with `task-008-build-fixtures.mjs` in a new temporary directory, then use
+`TASK_008_FULL_UI_FIXTURE=/absolute/fixture-root` instead of
+`TASK_008_APPROVAL_FIXTURE=1` with the same renderer URL. The probe serves the
+two versions from a private loopback catalog, installs v0.1.0 through the trust
+dialog, saves configuration, injects a bad v0.2.0 manifest signature and checks
+v0.1.0 remains active, retries and upgrades, rolls back, reloads the renderer,
+and compares page state to the isolated durable state after each transition.
+The resulting log reports `skillsUiJourney: true`; it also runs the allow/deny
+approval checks. Neither this mode nor the hosted artifact workflow touches the
+user's normal Yuanpu home.
+
 ## Existing Windows installation smoke
 
 Run `task-008-installed-windows-probe.cmd` (or the adjacent PS1) from PowerShell/CMD.

@@ -8,6 +8,8 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import { createCatalogServer } from '../../../server/dist/index.mjs';
+
 const rendererUrl = process.env.TASK_036_RENDERER_URL;
 if (!rendererUrl || !/^http:\/\/127\.0\.0\.1:\d+\/$/.test(rendererUrl)) {
   throw new Error('Set TASK_036_RENDERER_URL to the isolated worktree Vite URL.');
@@ -101,10 +103,23 @@ const workspace = join(root, 'workspace');
 const userData = join(root, 'desktop-user-data');
 let providerRequests = 0;
 const live = process.env.TASK_036_LIVE === '1';
-const approvalFixture = process.env.TASK_008_APPROVAL_FIXTURE === '1';
+const fullUiFixture = process.env.TASK_008_FULL_UI_FIXTURE;
+const approvalFixture = process.env.TASK_008_APPROVAL_FIXTURE === '1' || Boolean(fullUiFixture);
 const screenshots = approvalFixture ? join(root, 'screenshots') : resolve(desktopRoot, '../../docs/frontend/evidence/task-036');
 let mode = 'success';
 let approvalDecision = 'approved';
+const catalogOptions = fullUiFixture ? { artifactRoot: join(fullUiFixture, '0.1.0') } : undefined;
+const catalog = catalogOptions ? createCatalogServer(undefined, catalogOptions) : undefined;
+let catalogFault;
+const catalogServer = catalog ? createServer(async (request, response) => {
+  if (catalogFault === 'signature' && request.url?.endsWith('/manifest')) {
+    const manifest = JSON.parse(await readFile(join(catalogOptions.artifactRoot, 'manifest.json'), 'utf8'));
+    manifest.signature.value = Buffer.alloc(64).toString('base64');
+    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(manifest));
+    return;
+  }
+  catalog.emit('request', request, response);
+}) : undefined;
 const provider = createServer(async (request, response) => {
   if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
     response.writeHead(404).end(); return;
@@ -147,6 +162,12 @@ let child;
 let renderer;
 let runtimePid;
 try {
+  if (fullUiFixture) {
+    const fixture = JSON.parse(await readFile(join(fullUiFixture, 'metadata/fixture.json'), 'utf8'));
+    assert.equal(fixture.development, true);
+    assert.equal(fixture.target, `${process.platform}-${process.arch}`);
+    assert.equal(fixture.sourceCommit, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(desktopRoot, '../..'), encoding: 'utf8' }).trim());
+  }
   await mkdir(appRoot, { recursive: true });
   await mkdir(screenshots, { recursive: true });
   await symlink(resolve(desktopRoot, '../python-capabilities'), join(root, 'apps/python-capabilities'), 'dir');
@@ -165,6 +186,7 @@ try {
     require(${JSON.stringify(desktopMain)});
   `);
   const providerPort = await listen(provider);
+  const catalogPort = catalogServer ? await listen(catalogServer) : undefined;
   const config = live
     ? JSON.parse(await readFile(join(homedir(), '.yuanpu/app/config.json'), 'utf8'))
     : { schemaVersion: 1, provider: 'task-036-fixture', model: 'fixture-model',
@@ -180,6 +202,10 @@ try {
       YUANPU_NODE_BINARY: process.execPath,
       YUANPU_NOTIFICATIONS_ENABLED: '0',
       TASK_036_PROVIDER_KEY: 'fixture-only',
+      ...(catalogPort ? {
+        YUANPU_CATALOG_URL: `http://127.0.0.1:${catalogPort}`,
+        YUANPU_CAPABILITY_TRUST_ROOT_FILE: join(fullUiFixture, '0.1.0/bundle/trust-root.json'),
+      } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -345,6 +371,68 @@ try {
     assert.equal(await renderer.evaluate('document.querySelector("textarea").value'), 'A next draft must not be submitted while busy.');
     await shot('fixture-cancelled');
   }
+  if (fullUiFixture) {
+    const activeVersion = async () => {
+      const state = JSON.parse(await readFile(join(home, 'packages/artifact-state.json'), 'utf8'));
+      return state.packages['builtin.python.echo']?.activeVersion;
+    };
+    const installedCard = () => renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card.installed')).find(card => card.textContent.includes('builtin.python.echo'))?.textContent`);
+    await renderer.evaluate(`document.querySelector('.nav-item[aria-label="技能"]').click()`);
+    await eventually(() => renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card')).some(card => card.textContent.includes('Python 示例能力') && card.querySelector('.install-button'))`), 'Signed Python skill missing from current marketplace.', 30_000).catch(async (error) => {
+      console.log(JSON.stringify({ skillsPage: (await body()).slice(-1800), catalogPort, search: await renderer.evaluate(`window.yuanpu.searchPlugins('Python').then(items => items.map(item => ({ name: item.name, version: item.version }))).catch(error => error.message)`) }));
+      throw error;
+    });
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card')).find(card => card.textContent.includes('Python 示例能力')).querySelector('.install-button').click()`);
+    await eventually(() => renderer.evaluate(`Boolean(document.querySelector('.trust-dialog'))`), 'Signed install trust dialog missing.');
+    assert.ok((await body()).includes('清单摘要'));
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.trust-dialog button')).find(button => button.textContent === '信任并安装').click()`);
+    await eventually(async () => (await activeVersion()) === '0.1.0' && (await installedCard())?.includes('v0.1.0'), 'UI install and durable v0.1.0 state diverged.', 60_000);
+    await shot('task008-current-ui-installed');
+
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card.installed')).find(card => card.textContent.includes('builtin.python.echo')).querySelector('.plugin-actions button').click()`);
+    await eventually(() => renderer.evaluate(`Boolean(document.querySelector('.raw-config-field textarea'))`), 'Installed skill configuration page missing.');
+    await renderer.evaluate(`(() => { const field = document.querySelector('.raw-config-field textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, ${JSON.stringify(JSON.stringify({ responsePrefix: 'TASK008 UI: ' }))}); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.config-actions button')).find(button => button.textContent === '保存并应用').click()`);
+    await eventually(() => renderer.evaluate(`Boolean(document.querySelector('.config-success'))`), 'Current UI did not confirm configuration save.');
+    assert.equal(JSON.parse(await readFile(join(home, 'packages/config/builtin.python.echo/user.json'), 'utf8')).responsePrefix, 'TASK008 UI: ');
+    await renderer.evaluate(`document.querySelector('.back-button').click()`);
+    await shot('task008-current-ui-configured');
+
+    catalogOptions.artifactRoot = join(fullUiFixture, '0.2.0');
+    await renderer.evaluate(`Array.from(document.querySelectorAll('[role="tab"]')).find(button => button.textContent === '技能市场').click()`);
+    await renderer.evaluate(`document.querySelector('form.plugin-search').requestSubmit()`);
+    await eventually(() => renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card')).some(card => card.textContent.includes('Python 示例能力') && card.textContent.includes('v0.2.0'))`), 'Updated signed version missing from current marketplace.', 30_000);
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card')).find(card => card.textContent.includes('Python 示例能力')).querySelector('.install-button').click()`);
+    await eventually(() => renderer.evaluate(`Boolean(document.querySelector('.trust-dialog'))`), 'Update trust dialog missing.');
+    catalogFault = 'signature';
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.trust-dialog button')).find(button => button.textContent === '信任并安装').click()`);
+    await eventually(() => renderer.evaluate(`Boolean(document.querySelector('.install-recovery'))`), 'Bad signature did not surface recoverable UI failure.', 30_000);
+    assert.equal(await activeVersion(), '0.1.0');
+    assert.ok((await body()).includes('仍在使用 v0.1.0'));
+    await shot('task008-current-ui-bad-signature');
+    catalogFault = undefined;
+    await renderer.evaluate(`document.querySelector('.install-recovery button').click()`);
+    await eventually(() => renderer.evaluate(`Boolean(document.querySelector('.trust-dialog'))`), 'Retry trust dialog missing.');
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.trust-dialog button')).find(button => button.textContent === '信任并安装').click()`);
+    await eventually(async () => (await activeVersion()) === '0.2.0' && (await installedCard())?.includes('v0.2.0'), 'UI upgrade and durable v0.2.0 state diverged.', 60_000);
+    assert.equal(JSON.parse(await readFile(join(home, 'packages/config/builtin.python.echo/user.json'), 'utf8')).responsePrefix, 'TASK008 UI: ');
+    await shot('task008-current-ui-upgraded');
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card.installed .plugin-actions button')).find(button => button.textContent === '回滚到 v0.1.0').click()`);
+    await eventually(async () => (await activeVersion()) === '0.1.0' && (await installedCard())?.includes('v0.1.0'), 'UI rollback and durable v0.1.0 state diverged.', 60_000);
+    await renderer.command('Page.reload', { ignoreCache: true });
+    await eventually(async () => {
+      try { return await renderer.evaluate(`(() => { const button = document.querySelector('.nav-item[aria-label="技能"]'); if (!button) return false; button.click(); return true; })()`); }
+      catch { return false; }
+    }, 'Renderer did not return after reload.', 30_000);
+    await eventually(async () => {
+      try { return await renderer.evaluate(`(() => { const button = Array.from(document.querySelectorAll('[role="tab"]')).find(item => item.textContent === '已安装'); if (!button) return false; button.click(); return true; })()`); }
+      catch { return false; }
+    }, 'Installed tab did not return after reload.', 30_000);
+    await eventually(async () => (await renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card.installed')).some(card => card.textContent.includes('builtin.python.echo') && card.textContent.includes('v0.1.0'))`)), 'Installed state not restored after renderer reload.', 30_000);
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.plugin-card.installed')).find(card => card.textContent.includes('builtin.python.echo')).querySelector('.plugin-actions button').click()`);
+    await eventually(() => renderer.evaluate(`document.querySelector('.raw-config-field textarea')?.value.includes('TASK008 UI: ')`), 'Saved configuration not restored in current UI after reload.', 30_000);
+    await shot('task008-current-ui-rollback-reload');
+  }
   if (process.env.TASK_036_INSPECT === '1') {
     await renderer.command('Emulation.clearDeviceMetricsOverride');
     console.log('Native inspection window ready (45 seconds).');
@@ -363,6 +451,7 @@ try {
     mode: live ? 'live-provider' : approvalFixture ? 'controlled-approval-provider' : 'controlled-provider',
     viewportAndKeyboard: true,
     providerRequests,
+    skillsUiJourney: Boolean(fullUiFixture),
     runtimeChildrenStopped: true,
   }));
 } finally {
@@ -370,6 +459,10 @@ try {
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
   provider.closeAllConnections();
   await new Promise((resolveClose) => provider.close(resolveClose));
+  if (catalogServer) {
+    catalogServer.closeAllConnections();
+    await new Promise((resolveClose) => catalogServer.close(resolveClose));
+  }
   if (runtimePid && exists(runtimePid)) {
     const command = execFileSync('ps', ['-p', String(runtimePid), '-o', 'command='], { encoding: 'utf8' });
     if (command.includes(join(root, 'apps', 'runtime', 'dist', 'index.cjs'))) process.kill(runtimePid, 'SIGKILL');
