@@ -40,9 +40,23 @@ target acceptance.
 
 For real desktop target testing, the two version directories can instead seed the
 controlled catalog, with the matching public test trust root injected only into an
-isolated test App. A matching installed App/SEA, UI approval, real external-network
-isolation and OS-specific installation/signing observations are separate prerequisites
-and remain unverified until actually executed. Do not replace the user's trust root.
+isolated test App. A matching installed App/SEA, UI approval and OS-specific
+installation observations are separate checks. The TASK-008 acceptance scope does
+not require disconnecting external networking or formal platform code signing;
+neither is implied by this CI. Do not replace the user's trust root or weaken
+capability-manifest signature verification.
+
+## Current macOS desktop approval probe
+
+After building the desktop and Runtime, start the renderer on a private loopback
+port, then run `apps/desktop/test/task-036-ui-app-probe.mjs` with
+`TASK_008_APPROVAL_FIXTURE=1` and `TASK_036_RENDERER_URL` set to that renderer URL.
+This starts a real isolated Electron/Runtime/MCP stack and drives the actual
+one-time approval controls for allow and deny. Its OpenAI-compatible model
+responses are deterministic local fixtures, **not** evidence of a live model
+provider. It uses a temporary Yuanpu home and does not read the user's provider
+credentials. A previous live-provider TASK-036 run is historical supporting
+evidence only, not a substitute for this revision's desktop probe.
 
 ## Existing Windows installation smoke
 

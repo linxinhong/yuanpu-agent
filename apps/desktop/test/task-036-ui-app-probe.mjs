@@ -101,18 +101,45 @@ const workspace = join(root, 'workspace');
 const userData = join(root, 'desktop-user-data');
 let providerRequests = 0;
 const live = process.env.TASK_036_LIVE === '1';
-const screenshots = resolve(desktopRoot, '../../docs/frontend/evidence/task-036');
+const approvalFixture = process.env.TASK_008_APPROVAL_FIXTURE === '1';
+const screenshots = approvalFixture ? join(root, 'screenshots') : resolve(desktopRoot, '../../docs/frontend/evidence/task-036');
 let mode = 'success';
+let approvalDecision = 'approved';
 const provider = createServer(async (request, response) => {
   if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
     response.writeHead(404).end(); return;
   }
-  for await (const _chunk of request) { /* Only synthetic prompts are used by this fixture. */ }
+  let requestBody = '';
+  for await (const chunk of request) {
+    requestBody += chunk.toString();
+    if (requestBody.length > 256_000) { response.writeHead(413).end(); return; }
+  }
   providerRequests += 1;
   if (mode === 'hold') return;
   if (mode === 'failure') { response.writeHead(400).end(JSON.stringify({ error: { message: 'Controlled provider failure' } })); return; }
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+  if (mode === 'approval') {
+    const messages = JSON.parse(requestBody).messages;
+    const lastUserIndex = messages.findLastIndex((message) => message.role === 'user');
+    const currentMessages = messages.slice(lastUserIndex);
+    const latestTool = [...currentMessages].reverse().find((message) => message.role === 'tool');
+    const toolText = latestTool ? JSON.stringify(latestTool.content) : '';
+    const capabilityId = /ypcap:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+/.exec(toolText)?.[0];
+    const latestToolCall = [...currentMessages].reverse().find((message) => message.role === 'assistant' && message.tool_calls?.length)?.tool_calls[0]?.function?.name;
+    const toolCall = (name, args) => {
+      response.write(chunk({ role: 'assistant', tool_calls: [{ index: 0, id: `call_${providerRequests}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }));
+      response.end(chunk({}, 'tool_calls') + 'data: [DONE]\n\n');
+    };
+    if (!latestTool) { toolCall('search_capabilities', { query: 'yuanpu_approved_echo' }); return; }
+    if (latestToolCall === 'search_capabilities' && capabilityId) {
+      toolCall('execute_capability', { name: capabilityId, arguments: { text: `TASK008-${approvalDecision}` } });
+      return;
+    }
+    response.write(chunk({ role: 'assistant', content: `TASK008-${approvalDecision}` }));
+    response.end(chunk({}, 'stop') + 'data: [DONE]\n\n');
+    return;
+  }
   response.write(chunk({ role: 'assistant', content: 'UI fixture reply completed.' }));
   response.end(chunk({}, 'stop') + 'data: [DONE]\n\n');
 });
@@ -169,7 +196,7 @@ try {
   } catch (error) {
     throw new Error(`${error.message}; diagnostics=${diagnostics.slice(-700)}`);
   }
-  await eventually(() => renderer.evaluate('document.querySelectorAll(".nav-item").length === 4'), 'Renderer UI did not mount.');
+  await eventually(() => renderer.evaluate('document.querySelectorAll(".nav-item").length >= 4'), 'Renderer UI did not mount.');
   runtimePid = await eventually(() => childRuntimePid(child.pid), 'Runtime child missing.');
   const connectionId = `imc_${randomUUID()}`;
   const connection = await renderer.evaluate(`window.yuanpu.saveWecomConnection(${JSON.stringify({
@@ -192,12 +219,16 @@ try {
   assert.equal(created.nextTriggerAt, preview.nextTriggerAt);
   await renderer.evaluate(`window.yuanpu.setScheduleEnabled(${JSON.stringify(created.scheduleId)}, false)`);
   assert.equal((await renderer.evaluate('window.yuanpu.listSchedules()'))[0].enabled, false);
-  await renderer.evaluate(`Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('定时任务')).click()`);
-  await eventually(async () => (await renderer.evaluate('document.body.innerText')).includes('Fixture scheduled note'), 'Real schedule did not appear in the Electron UI.');
-  await renderer.evaluate(`Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('连接')).click()`);
-  await eventually(async () => (await renderer.evaluate('document.body.innerText')).includes(connectionId), 'Real connection did not appear in the Electron UI.');
-  assert.equal((await renderer.evaluate('document.body.innerText')).includes('fixture-bot'), false);
-  await renderer.evaluate(`Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.trim() === '聊天').click()`);
+  if (approvalFixture) {
+    await renderer.evaluate(`document.querySelector('.nav-item[aria-label="工作"]').click()`);
+  } else {
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('定时任务')).click()`);
+    await eventually(async () => (await renderer.evaluate('document.body.innerText')).includes('Fixture scheduled note'), 'Real schedule did not appear in the Electron UI.');
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.includes('连接')).click()`);
+    await eventually(async () => (await renderer.evaluate('document.body.innerText')).includes(connectionId), 'Real connection did not appear in the Electron UI.');
+    assert.equal((await renderer.evaluate('document.body.innerText')).includes('fixture-bot'), false);
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.nav-item')).find((button) => button.textContent.trim() === '聊天').click()`);
+  }
   const body = () => renderer.evaluate('document.body.innerText');
   const click = (selector) => renderer.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   const fill = async (text) => {
@@ -228,7 +259,7 @@ try {
     const run = await eventually(async () => {
       const current = await latestRun();
       return current && ['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(current.status) ? current : undefined;
-    }, 'Run did not finish.', live ? 120_000 : 20_000);
+    }, 'Run did not finish.', live || approvalFixture ? 120_000 : 20_000);
     await eventually(async () => !(await renderer.evaluate('Boolean(document.querySelector(".thinking"))')), 'UI stayed busy after terminal state.');
     return run;
   };
@@ -244,7 +275,7 @@ try {
   await eventually(async () => (await body()).includes(first.output.message), 'Model response missing in UI.');
 
   // Native modal keyboard behavior and all supported viewport bounds.
-  for (const [width, height] of [[1440, 900], [1280, 800], [1024, 768], [390, 844]]) {
+  for (const [width, height] of approvalFixture ? [] : [[1440, 900], [1280, 800], [1024, 768], [390, 844]]) {
     await renderer.command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await eventually(async () => await renderer.evaluate(`window.innerWidth === ${width}`), 'Viewport did not update.');
     if (width <= 1100) {
@@ -260,11 +291,13 @@ try {
     await shot(`${live ? 'live' : 'fixture'}-chat-${width}`);
   }
   await renderer.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  await click('[aria-label="打开会话动态"]');
+  if (!approvalFixture) await click('[aria-label="打开会话动态"]');
 
-  if (live) {
+  if (live || approvalFixture) {
     for (const decision of ['approved', 'denied']) {
-      await send('请查找并调用 yuanpu_approved_echo，参数 text 为 UI-036-' + decision + '。这是需要宿主一次授权的无副作用回显工具，请只调用一次，等待用户决定，不改用其他工具。');
+      approvalDecision = decision;
+      if (approvalFixture) mode = 'approval';
+      await send('请查找并调用 yuanpu_approved_echo，参数 text 为 ' + (approvalFixture ? 'TASK008-' : 'UI-036-') + decision + '。这是需要宿主一次授权的无副作用回显工具，请只调用一次，等待用户决定，不改用其他工具。');
       await eventually(async () => (await renderer.evaluate('window.yuanpu.listCapabilityApprovals()')).length > 0,
         'Live model did not request the controlled echo approval.', 120_000);
       await eventually(() => renderer.evaluate('Array.from(document.querySelectorAll(".approval-actions button")).some(button => button.textContent.trim() === "允许一次" && !button.disabled)'), 'Approval controls absent.', 120_000).catch(async (error) => {
@@ -282,12 +315,15 @@ try {
       const run = await waitTerminal();
       assert.equal(run.status, decision === 'approved' ? 'succeeded' : 'failed');
       if (decision === 'approved') {
-        assert.ok(run.output?.message.includes('UI-036-approved'));
-        assert.equal(await renderer.evaluate('Array.from(document.querySelectorAll(".message.assistant .message-body p")).filter(p => p.textContent.includes("UI-036-approved")).length'), 1);
+        assert.ok(run.output?.message.includes(approvalFixture ? 'TASK008-approved' : 'UI-036-approved'));
+        assert.equal(await renderer.evaluate(`Array.from(document.querySelectorAll('.message.assistant .message-body p')).filter(p => p.textContent.includes(${JSON.stringify(approvalFixture ? 'TASK008-approved' : 'UI-036-approved')})).length`), 1);
+        if (approvalFixture) {
+          assert.equal(run.output?.tools?.some((tool) => tool.name.startsWith('ypcap:') && tool.status === 'completed'), true);
+        }
       }
-      if (decision === 'denied') assert.equal(run.output?.tools.some(tool => tool.name === 'execute_capability' && tool.status === 'completed'), false);
-      assert.ok((await body()).includes(decision === 'approved' ? '已允许一次' : '已拒绝授权'));
-      await shot('live-approval-' + decision);
+      if (decision === 'denied') assert.equal(run.output?.tools.some(tool => (approvalFixture ? tool.name.startsWith('ypcap:') : tool.name === 'execute_capability') && tool.status === 'completed'), false);
+      if (!approvalFixture) assert.ok((await body()).includes(decision === 'approved' ? '已允许一次' : '已拒绝授权'));
+      await shot((approvalFixture ? 'task008' : 'live') + '-approval-' + decision);
     }
   } else {
     mode = 'failure';
@@ -324,7 +360,7 @@ try {
     status: 'passed',
     schedulePersisted: true,
     connectionStatus: connection.status,
-    mode: live ? "live-provider" : "controlled-provider",
+    mode: live ? 'live-provider' : approvalFixture ? 'controlled-approval-provider' : 'controlled-provider',
     viewportAndKeyboard: true,
     providerRequests,
     runtimeChildrenStopped: true,
