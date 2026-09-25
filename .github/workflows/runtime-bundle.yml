@@ -3,6 +3,11 @@ name: Runtime Bundle
 on:
   workflow_dispatch:
     inputs:
+      task008-verification:
+        description: Run isolated TASK-008 two-version verification instead of normal bundle
+        required: false
+        type: boolean
+        default: false
       artifact-prefix:
         description: Prefix for uploaded artifact names
         required: false
@@ -35,7 +40,12 @@ permissions:
   contents: read
 
 jobs:
+  task008-verification:
+    if: ${{ inputs.task008-verification == true }}
+    uses: ./.github/workflows/task-008-artifact-verification.yml
+
   native-bundle:
+    if: ${{ inputs.task008-verification != true }}
     name: Native bundle (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
