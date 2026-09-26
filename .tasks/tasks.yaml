@@ -1557,7 +1557,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-044
     title: "实现助理对工作过程的评估"
-    status: ready
+    status: in_progress
     goal: "助理自动审阅工作目标、过程、结论及产物，发现遗漏并生成有证据的后续动作。"
     scope:
       in: ["工作审阅服务与 skills/review-work/SKILL.md，消费助理自动化触发", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
@@ -1583,15 +1583,14 @@ tasks:
     investigation_hints: ["packages/evals/README.md、src/harness.ts 仅作离线评分/证据方法参考，不修改上游或依赖其生产 runner", "新增 yuanpu-assistant review 模块与技能；输入来自已验证来源仓库，专业核验接口可先返回待委派状态", "临时文件与 loopback 模型验证真实写入；费用上限/取消/新版本重试/误报完成是最近行为测试，再 pnpm check"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-assistant-review-044"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T18:57:54.778Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-review"
+      branch: "task/task-044-assistant-work-review"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-045
     title: "实现用户理解与自动工作整理技能"
     status: pending
