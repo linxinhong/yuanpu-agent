@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
-import { parseWorkReviewProposal, type WorkReviewProposal } from '@yuanpu-agent/assistant';
+import { parseWorkReviewProposal, parseUnderstandingProposal, isDirectUserStatement,
+  type WorkReviewProposal, type AssistantUserUnderstanding,
+  type UnderstandingSnapshot, type UnderstandingProposal } from '@yuanpu-agent/assistant';
 import type { AssistantMemoryRepository, AssistantAutomationStore, AutomationHandler,
-  AutomationJob, AutomationProposal, AssistantWorkReviewStore, WorkReviewSnapshot } from '@yuanpu-agent/assistant';
+  AutomationJob, AutomationProposal, AssistantWorkReviewStore, WorkReviewSnapshot,
+  AssistantWorkOrganization } from '@yuanpu-agent/assistant';
 import type { AssistantDelegationRecord } from '@yuanpu-agent/protocol';
 
 export interface DelegationAutomationHost {
@@ -14,7 +17,14 @@ export interface DelegationAutomationHost {
 
 export interface WorkReviewAutomationHost {
   store: AssistantWorkReviewStore;
+  organization?: AssistantWorkOrganization;
   review(snapshot: WorkReviewSnapshot, signal: AbortSignal,
+    beforeModel: () => boolean): Promise<{ costUsd: number; message: string }>;
+}
+
+export interface UnderstandingAutomationHost {
+  store: AssistantUserUnderstanding;
+  understand(snapshot: UnderstandingSnapshot, signal: AbortSignal,
     beforeModel: () => boolean): Promise<{ costUsd: number; message: string }>;
 }
 
@@ -46,12 +56,20 @@ function parseEvidenceProposal(message: string): Array<{ criterion: string; evid
 /** Worker-owned periodic check and one-shot, crash-conservative delegation wake. */
 export function assistantAutomationHandler(memory: AssistantMemoryRepository,
   store: AssistantAutomationStore, delegations?: DelegationAutomationHost,
-  reviews?: WorkReviewAutomationHost): AutomationHandler {
+  reviews?: WorkReviewAutomationHost,
+  understanding?: UnderstandingAutomationHost): AutomationHandler {
   return {
     async lookup(job) {
       if (job.kind === 'review-work') {
         if (store.hasCheckpoint(job.effectId)) return 'applied';
         return reviews?.store.snapshot(job) ? 'absent' : 'deferred';
+      }
+      if (job.kind === 'understand-user') {
+        if (store.hasCheckpoint(job.effectId)) return 'applied';
+        return understanding?.store.snapshot(job) ? 'absent' : 'deferred';
+      }
+      if (job.kind === 'maintain-memory') {
+        return store.hasCheckpoint(job.effectId) ? 'applied' : 'absent';
       }
       if (job.kind === 'verify-delegation') {
         if (store.hasCheckpoint(job.effectId)) return 'applied';
@@ -67,6 +85,38 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
     },
     async prepare(job: AutomationJob, signal: AbortSignal): Promise<AutomationProposal> {
       if (signal.aborted) throw signal.reason;
+      if (job.kind === 'understand-user') {
+        if (!understanding) throw new Error('User understanding host is unavailable.');
+        const snapshot = understanding.store.snapshot(job);
+        if (!snapshot) throw new Error('User understanding source is unavailable.');
+        const fingerprint = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+        const prepared = store.preparedProposal(job);
+        if (prepared) {
+          if ((prepared.value as { fingerprint?: string }).fingerprint === fingerprint) return prepared;
+          return { costUsd: 0, value: { fingerprint, parsed: { observations: [] } } };
+        }
+        if (store.hasEffectAttempt(job.effectId)) {
+          return { costUsd: 0, value: { fingerprint, parsed: { observations: [] } } };
+        }
+        signal.throwIfAborted();
+        const billed = await understanding.understand(snapshot, signal,
+          () => store.beginEffectAttempt(job));
+        signal.throwIfAborted();
+        let parsed: UnderstandingProposal;
+        try {
+          parsed = parseUnderstandingProposal(billed.message);
+          parsed = { observations: parsed.observations.filter((item) =>
+            isDirectUserStatement(snapshot.userText, item.quote, item.topic)) };
+        }
+        catch { parsed = { observations: [] }; }
+        const proposal = { costUsd: billed.costUsd, value: { fingerprint, parsed } };
+        store.savePreparedProposal(job, proposal);
+        return proposal;
+      }
+      if (job.kind === 'maintain-memory') {
+        return { costUsd: 0, value: { sourceId: job.sourceId,
+          sourceVersion: job.sourceVersion } };
+      }
       if (job.kind === 'review-work') {
         if (!reviews) throw new Error('Work review host is unavailable.');
         const snapshot = reviews.store.snapshot(job);
@@ -127,6 +177,25 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
         availableSourceCount: sources.available ?? 0, activeMemoryCount: memories.total } };
     },
     async apply(job, proposal, commit, signal) {
+      if (job.kind === 'understand-user') {
+        if (!understanding) throw new Error('User understanding host is unavailable.');
+        signal.throwIfAborted();
+        const snapshot = understanding.store.snapshot(job);
+        const value = proposal.value as { fingerprint: string; parsed: UnderstandingProposal };
+        if (!snapshot || createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
+          !== value.fingerprint) throw new Error('Understanding source changed before commit.');
+        understanding.store.record(job, snapshot, value.parsed, commit,
+          (record) => store.recordCheckpoint(job, record));
+        await understanding.store.reconcile(job.audience);
+        return;
+      }
+      if (job.kind === 'maintain-memory') {
+        signal.throwIfAborted();
+        await understanding?.store.reconcile(job.audience);
+        await reviews?.organization?.reconcile();
+        commit(() => store.recordCheckpoint(job, proposal.value));
+        return;
+      }
       if (job.kind === 'review-work') {
         if (!reviews) throw new Error('Work review host is unavailable.');
         signal.throwIfAborted();
@@ -137,7 +206,10 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
         const parsed = (proposal.value as { parsed: WorkReviewProposal }).parsed;
         const committed = reviews.store.record(job, snapshot, parsed, commit,
           (value) => store.recordCheckpoint(job, value));
-        if (committed) await reviews.store.flushPending();
+        if (committed) {
+          await reviews.store.flushPending();
+          await reviews.organization?.reconcile();
+        }
         return;
       }
       if (job.kind === 'verify-delegation') {
@@ -160,6 +232,10 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
           status: current.status, updatedAt: current.updatedAt,
           evidenceLinked: current.status === 'completed' }));
         return;
+      }
+      if (job.kind === 'daily-check' || job.kind === 'weekly-check') {
+        await understanding?.store.reconcile(job.audience);
+        await reviews?.organization?.reconcile();
       }
       commit(() => store.recordCheckpoint(job, proposal.value));
     },

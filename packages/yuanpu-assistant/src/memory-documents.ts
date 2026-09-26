@@ -211,6 +211,32 @@ export class AssistantMemoryRepository {
     if (!validId(id)) throw new Error('Invalid memory document ID.');
     if (section === 'memories' && id === 'user-summary') return join(this.root, 'memories', 'USER.md');
     if (section === 'memories' && id === 'core-memory') return join(this.root, 'memories', 'MEMORY.md');
+    if (section === 'memories' && id === 'collaboration') {
+      return join(this.root, 'memories', 'collaboration.md');
+    }
+    const userTopics = new Set(['background', 'interests', 'hobbies', 'values', 'goals',
+      'working-style', 'thinking-style', 'preferences']);
+    if (section === 'memories' && id.startsWith('user-')
+      && userTopics.has(id.slice('user-'.length))) {
+      return join(this.root, 'memories', 'user', `${id.slice('user-'.length)}.md`);
+    }
+    if (section === 'memories' && ['knowledge', 'experiences'].includes(id.slice('user-'.length))
+      && id.startsWith('user-')) {
+      return join(this.root, 'memories', 'knowledge', `${id.slice('user-'.length)}.md`);
+    }
+    const workFiles: Record<string, string> = { 'work-context': 'context.md',
+      'work-focus': 'focus.md', 'work-commitments': 'commitments.md',
+      'work-user-context': 'user-context.md' };
+    if (section === 'work' && workFiles[id]) return join(this.root, 'work', workFiles[id]);
+    if (section === 'work' && /^work-project-[a-z0-9][a-z0-9_-]*$/u.test(id)) {
+      return join(this.root, 'work', 'projects', `${id.slice('work-project-'.length)}.md`);
+    }
+    if (section === 'work' && /^work-commitment-[a-f0-9]{24}$/u.test(id)) {
+      return join(this.root, 'work', 'commitments', `${id.slice('work-commitment-'.length)}.md`);
+    }
+    if (section === 'suggestions' && /^follow-up-[a-f0-9]{24}$/u.test(id)) {
+      return join(this.root, 'suggestions', 'follow-ups', `${id.slice('follow-up-'.length)}.md`);
+    }
     return join(this.root, section, 'notes', `${id}.md`);
   }
 
@@ -323,6 +349,7 @@ export class AssistantMemoryRepository {
     const row = this.row(id);
     if (!row) return undefined;
     const path = this.path(row.section as AssistantDocumentSection, id);
+    await assertSafeDirectory(dirname(path));
     const content = await existingContent(path);
     if (content === undefined) throw new Error(`Memory file is missing: ${id}`);
     const parsed = parseDocument(content);
@@ -391,7 +418,10 @@ export class AssistantMemoryRepository {
       const source = this.sources.source(ref.sourceId);
       if (!source || source.sourceVersion !== ref.sourceVersion
         || (source.availability !== 'available'
-          && !(allowUnavailableEvidence && source.availability === 'temporarily_unavailable'))
+          && !(source.availability === 'temporarily_unavailable'
+            && (allowUnavailableEvidence || (current?.status === 'active'
+              && current.evidence.some((existing) => existing.sourceId === ref.sourceId
+                && existing.sourceVersion === ref.sourceVersion)))))
         || !sameAudience(source.audience, draft.audience) || this.sources.isForgotten(ref.sourceId)) {
         throw new Error(`Memory evidence is not currently available: ${ref.sourceId}`);
       }
@@ -407,6 +437,7 @@ export class AssistantMemoryRepository {
       status: draft.status ?? 'active' };
     validateDocument(document);
     const path = this.path(document.section, document.id);
+    await assertSafeDirectory(dirname(path));
     const previous = await existingContent(path);
     if (!current && previous !== undefined && previous !== '# About the user\n\n'
       && previous !== '# Current memory\n\n') {

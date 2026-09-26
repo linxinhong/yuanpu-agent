@@ -67,8 +67,11 @@ test('real Runtime source adapter pages saved Work and Assistant turns into Work
       assert.equal(db.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status='processed'").get().n, 2);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_text').get().n, 2);
       assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
-        WHERE kind IN ('review-work','understand-user')`).get().n, 2,
+        WHERE kind IN ('review-work','understand-user')`).get().n, 3,
       'real saved turns must enter the durable assistant automation queue');
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+        WHERE kind='understand-user'`).get().n, 2,
+      'Work and Assistant user turns both feed evidence-bound understanding');
       assert.equal(db.prepare('SELECT cursor FROM source_feeds WHERE feed_id=?').get('work').cursor,
         workPage.nextCursor);
     } finally { db.close(); }

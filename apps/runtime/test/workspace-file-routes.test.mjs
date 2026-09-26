@@ -26,7 +26,12 @@ test('work file routes serve the workspace with containment enforcement', async 
   });
   child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
   context.after(async () => {
-    child.kill();
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise((resolve) => {
+        child.once('exit', resolve);
+        child.kill();
+      });
+    }
     await rm(home, { recursive: true, force: true });
     await rm(workspace, { recursive: true, force: true });
   });
