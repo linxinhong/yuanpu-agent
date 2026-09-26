@@ -61,6 +61,7 @@ const sourceSchema = `
     kind TEXT NOT NULL CHECK (kind IN ('created','updated','deleted')),
     audience_kind TEXT NOT NULL, audience_id TEXT NOT NULL,
     content_ref TEXT, work_id TEXT, occurred_at TEXT NOT NULL,
+    attempted_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
       ('pending','processed','unavailable','obsolete','forgotten')),
     PRIMARY KEY (feed_id,event_id)
@@ -144,6 +145,10 @@ export class AssistantSourceStore {
     this.database = database;
     database.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     database.exec(sourceSchema);
+    const columns = database.prepare('PRAGMA table_info(source_events)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'attempted_at')) {
+      database.exec('ALTER TABLE source_events ADD COLUMN attempted_at TEXT');
+    }
   }
 
   static async open(assistantHome: string): Promise<AssistantSourceStore> {
@@ -183,6 +188,8 @@ export class AssistantSourceStore {
     try {
       if (this.cursor(feedId) !== expectedCursor) throw new Error('Source cursor changed.');
       let inserted = 0;
+      const originatingFeed = feedId.endsWith('-deletions')
+        ? feedId.slice(0, -'-deletions'.length) : feedId;
       for (const event of page.events) {
         const change = event.change;
         validIdentity(event.eventId, 'source event ID');
@@ -194,7 +201,9 @@ export class AssistantSourceStore {
         const owner = this.database.prepare(`SELECT feed_id FROM source_events WHERE source_id = ?
           UNION SELECT feed_id FROM source_current WHERE source_id = ? LIMIT 1`)
           .get(change.sourceId, change.sourceId) as { feed_id: string } | undefined;
-        if (owner && owner.feed_id !== feedId) throw new Error('Source ID belongs to another feed.');
+        if (owner && owner.feed_id.replace(/-deletions$/u, '') !== originatingFeed) {
+          throw new Error('Source ID belongs to another feed.');
+        }
         const existing = this.database.prepare('SELECT * FROM source_events WHERE feed_id = ? AND event_id = ?')
           .get(feedId, event.eventId) as Record<string, unknown> | undefined;
         if (existing) {
@@ -235,7 +244,8 @@ export class AssistantSourceStore {
   nextEvent(retryUnavailable = false): QueuedSource | undefined {
     const row = this.database.prepare(`SELECT * FROM source_events
       WHERE status = 'pending' OR (status = 'unavailable' AND ? = 1)
-      ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, rowid LIMIT 1`)
+      ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END,
+        CASE WHEN status = 'unavailable' THEN attempted_at END, rowid LIMIT 1`)
       .get(retryUnavailable ? 1 : 0) as Record<string, unknown> | undefined;
     return row ? eventRow(row) : undefined;
   }
@@ -313,8 +323,10 @@ export class AssistantSourceStore {
   }
 
   markEvent(event: QueuedSource, status: QueuedSource['status']): void {
-    this.database.prepare('UPDATE source_events SET status = ? WHERE feed_id = ? AND event_id = ?')
-      .run(status, event.feedId, event.eventId);
+    this.database.prepare(`UPDATE source_events SET status = ?,
+      attempted_at = CASE WHEN ? = 'unavailable' THEN ? ELSE attempted_at END
+      WHERE feed_id = ? AND event_id = ?`)
+      .run(status, status, new Date().toISOString(), event.feedId, event.eventId);
   }
 
   setCurrent(event: QueuedSource, availability: SourceSearchHit['availability'], text?: string,
@@ -322,7 +334,9 @@ export class AssistantSourceStore {
     const change = event.change;
     const previous = this.database.prepare('SELECT feed_id FROM source_current WHERE source_id = ?')
       .get(change.sourceId) as { feed_id: string } | undefined;
-    if (previous && previous.feed_id !== event.feedId) throw new Error('Source ID belongs to another feed.');
+    const originatingFeed = event.feedId.endsWith('-deletions')
+      ? event.feedId.slice(0, -'-deletions'.length) : event.feedId;
+    if (previous && previous.feed_id !== originatingFeed) throw new Error('Source ID belongs to another feed.');
     this.database.exec('BEGIN IMMEDIATE');
     try {
       if (availability === 'temporarily_unavailable' && previous) {
@@ -337,7 +351,7 @@ export class AssistantSourceStore {
         ON CONFLICT(source_id) DO UPDATE SET source_version=excluded.source_version,
         content_ref=excluded.content_ref,audience_kind=excluded.audience_kind,
         audience_id=excluded.audience_id,availability=excluded.availability,
-        occurred_at=excluded.occurred_at`).run(change.sourceId, event.feedId, change.sourceVersion,
+        occurred_at=excluded.occurred_at`).run(change.sourceId, originatingFeed, change.sourceVersion,
           change.contentRef ?? null, change.audience.kind, change.audience.id, availability, change.occurredAt);
       if (availability === 'available' && text !== undefined) {
         const bounded = text.slice(0, 32_000);
@@ -389,6 +403,16 @@ export class AssistantSourceStore {
     return rows.map((row) => ({ contentRef: row.content_ref,
       ...(row.summary === null ? {} : { summary: row.summary }),
       ...(row.media_type === null ? {} : { mediaType: row.media_type }) }));
+  }
+
+  sourceText(sourceId: string, audience: AssistantAudience): string | undefined {
+    validAudience(audience);
+    const source = this.source(sourceId);
+    if (!source || source.availability !== 'available'
+      || source.audience.kind !== audience.kind || source.audience.id !== audience.id) return undefined;
+    const row = this.database.prepare('SELECT text FROM source_text WHERE source_id = ?')
+      .get(sourceId) as { text: string } | undefined;
+    return row?.text;
   }
 
   search(query: string, audience: AssistantAudience, limit = 20): SourceSearchHit[] {

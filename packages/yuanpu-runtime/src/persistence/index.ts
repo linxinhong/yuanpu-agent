@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { AgentRunStore } from './agent-run-store.js';
 import { AssistantLinkStore } from './assistant-link-store.js';
 import { AssistantHostStore } from './assistant-host-store.js';
+import { AssistantSourceLifecycleStore } from './assistant-source-lifecycle-store.js';
 import { WorkConversationStore } from './work-conversation-store.js';
 import { ChannelStore } from '../channels/store.js';
 import { SchedulerStore } from '../scheduler/store.js';
@@ -12,9 +13,10 @@ import { SchedulerStore } from '../scheduler/store.js';
 export * from './agent-run-store.js';
 export * from './assistant-link-store.js';
 export * from './assistant-host-store.js';
+export * from './assistant-source-lifecycle-store.js';
 export * from './work-conversation-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 11;
+export const YUANPU_METADATA_SCHEMA_VERSION = 12;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -437,6 +439,24 @@ const migrations: readonly Migration[] = [{
         END;`);
     assertWorkSourceEventSchema(database);
   },
+}, {
+  version: 12,
+  sql: `
+    CREATE TABLE IF NOT EXISTS yp_assistant_source_deletions (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      feed_id TEXT NOT NULL CHECK(feed_id IN ('work','assistant')),
+      source_id TEXT NOT NULL,
+      source_version TEXT NOT NULL,
+      audience_id TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      UNIQUE(feed_id,source_id)
+    ) STRICT;
+    CREATE TABLE IF NOT EXISTS yp_assistant_legacy_memory_events (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_version TEXT NOT NULL,
+      occurred_at TEXT NOT NULL
+    ) STRICT;
+  `,
 }];
 
 function assertWorkSourceEventSchema(database: DatabaseSync): void {
@@ -557,6 +577,12 @@ function applyMigrations(database: DatabaseSync): number {
   if (!workDirectoryColumn(database)) throw new Error('Missing Work working_directory column.');
   assertCompatibleAssistantHostSchema(database, true);
   assertWorkSourceEventSchema(database);
+  const deletions = database.prepare(`SELECT type FROM sqlite_master
+    WHERE name='yp_assistant_source_deletions'`).get() as { type: string } | undefined;
+  if (deletions?.type !== 'table') throw new Error('Missing Assistant source deletion ledger.');
+  const legacyEvents = database.prepare(`SELECT type FROM sqlite_master
+    WHERE name='yp_assistant_legacy_memory_events'`).get() as { type: string } | undefined;
+  if (legacyEvents?.type !== 'table') throw new Error('Missing legacy memory source ledger.');
   return YUANPU_METADATA_SCHEMA_VERSION;
 }
 
@@ -566,6 +592,7 @@ export class YuanpuMetadataDatabase {
   readonly agentRuns: AgentRunStore;
   readonly assistantLink: AssistantLinkStore;
   readonly assistantHost: AssistantHostStore;
+  readonly assistantSourceLifecycle: AssistantSourceLifecycleStore;
   readonly workConversations: WorkConversationStore;
   readonly channels: ChannelStore;
   readonly schedules: SchedulerStore;
@@ -575,6 +602,7 @@ export class YuanpuMetadataDatabase {
     this.agentRuns = new AgentRunStore(database);
     this.assistantLink = new AssistantLinkStore(database);
     this.assistantHost = new AssistantHostStore(database);
+    this.assistantSourceLifecycle = new AssistantSourceLifecycleStore(database);
     this.workConversations = new WorkConversationStore(database);
     this.channels = new ChannelStore(database);
     this.schedules = new SchedulerStore(database);

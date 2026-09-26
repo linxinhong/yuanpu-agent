@@ -560,7 +560,8 @@ async function serve(): Promise<void> {
   });
   const assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
-    sources: new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost),
+    sources: new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
+      metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md')),
     model: {
       appPath: home.appPath,
       agentPath: home.agentPath,

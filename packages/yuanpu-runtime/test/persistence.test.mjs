@@ -44,8 +44,10 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_agent_runs',
     'yp_assistant_bindings',
     'yp_assistant_deliveries',
+    'yp_assistant_legacy_memory_events',
     'yp_assistant_mirror',
     'yp_assistant_requests',
+    'yp_assistant_source_deletions',
     'yp_assistant_sources',
     'yp_channel_connections',
     'yp_channel_inbound',
@@ -78,6 +80,28 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
   assert.equal(runColumns.includes('external_effect_state'), true);
   assert.equal(runColumns.includes('approval_request_id'), true);
   inspection.close();
+});
+
+test('v11 metadata gains deletion and legacy source ledgers without rewriting saved Work turns', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-v11-sources-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  openYuanpuMetadataDatabase(path).close();
+  const old = new DatabaseSync(path);
+  old.exec(`DROP TABLE yp_assistant_source_deletions;
+    DROP TABLE yp_assistant_legacy_memory_events;
+    DELETE FROM yp_schema_migrations WHERE version=12;
+    PRAGMA user_version=11;`);
+  old.prepare(`INSERT INTO yp_work_turn_sources(conversation_id,turn_id,run_id,content_ref,
+    source_version,committed_at,user_text,assistant_text) VALUES (?,?,?,?,?,?,?,?)`)
+    .run('work:test', 'turn-1', 'run-1', 'ref-1', 'hash-1', '2026-09-27T00:00:00Z', 'u', 'a');
+  const eventId = old.prepare('SELECT event_id FROM yp_work_turn_sources').get().event_id;
+  old.close();
+  const upgraded = openYuanpuMetadataDatabase(path);
+  assert.equal(upgraded.schemaVersion, YUANPU_METADATA_SCHEMA_VERSION);
+  assert.equal(upgraded.workConversations.sourcePage(0, 1)[0].eventId, eventId);
+  assert.deepEqual(upgraded.assistantSourceLifecycle.deletionPage('work', 0, 10), []);
+  upgraded.close();
 });
 
 test('repairs both historical schema v8 shapes and a v9 Work database without losing records', async (context) => {

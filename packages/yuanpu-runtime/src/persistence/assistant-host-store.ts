@@ -368,7 +368,8 @@ export class AssistantHostStore {
     } }));
   }
 
-  sourcePage(afterEventId: number, limit: number): Array<{ eventId: number; change: AssistantSourceChange }> {
+  sourcePage(afterEventId: number, limit: number,
+    audienceId = 'local-user'): Array<{ eventId: number; change: AssistantSourceChange }> {
     if (!Number.isSafeInteger(afterEventId) || afterEventId < 0
       || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
       throw new Error('Invalid Assistant source page boundary.');
@@ -376,8 +377,9 @@ export class AssistantHostStore {
     const rows = this.database.prepare(`SELECT s.event_id, s.source_id, s.source_version, s.content_ref,
       s.audience_id, s.occurred_at, EXISTS(SELECT 1 FROM yp_assistant_sources p
         WHERE p.source_id = s.source_id AND p.event_id < s.event_id) AS prior
-      FROM yp_assistant_sources s WHERE s.event_id > ? ORDER BY s.event_id LIMIT ?`)
-      .all(afterEventId, limit) as Array<{ event_id: number; source_id: string; source_version: string;
+      FROM yp_assistant_sources s WHERE s.event_id > ? AND s.audience_id = ?
+      ORDER BY s.event_id LIMIT ?`)
+      .all(afterEventId, audienceId, limit) as Array<{ event_id: number; source_id: string; source_version: string;
         content_ref: string; audience_id: string; occurred_at: string; prior: number }>;
     return rows.map((row) => ({ eventId: row.event_id, change: {
       sourceId: row.source_id, sourceVersion: row.source_version, kind: row.prior ? 'updated' : 'created',
