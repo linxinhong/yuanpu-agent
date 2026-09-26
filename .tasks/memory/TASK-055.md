@@ -19,6 +19,7 @@
 - 聚焦构建/类型检查与 runtime-kit 的 Work/持久层测试通过；Runtime 全包 58/58 通过，日志 .git/worktrees/conversation-tree-sol/coding-owner/1790444767478439000.log。
 - 合并前最终 pnpm check 全量通过，日志 .git/worktrees/conversation-tree-sol/coding-owner/1790445510293072000.log（含重试修复）。首次全量因旧 Desktop 版本断言与并行 crash fixture 的连接重置失败；第二次因真实 Python MCP 初始化超出默认五秒失败。断言更新归实现提交；两项测试时序容差单列 89806d1，未改生产超时或跳过断言。
 - 合并 main 后，Work/persistence 聚焦检查通过；Runtime 全包首跑有新主线并行启动五秒超时（71/74），随后单独 Work 路由/文件预览/目录安全检查通过，日志 .git/worktrees/conversation-tree-sol/coding-owner/1790445666764473000.log。合并结果的 pnpm check 最终全量通过，日志 .git/worktrees/conversation-tree-sol/coding-owner/1790445689509766000.log；无其他 owner 测试代码修改。
+- 后续 main 的 UI 提交 1a7bf1e 在独占 worktree 无冲突合入为 26aff69；chat.tsx 的创建重试 UUID 逻辑保留，文件预览标签页改动未覆盖。App typecheck/test 和 Work/persistence 聚焦检查通过，日志 .git/worktrees/conversation-tree-sol/coding-owner/1790447863468281000.log。该合并树的 pnpm check 全量通过，日志 .git/worktrees/conversation-tree-sol/coding-owner/1790447879608776000.log。
 
 ## 限制与后续
 
