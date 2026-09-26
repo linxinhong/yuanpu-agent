@@ -144,26 +144,40 @@ export function redactReviewText(text: string): string {
 }
 const redact = redactReviewText;
 
+function lastTurnIndex(materials: WorkReviewMaterial[]): number {
+  for (let index = materials.length - 1; index >= 0; index--) {
+    if (materials[index]?.kind === 'turn') return index;
+  }
+  return -1;
+}
+
 /** A complete claim needs a host-verified artifact satisfying a literal user request. */
 function exactWriteProof(snapshot: WorkReviewSnapshot,
   evidence: AssistantEvidenceRef[]): AssistantEvidenceRef[] | undefined {
-  const turns = snapshot.materials.filter((item) => item.kind === 'turn');
-  if (turns.length !== 1 || !turns[0]!.text.startsWith('User:')) return undefined;
-  const instruction = /^User:\s*Write exactly `([^`\n]{1,1000})` to `([^`\n]{1,256})`\.\s*(?:\nAssistant:[^\n]*)?$/u
-    .exec(turns[0]!.text);
-  if (!instruction) return undefined;
+  const latestTurnIndex = lastTurnIndex(snapshot.materials);
+  const latestTurn = snapshot.materials[latestTurnIndex];
+  if (!latestTurn?.text.startsWith('User:')) return undefined;
+  const request = /^User:\s*([\s\S]*?)(?:\nAssistant:|$)/u.exec(latestTurn.text)?.[1]?.trim();
+  const initial = request && /^Write exactly `([^`\n]{1,1000})` to `([^`\n]{1,256})`\.$/u.exec(request);
+  const repair = request && /^Please fix ([^`\n]{1,256}) so it contains exactly `([^`\n]{1,1000})`\.$/u.exec(request);
+  const literal = initial?.[1] ?? repair?.[2];
+  const path = initial?.[2] ?? repair?.[1];
+  if (!literal || !path) return undefined;
   for (const ref of evidence) {
-    const artifact = snapshot.materials.find((item) => item.sourceId === ref.sourceId
+    const artifactIndex = snapshot.materials.findIndex((item) => item.sourceId === ref.sourceId
       && item.kind === 'artifact');
+    const artifact = snapshot.materials[artifactIndex];
+    if (artifactIndex <= latestTurnIndex) continue;
     if (!artifact) continue;
     const payload = /^Successful write payload for requested Work path ([^\n]+), run [^\n]+:\n([\s\S]*)$/u
       .exec(artifact.text);
     const suffix = artifact.sourceId.slice('work-artifact:'.length);
     const toolId = `work-tool:${suffix}`;
     const toolRef = evidence.find((item) => item.sourceId === toolId);
-    if (payload !== null && payload[1] === instruction[2] && payload[2] === instruction[1]
-      && toolRef && snapshot.materials.some((item) => item.sourceId === toolId
-        && item.kind === 'tool' && item.text.startsWith('Tool write (completed)'))) {
+    const toolIndex = snapshot.materials.findIndex((item) => item.sourceId === toolId
+      && item.kind === 'tool' && item.text.startsWith('Tool write (completed)'));
+    if (payload !== null && payload[1] === path && payload[2] === literal
+      && toolRef && toolIndex > latestTurnIndex && toolIndex < artifactIndex) {
       return [toolRef, ref];
     }
   }
@@ -267,6 +281,7 @@ export class AssistantWorkReviewStore {
       throw new Error('Review source is no longer available.');
     }
     const known = new Map(snapshot.materials.map((item) => [item.sourceId, item]));
+    const latestTurnIndex = lastTurnIndex(snapshot.materials);
     const findings = proposal.findings.map((item) => {
       const evidence: AssistantEvidenceRef[] = item.evidenceRefs.map((id) => {
         const material = known.get(id);
@@ -283,11 +298,13 @@ export class AssistantWorkReviewStore {
       const exactProof = exactWriteProof(snapshot, evidence);
       const failedTool = evidence.some((ref) => {
         const material = known.get(ref.sourceId);
-        return material?.kind === 'tool' && /\(failed\)/u.test(material.text);
+        return material?.kind === 'tool' && /\(failed\)/u.test(material.text)
+          && snapshot.materials.indexOf(material) > latestTurnIndex;
       });
       const successfulTool = evidence.some((ref) => {
         const material = known.get(ref.sourceId);
-        return material?.kind === 'tool' && /\(completed\)/u.test(material.text);
+        return material?.kind === 'tool' && /\(completed\)/u.test(material.text)
+          && snapshot.materials.indexOf(material) > latestTurnIndex;
       });
       let judgment = item.judgment;
       if (judgment === 'supported' && !exactProof) judgment = successfulTool ? 'partial' : 'unverified';
@@ -320,16 +337,15 @@ export class AssistantWorkReviewStore {
     if (judgment === 'failed' && !findings.some((finding) => finding.judgment === 'failed')) {
       judgment = 'unverified';
     }
-    if (judgment === 'failed' && snapshot.materials.some((item) => item.kind === 'tool'
-      && /\(completed\)/u.test(item.text))) judgment = 'partial';
+    if (judgment === 'failed' && snapshot.materials.some((item, index) => item.kind === 'tool'
+      && index > latestTurnIndex && /\(completed\)/u.test(item.text))) judgment = 'partial';
     const reviewId = `review-${hash(`${job.jobId}:${snapshot.workId}`).slice(0, 24)}`;
     const latest = this.database.prepare('SELECT MAX(review_version) AS version FROM work_reviews WHERE work_id=?')
       .get(snapshot.workId) as { version: number | null };
     const review: AssistantWorkReview = { reviewId, workId: snapshot.workId,
       reviewVersion: (latest.version ?? 0) + 1,
       audience: job.audience, goal: redact(judgment === 'supported'
-        ? snapshot.materials.find((item) => item.kind === 'turn' && item.text.startsWith('User:'))!
-          .text.split('\nAssistant:')[0]!.slice('User:'.length).trim()
+      ? snapshot.materials[latestTurnIndex]!.text.split('\nAssistant:')[0]!.slice('User:'.length).trim()
         : proposal.goal),
       constraints: proposal.constraints.map(redact), judgment, findings,
       unresolved: [...proposal.unresolved.map(redact),
