@@ -651,14 +651,15 @@ export class RuntimeManager {
     });
   }
 
-  submitDesktopMessage(message: string, surface: 'work' | 'assistant' = 'work', conversationId?: string): Promise<AgentRunReceipt> {
+  submitDesktopMessage(message: string, surface: 'work' | 'assistant' = 'work', conversationId?: string,
+    clientMessageId?: string): Promise<AgentRunReceipt> {
     if (typeof message !== 'string' || !message.trim()) {
       throw new Error('A non-empty message is required.');
     }
     return this.request(RUNTIME_ROUTES.chatSubmit, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message, surface, conversationId }),
+      body: JSON.stringify({ message, surface, conversationId, clientMessageId }),
     });
   }
 

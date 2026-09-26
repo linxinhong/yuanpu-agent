@@ -10,7 +10,8 @@ const bridge: DesktopBridge = {
   runtimeRecoveryNotice: () => ipcRenderer.invoke('runtime:recovery-notice'),
   greeting: (name) => ipcRenderer.invoke('runtime:greeting', name),
   chat: (message) => ipcRenderer.invoke('runtime:chat', message),
-  submitDesktopMessage: (message, surface, conversationId) => ipcRenderer.invoke('runtime:chat:submit', message, surface, conversationId),
+  submitDesktopMessage: (message, surface, conversationId, clientMessageId) =>
+    ipcRenderer.invoke('runtime:chat:submit', message, surface, conversationId, clientMessageId),
   getDesktopTranscript: (surface, conversationId) => ipcRenderer.invoke('desktop:transcript', surface, conversationId),
   listWorkConversations: () => ipcRenderer.invoke('work:conversations:list'),
   createWorkConversation: () => ipcRenderer.invoke('work:conversations:create'),

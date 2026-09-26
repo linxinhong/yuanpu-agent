@@ -255,6 +255,12 @@ export class ChannelStore {
     `).get(provider, connectionId, senderDigest));
   }
 
+  hasInbound(provider: string, connectionId: string, providerMessageId: string): boolean {
+    return Boolean(this.database.prepare(`SELECT 1 FROM yp_channel_inbound
+      WHERE provider = ? AND connection_id = ? AND provider_message_id = ?`)
+      .get(provider, connectionId, providerMessageId));
+  }
+
   acceptInbound(input: ChannelInboundRoute): { inserted: boolean; record: ChannelInboundRoute } {
     const inserted = this.database.prepare(`
       INSERT OR IGNORE INTO yp_channel_inbound(

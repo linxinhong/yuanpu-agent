@@ -183,6 +183,13 @@ export class AssistantLinkStore {
     return this.#row()?.previous_pi_session_id;
   }
 
+  legacySessionIds(): string[] {
+    const row = this.#row();
+    if (row) return [...new Set([row.previous_pi_session_id, row.linked_pi_session_id])];
+    const id = this.sessionId('assistant');
+    return id ? [id] : [];
+  }
+
   queueMirror(runId: string, part: AssistantMirror['part'], targetId: string, content: string): AssistantMirror {
     const now = new Date().toISOString();
     this.database.prepare(`

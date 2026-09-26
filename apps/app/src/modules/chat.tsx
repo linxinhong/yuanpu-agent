@@ -5,7 +5,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CapabilityApprovalSummary,
   NotificationNavigationTarget,
@@ -80,7 +80,7 @@ const initialMessages: ChatMessage[] = [{
   role: 'assistant',
   text: '你好，我是 YuanpuAgent。你可以直接开始对话，也可以让我调用外部 MCP 能力。',
 }];
-const assistantGreeting = '你好，我是你的助理。这里可以接续你绑定的企业微信私聊。';
+const assistantGreeting = '你好，我是你的助理。桌面与企业微信共享助理身份，各自保留独立对话。';
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -113,6 +113,7 @@ export function ChatPanel({
     catch { return ''; }
   });
   const [attachments, setAttachments] = useState<Array<{ name: string; contents: string }>>([]);
+  const pendingAssistantMessage = useRef<{ text: string; id: string; createdAt: number } | undefined>(undefined);
   const [attachmentError, setAttachmentError] = useState('');
   const [redactionPreviewEnabled, setRedactionPreviewEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -190,7 +191,7 @@ export function ChatPanel({
   const archiveQuery = useQuery({
     queryKey: ['assistant', 'archive'],
     queryFn: () => desktop!.getDesktopTranscript('assistantArchive'),
-    enabled: active && surface === 'assistant' && archiveOpen && Boolean(desktop) && Boolean(assistantLinkQuery.data?.linked),
+    enabled: active && surface === 'assistant' && archiveOpen && Boolean(desktop),
   });
   const mirrorQuery = useQuery({
     queryKey: ['assistant', 'mirrors', activeRunId],
@@ -198,15 +199,7 @@ export function ChatPanel({
     enabled: active && surface === 'assistant' && Boolean(desktop) && Boolean(activeRunId),
     refetchInterval: active && surface === 'assistant' && activeRunId ? 3000 : false,
   });
-  const retryMirror = useMutation({
-    mutationFn: (mirrorId: string) => desktop!.retryAssistantMirror(mirrorId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['assistant', 'mirrors', activeRunId] }),
-  });
   const appliedTranscript = useRef('');
-
-  useEffect(() => {
-    if (assistantLinkQuery.data && !assistantLinkQuery.data.linked) setArchiveOpen(false);
-  }, [assistantLinkQuery.data?.linked]);
 
   useEffect(() => {
     if (busy || !transcriptQuery.data) return;
@@ -496,7 +489,34 @@ export function ChatPanel({
         setMessages((current) => [...current, { id: nextId.current++, role: 'assistant',
           text: '这是浏览器预览回复。通过桌面应用启动后，消息会交给本地助理处理。' }]);
       } else {
-        const receipt = await desktop.submitDesktopMessage(text, surface, surface === 'work' ? workConversationId : undefined);
+        let clientMessageId: string | undefined;
+        if (surface === 'assistant') {
+          if (!pendingAssistantMessage.current) {
+            try {
+              const saved = JSON.parse(window.localStorage.getItem('yuanpu:assistant-pending-message') ?? 'null') as
+                { text?: unknown; id?: unknown; createdAt?: unknown } | null;
+              if (saved?.text === text && typeof saved.id === 'string'
+                && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id)
+                && typeof saved.createdAt === 'number'
+                && Date.now() - saved.createdAt < 300_000 && saved.createdAt <= Date.now()) {
+                pendingAssistantMessage.current = { text, id: saved.id, createdAt: saved.createdAt };
+              }
+            } catch { /* invalid local retry record */ }
+          }
+          if (pendingAssistantMessage.current?.text !== text
+            || Date.now() - pendingAssistantMessage.current.createdAt >= 300_000) {
+            pendingAssistantMessage.current = { text, id: crypto.randomUUID(), createdAt: Date.now() };
+          }
+          clientMessageId = pendingAssistantMessage.current.id;
+          try { window.localStorage.setItem('yuanpu:assistant-pending-message',
+            JSON.stringify(pendingAssistantMessage.current)); } catch { /* optional retry cache */ }
+        }
+        const receipt = await desktop.submitDesktopMessage(text, surface,
+          surface === 'work' ? workConversationId : undefined, clientMessageId);
+        if (surface === 'assistant') {
+          pendingAssistantMessage.current = undefined;
+          try { window.localStorage.removeItem('yuanpu:assistant-pending-message'); } catch { /* optional retry cache */ }
+        }
         setActiveRunId(receipt.runId);
         setActiveRunStatus(receipt.status);
         recordActivity(receipt.runId, '已提交任务', 'done');
@@ -676,12 +696,12 @@ export function ChatPanel({
               onClick={() => { restoreActivityFocus.current = true; if (activityOpen) setRightPanelMaximized(false); setActivityOpen((value) => !value); }}><AppIcon name="panel" /><span className="panel-toggle-label">运行详情</span></button>
           </div>
           {surface === 'assistant' && <div className="assistant-channel-state" role="status">
-            {archiveOpen ? '原桌面会话归档 · 只读' : assistantLinkQuery.data?.linked
-              ? '已连接企业微信私聊 · 桌面消息与回复将同步投递'
+            {archiveOpen ? '旧助理会话归档 · 只读' : assistantLinkQuery.data?.linked
+              ? '已绑定企业微信私聊 · 双渠道对话独立'
               : assistantLinkQuery.error ? '助理连接状态不可用' : '桌面助理 · 可在设置中绑定企业微信私聊'}
-            {assistantLinkQuery.data?.linked && <button type="button" className="runtime-link" onClick={() => setArchiveOpen((value) => !value)}>
-              {archiveOpen ? '返回已绑定会话' : '查看原桌面会话'}
-            </button>}
+            <button type="button" className="runtime-link" onClick={() => setArchiveOpen((value) => !value)}>
+              {archiveOpen ? '返回助理对话' : '查看旧助理会话'}
+            </button>
           </div>}
       </header>
       {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表' : '会话列表预览'}>
@@ -774,12 +794,11 @@ export function ChatPanel({
             {archiveOpen && archiveQuery.isLoading && <p className="archive-notice">正在读取原桌面会话…</p>}
             {archiveOpen && archiveQuery.error && <p className="archive-notice" role="alert">原桌面会话读取失败：{formatError(archiveQuery.error)}</p>}
             {archiveOpen && archiveQuery.data?.length === 0 && <p className="archive-notice">原桌面会话还没有消息。</p>}
-            {!archiveOpen && surface === 'assistant' && mirrorQuery.data?.length ? <div className="assistant-mirror-status" aria-label="企业微信投递状态">
+            {!archiveOpen && surface === 'assistant' && mirrorQuery.data?.length ? <div className="assistant-mirror-status" aria-label="旧企业微信投递记录（只读）">
+              <p>旧企业微信投递记录（只读）</p>
               {mirrorQuery.data.map((mirror) => <div key={mirror.mirrorId}>
                 <span>{mirror.part === 'user' ? '消息' : '回复'}：{mirror.status === 'accepted' ? '企业微信已接收' : mirror.status === 'pending' ? '等待投递' : mirror.status === 'delivering' ? '正在投递' : mirror.status === 'unknown' ? '结果未知' : '投递失败'}</span>
-                {mirror.status === 'failed' && <button type="button" disabled={retryMirror.isPending} onClick={() => retryMirror.mutate(mirror.mirrorId)}>重试投递</button>}
               </div>)}
-              {retryMirror.error && <p role="alert">{formatError(retryMirror.error)}</p>}
             </div> : null}
             {!archiveOpen && !workArchived && readyApprovalContextRef.current === approvalContext && approvals.map((approval) => (
               <article className="approval-card" key={approval.requestId}>

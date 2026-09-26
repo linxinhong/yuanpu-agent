@@ -138,11 +138,51 @@ async function fixture(options = {}) {
     config: options.config ?? config(),
     store: database.channels,
     agent: service,
+    assistant: options.assistant,
     transport,
   });
   router.start();
   return { database, executions, router, service, transport };
 }
+
+test('assistant binding diverts only new owner messages; old msgid and other paired Work remain on old ledger', async () => {
+  const context = await fixture();
+  try {
+    const oldMessage = message({ providerMessageId: 'before-binding' });
+    const old = await context.router.handleInbound(oldMessage);
+    assert.equal(old.accepted, true);
+    await waitUntil(() => context.executions.length === 1);
+    const contact = context.database.channels.listPrivateContacts('wecom')[0];
+    assert.ok(contact);
+    context.database.assistantHost.linkWecomContact(contact.contactId);
+    await context.router.close();
+    const assistantReceipts = [];
+    const assistant = {
+      ownsWecomMessage: (incoming) => context.database.assistantHost.ownsWecomMessage(
+        incoming.connectionId, incoming.senderId, incoming.conversationId),
+      handleWecom: async (incoming) => {
+        assistantReceipts.push(incoming.providerMessageId);
+        return { accepted: true, duplicate: false, runId: 'assistant-run' };
+      },
+      recoverWecom() {},
+    };
+    const router = new ChannelRouter({ config: config(), store: context.database.channels,
+      agent: context.service, assistant, transport: new FixtureTransport() });
+    router.start();
+    try {
+      const duplicate = await router.handleInbound(oldMessage);
+      assert.equal(duplicate.duplicate, true);
+      assert.equal(duplicate.runId, old.runId);
+      const owner = await router.handleInbound(message({ providerMessageId: 'after-binding' }));
+      assert.equal(owner.runId, 'assistant-run');
+      const other = await router.handleInbound(message({ senderId: 'member-fixture-b',
+        providerMessageId: 'other-work' }));
+      assert.equal(other.accepted, true);
+      await waitUntil(() => context.executions.length === 2);
+      assert.deepEqual(assistantReceipts, ['after-binding']);
+    } finally { await router.close(); }
+  } finally { await context.service.close(); context.database.close(); }
+});
 
 test('rejects unauthenticated channel identities before Agent dispatch', async () => {
   const context = await fixture();

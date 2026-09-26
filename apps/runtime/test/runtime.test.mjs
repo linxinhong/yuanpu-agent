@@ -424,6 +424,14 @@ test('runtime server exposes its protocol and greeting', async (context) => {
       idempotencyKey: 'legacy-default-rejected' }),
   });
   assert.equal(legacyAgentSubmission.status, 403);
+  for (const conversationId of ['assistant', 'assistant:desktop:forged', 'assistant:wecom:forged', 'asst_forged']) {
+    const bypass = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...agentRequest, conversation: { namespace: 'desktop', conversationId },
+        idempotencyKey: `reject-${conversationId}` }),
+    });
+    assert.equal(bypass.status, 403, conversationId);
+  }
   const duplicateAgentSubmission = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
     method: 'POST',
     headers: { ...headers, 'content-type': 'application/json' },

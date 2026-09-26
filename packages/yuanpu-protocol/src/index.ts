@@ -377,7 +377,8 @@ export interface DesktopBridge {
   runtimeRecoveryNotice(): Promise<RuntimeRecoveryNotice | undefined>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
-  submitDesktopMessage(message: string, surface?: DesktopConversationSurface, conversationId?: string): Promise<AgentRunReceipt>;
+  submitDesktopMessage(message: string, surface?: DesktopConversationSurface, conversationId?: string,
+    clientMessageId?: string): Promise<AgentRunReceipt>;
   getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
   listWorkConversations(): Promise<WorkConversation[]>;
   createWorkConversation(): Promise<WorkConversation>;
