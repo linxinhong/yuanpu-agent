@@ -1239,7 +1239,7 @@ tasks:
 
   - id: TASK-037
     title: "固定助理契约并验证 Pi 会话适配"
-    status: ready
+    status: in_progress
     goal: "以运行证据确定独立助理、双入口及工作评估的服务边界，解除下游实现不确定性。"
     scope:
       in: ["yuanpu-protocol 的 assistantId/身份/会话/来源/审阅/记忆/委派/回复契约及版本策略", "本地与企业微信归一化输入的 Pi client/server 垂直适配探针；状态订阅和重连", "选型结论、兼容迁移方案和相邻契约测试"]
@@ -1263,15 +1263,14 @@ tasks:
     investigation_hints: ["入口 packages/yuanpu-protocol/src/index.ts、packages/client/README.md、packages/server/README.md；参照 docs/agent-runtime-contracts.md", "预检当前 Pi 版本与工作区新增 API；packages/yuanpu-runtime/test/agent-contracts.test.mjs 是现有契约回归入口", "探针放 Yuanpu 自有 test/fixture，不改上游；先跑具体新增探针再 pnpm check；此卡统一拥有共享协议初始修改"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-architecture-sol1"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T12:59:43.360Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
+      branch: "task/task-037-assistant-contract"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-038
     title: "创建独立助理包与专属执行环境"
     status: pending
