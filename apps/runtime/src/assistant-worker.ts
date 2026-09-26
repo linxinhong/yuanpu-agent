@@ -121,10 +121,24 @@ export async function runAssistantWorker(): Promise<void> {
     if (closed || sourcePump) return;
     sourcePump = (async () => {
       memory ??= await AssistantMemoryRepository.open(paths.root);
-      for (const feed of ['work', 'assistant']) await memory.sources.sync(sourceHost, feed, 100);
-      for (let count = 0; count < 50; count++) {
-        if (closed || !await memory.processNext(sourceHost)) break;
+      await memory.reconcileDeletedSources();
+      for (const feed of ['work', 'assistant', 'work-deletions', 'assistant-deletions', 'legacy-memory']) {
+        await memory.sources.sync(sourceHost, feed, 100);
       }
+      for (let count = 0; count < 50; count++) {
+        if (closed) break;
+        const event = await memory.processNext(sourceHost);
+        if (!event) break;
+        if (event.feedId === 'legacy-memory' && event.status === 'processed') {
+          const audience = { kind: 'personal' as const, id: 'local-user' };
+          const text = memory.sources.sourceText(event.change.sourceId, audience);
+          if (text?.trim()) await memory.importLegacyMemory({ id: 'legacy-memory', text,
+            source: { sourceId: event.change.sourceId,
+              sourceVersion: event.change.sourceVersion, observedAt: event.change.occurredAt },
+            audience, context: '旧版助理记忆（只读导入，待核实）' });
+        }
+      }
+      if (!closed && !memory.sources.nextEvent()) await memory.processNext(sourceHost, true);
     })().catch((error) => send({ kind: 'source-error', error: String(error) }))
       .finally(() => { sourcePump = undefined; });
   };

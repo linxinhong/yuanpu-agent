@@ -82,14 +82,29 @@ test('opaque Work and Assistant source events survive restart, order changes, an
   assert.equal((await repo.importLegacyMemory(legacy)).version, 1,
     'repeating a host-supplied legacy import reuses its revision ID');
   assert.equal((await repo.search('只读旧记忆', person)).length, 1);
+  for (const [eventId, version, text] of [
+    ['2', 'assistant-v2', '新版旧记忆。'], ['3', 'assistant-v1', legacy.text],
+  ]) {
+    const ref = `assistant-content:${eventId}`;
+    host.current.set('assistant-turn:1', { status: 'available', sourceVersion: version });
+    host.contents.set(ref, { status: 'available', sourceVersion: version, text });
+    repo.sources.enqueuePage('assistant', String(Number(eventId) - 1), { nextCursor: eventId,
+      events: [{ eventId, change: change('assistant-turn:1', version, ref, 'updated') }] });
+    await repo.processNext(host);
+    await repo.importLegacyMemory({ ...legacy, text, source: { ...legacy.source,
+      sourceVersion: version } });
+    assert.equal((await repo.get('legacy-memory')).text, text);
+  }
+  assert.equal((await repo.importLegacyMemory(legacy)).version, 5,
+    'repeating reverted content does not create another revision');
   repo.close();
 
   const reopened = await AssistantMemoryRepository.open(home);
   assert.equal(reopened.sources.cursor('work'), '2');
-  assert.equal(reopened.sources.cursor('assistant'), '1');
+  assert.equal(reopened.sources.cursor('assistant'), '3');
   assert.equal(reopened.sources.nextEvent(), undefined);
   reopened.sources.rebuildIndex();
-  assert.equal(reopened.sources.search('项目进展', person).length, 2);
+  assert.equal(reopened.sources.search('项目进展', person).length, 1);
   reopened.close();
 });
 
@@ -112,6 +127,8 @@ test('manual edit wins a version race; unavailable source preserves evidence unt
   const file = join(home, 'memories', 'notes', 'project-progress.md');
   const edited = (await readFile(file, 'utf8')).replace('每周回顾项目进展', '每两周回顾项目进展');
   await writeFile(file, edited);
+  assert.equal((await repo.search('每两周回顾', person))[0].document.text,
+    '用户希望每两周回顾项目进展。', 'search observes a direct edit before get() is called');
   const manual = await repo.get('project-progress');
   assert.equal(manual.version, 2);
   assert.equal(manual.manualAuthority, true);
@@ -310,4 +327,75 @@ test('pending file revision after a crash replays exactly once', async (t) => {
   assert.equal(reopened.sources.database.prepare('SELECT COUNT(*) AS count FROM memory_pending_writes')
     .get().count, 0);
   reopened.close();
+});
+
+test('deleting A persists withdrawal when B is offline and withdraws evidence-only dependents', async (t) => {
+  const home = await temporaryHome(t);
+  const host = fakeHost();
+  const repo = await AssistantMemoryRepository.open(home);
+  for (const [index, sourceId] of ['source:a', 'source:b'].entries()) {
+    const version = `v${index}`;
+    const ref = `opaque:${index}`;
+    repo.sources.enqueuePage('work', String(index), { nextCursor: String(index + 1),
+      events: [{ eventId: String(index + 1), change: change(sourceId, version, ref) }] });
+    host.current.set(sourceId, { status: 'available', sourceVersion: version });
+    host.contents.set(ref, { status: 'available', sourceVersion: version, text: '来源文本。' });
+    await repo.processNext(host);
+  }
+  const base = { section: 'memories', kind: 'observed', audience: person,
+    context: '项目来源', verifiedAt: now, text: '项目来源已经记录。',
+    dependsOn: [], manualAuthority: false, reason: 'fixture' };
+  await repo.commit({ ...base, id: 'claim-a', expectedVersion: 0, revisionId: 'claim-a-v1',
+    evidence: [{ sourceId: 'source:a', sourceVersion: 'v0', observedAt: now }] });
+  await repo.commit({ ...base, id: 'claim-ab', expectedVersion: 0, revisionId: 'claim-ab-v1',
+    evidence: ['source:a', 'source:b'].map((sourceId, index) => ({ sourceId,
+      sourceVersion: `v${index}`, observedAt: now })) });
+  await repo.commit({ ...base, id: 'review-a', section: 'reviews', expectedVersion: 0,
+    revisionId: 'review-a-v1', evidence: [], dependsOn: ['claim-a'] });
+  host.current.set('source:b', { status: 'temporarily_unavailable' });
+  repo.sources.enqueuePage('work', '2', { nextCursor: '3', events: [{ eventId: '3',
+    change: change('source:b', 'v1', 'opaque:1', 'updated') }] });
+  assert.equal((await repo.processNext(host)).status, 'unavailable');
+  host.current.set('source:a', { status: 'deleted', sourceVersion: 'deleted-a' });
+  repo.sources.enqueuePage('work', '3', { nextCursor: '4', events: [{ eventId: '4',
+    change: change('source:a', 'deleted-a', undefined, 'deleted') }] });
+  assert.equal((await repo.processNext(host)).status, 'processed');
+  assert.equal((await repo.get('claim-a')).status, 'withdrawn');
+  assert.equal((await repo.get('review-a')).status, 'withdrawn');
+  assert.equal((await repo.get('claim-ab')).status, 'active');
+  assert.deepEqual((await repo.get('claim-ab')).evidence.map((ref) => ref.sourceId), ['source:b']);
+  assert.equal((await repo.search('项目来源', person)).length, 1);
+  host.current.set('source:b', { status: 'available', sourceVersion: 'v1' });
+  assert.equal((await repo.processNext(host, true)).status, 'processed',
+    'offline event retries without a new host change');
+  repo.close();
+});
+
+test('forget purges another document that once cited the forgotten source', async (t) => {
+  const home = await temporaryHome(t);
+  const host = fakeHost();
+  const repo = await AssistantMemoryRepository.open(home);
+  for (const [index, sourceId] of ['source:old', 'source:new'].entries()) {
+    const ref = `opaque:${index}`;
+    repo.sources.enqueuePage('work', String(index), { nextCursor: String(index + 1),
+      events: [{ eventId: String(index + 1), change: change(sourceId, `v${index}`, ref) }] });
+    host.current.set(sourceId, { status: 'available', sourceVersion: `v${index}` });
+    host.contents.set(ref, { status: 'available', sourceVersion: `v${index}`, text: '敏感项目。' });
+    await repo.processNext(host);
+  }
+  const base = { section: 'memories', kind: 'observed', audience: person,
+    context: '敏感项目', verifiedAt: now, text: '敏感项目记录。',
+    dependsOn: [], manualAuthority: false, reason: 'fixture' };
+  const oldEvidence = [{ sourceId: 'source:old', sourceVersion: 'v0', observedAt: now }];
+  await repo.commit({ ...base, id: 'forget-target', expectedVersion: 0,
+    revisionId: 'target-v1', evidence: oldEvidence });
+  const sibling = await repo.commit({ ...base, id: 'former-sibling', expectedVersion: 0,
+    revisionId: 'sibling-v1', evidence: oldEvidence });
+  await repo.commit({ ...sibling, expectedVersion: 1, revisionId: 'sibling-v2',
+    evidence: [{ sourceId: 'source:new', sourceVersion: 'v1', observedAt: now }], reason: 'changed source' });
+  assert.deepEqual((await repo.forget('forget-target')).sort(), ['forget-target', 'former-sibling']);
+  assert.equal(repo.sources.isForgotten('source:new'), false);
+  assert.equal(repo.sources.database.prepare(`SELECT COUNT(*) AS n FROM memory_revisions
+    WHERE memory_id='former-sibling'`).get().n, 0);
+  repo.close();
 });

@@ -90,6 +90,11 @@ const documentSchema = `
     term TEXT NOT NULL, memory_id TEXT NOT NULL REFERENCES memory_documents(id) ON DELETE CASCADE,
     PRIMARY KEY (term,memory_id)
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS memory_import_conflicts (
+    memory_id TEXT NOT NULL, source_id TEXT NOT NULL, source_version TEXT NOT NULL,
+    detected_at TEXT NOT NULL, reason TEXT NOT NULL,
+    PRIMARY KEY (memory_id,source_id,source_version)
+  ) STRICT;
 `;
 
 function digest(content: string): string { return createHash('sha256').update(content).digest('hex'); }
@@ -224,18 +229,40 @@ export class AssistantMemoryRepository {
 
   async processNext(host: AssistantSourceHost, retryUnavailable = false): Promise<QueuedSource | undefined> {
     const event = await this.sources.processNext(host, retryUnavailable);
-    if (event?.status === 'processed'
-      && this.sources.source(event.change.sourceId)?.availability === 'deleted') {
-      await this.withdrawSource(event.change.sourceId);
+    if (event?.status === 'processed') {
+      const source = this.sources.source(event.change.sourceId);
+      if (source && (source.availability === 'deleted' || this.database.prepare(`SELECT 1 FROM memory_evidence
+        WHERE source_id=? AND source_version!=? LIMIT 1`).get(event.change.sourceId,
+          source.sourceVersion))) {
+        await this.withdrawSource(event.change.sourceId);
+      }
     }
     return event;
   }
 
   async reconcileDeletedSources(): Promise<void> {
     const rows = this.database.prepare(`SELECT DISTINCT e.source_id FROM memory_evidence e
-      JOIN source_current s ON s.source_id=e.source_id WHERE s.availability='deleted'`)
+      JOIN source_current s ON s.source_id=e.source_id
+      WHERE s.availability='deleted' OR (s.availability='available'
+        AND e.source_version!=s.source_version)`)
       .all() as Array<{ source_id: string }>;
     for (const row of rows) await this.withdrawSource(row.source_id);
+    await this.reconcileDependentWithdrawals();
+  }
+
+  private async reconcileDependentWithdrawals(): Promise<void> {
+    const rows = this.database.prepare(`SELECT id FROM memory_documents WHERE status='active'`)
+      .all() as Array<{ id: string }>;
+    for (const row of rows) {
+      const document = await this.get(row.id);
+      if (!document || document.status !== 'active' || document.manualAuthority
+        || document.evidence.length || !document.dependsOn.length) continue;
+      const parents = await Promise.all(document.dependsOn.map((id) => this.get(id)));
+      if (parents.some((parent) => parent?.status === 'active')) continue;
+      await this.commitInternal({ ...document, expectedVersion: document.version,
+        revisionId: randomUUID(), status: 'withdrawn',
+        reason: 'All supporting memories were withdrawn' }, true);
+    }
   }
 
   private finalize(pending: PendingWrite): AssistantMemoryDocument {
@@ -334,6 +361,11 @@ export class AssistantMemoryRepository {
   }
 
   async commit(draft: AssistantMemoryDraft): Promise<AssistantMemoryDocument> {
+    return this.commitInternal(draft, false);
+  }
+
+  private async commitInternal(draft: AssistantMemoryDraft,
+    allowUnavailableEvidence: boolean): Promise<AssistantMemoryDocument> {
     const prior = this.database.prepare('SELECT memory_id FROM memory_revisions WHERE revision_id = ?')
       .get(draft.revisionId) as { memory_id: string } | undefined;
     if (prior) {
@@ -357,14 +389,17 @@ export class AssistantMemoryRepository {
     }
     for (const ref of draft.evidence) {
       const source = this.sources.source(ref.sourceId);
-      if (!source || source.sourceVersion !== ref.sourceVersion || source.availability !== 'available'
+      if (!source || source.sourceVersion !== ref.sourceVersion
+        || (source.availability !== 'available'
+          && !(allowUnavailableEvidence && source.availability === 'temporarily_unavailable'))
         || !sameAudience(source.audience, draft.audience) || this.sources.isForgotten(ref.sourceId)) {
         throw new Error(`Memory evidence is not currently available: ${ref.sourceId}`);
       }
     }
     for (const id of draft.dependsOn) {
       const parent = await this.get(id);
-      if (!parent || parent.status !== 'active' || !sameAudience(parent.audience, draft.audience)) {
+      if (!parent || (parent.status !== 'active' && draft.status !== 'withdrawn')
+        || !sameAudience(parent.audience, draft.audience)) {
         throw new Error(`Memory dependency is unavailable: ${id}`);
       }
     }
@@ -395,14 +430,20 @@ export class AssistantMemoryRepository {
     for (const row of rows) {
       const current = await this.get(row.memory_id);
       if (!current) continue;
-      const evidence = current.evidence.filter((ref) => ref.sourceId !== sourceId);
+      const evidence = current.evidence.filter((ref) => {
+        if (ref.sourceId === sourceId) return false;
+        const source = this.sources.source(ref.sourceId);
+        return source && source.sourceVersion === ref.sourceVersion
+          && source.availability !== 'deleted';
+      });
       const status = evidence.length || current.manualAuthority || current.dependsOn.length
         ? 'active' : 'withdrawn';
       const draft: AssistantMemoryDraft = { ...current, evidence,
         expectedVersion: current.version, revisionId: randomUUID(),
         status, reason: `Source ${sourceId} was deleted` };
-      await this.commit(draft);
+      await this.commitInternal(draft, true);
     }
+    await this.reconcileDependentWithdrawals();
   }
 
   private async recoverForgetJobs(): Promise<void> {
@@ -423,6 +464,7 @@ export class AssistantMemoryRepository {
       try {
         this.database.prepare('DELETE FROM memory_search_terms WHERE memory_id = ?').run(job.memory_id);
         this.database.prepare('DELETE FROM memory_revisions WHERE memory_id = ?').run(job.memory_id);
+        this.database.prepare('DELETE FROM memory_import_conflicts WHERE memory_id = ?').run(job.memory_id);
         this.database.prepare('DELETE FROM memory_pending_writes WHERE memory_id = ?').run(job.memory_id);
         this.database.prepare('DELETE FROM memory_dependencies WHERE parent_id = ? OR child_id = ?')
           .run(job.memory_id, job.memory_id);
@@ -460,6 +502,13 @@ export class AssistantMemoryRepository {
         .all(sourceId) as Array<{ memory_id: string }>;
       for (const sibling of siblings) visit(sibling.memory_id);
     }
+    const revisions = this.database.prepare('SELECT memory_id,content FROM memory_revisions WHERE content IS NOT NULL')
+      .all() as Array<{ memory_id: string; content: string }>;
+    for (const revision of revisions) {
+      if (parseDocument(revision.content).evidence.some((ref) => affectedSources.has(ref.sourceId))) {
+        visit(revision.memory_id);
+      }
+    }
     if (!ordered.length) return [];
     this.database.exec('BEGIN IMMEDIATE');
     try {
@@ -479,6 +528,9 @@ export class AssistantMemoryRepository {
   }
 
   async search(query: string, audience: AssistantAudience, limit = 20): Promise<AssistantMemorySearchHit[]> {
+    // Manual Markdown edits can introduce previously unindexed terms.
+    const known = this.database.prepare('SELECT id FROM memory_documents').all() as Array<{ id: string }>;
+    for (const row of known) await this.get(row.id);
     const terms = searchTerms(query);
     if (!terms.length) return [];
     const placeholders = terms.map(() => '?').join(',');
@@ -518,11 +570,36 @@ export class AssistantMemoryRepository {
   /** Host supplies legacy content through an authorized source reference, never a filesystem path. */
   async importLegacyMemory(input: { id: string; text: string; source: AssistantEvidenceRef;
     audience: AssistantAudience; context: string }): Promise<AssistantMemoryDocument> {
-    return this.commit({ id: input.id, expectedVersion: 0, revisionId: `legacy-${digest(input.id + input.source.sourceId)}`,
-      section: 'memories', kind: 'explicit', audience: input.audience,
+    const current = await this.get(input.id);
+    if (current?.manualAuthority) {
+      this.database.prepare(`INSERT OR IGNORE INTO memory_import_conflicts
+        (memory_id,source_id,source_version,detected_at,reason) VALUES (?,?,?,?,?)`)
+        .run(input.id, input.source.sourceId, input.source.sourceVersion,
+          new Date().toISOString(), 'Manual memory takes precedence over changed legacy content');
+      return current;
+    }
+    const text = input.text.slice(0, 20_000);
+    if (current?.text === text && current.evidence.length === 1
+      && current.evidence[0]?.sourceId === input.source.sourceId
+      && current.evidence[0].sourceVersion === input.source.sourceVersion
+      && current.status === 'active') return current;
+    return this.commit({ id: input.id, expectedVersion: current?.version ?? 0,
+      revisionId: `legacy-${digest(input.id + input.source.sourceId + input.source.sourceVersion
+        + String(current?.version ?? 0))}`,
+      section: 'memories', kind: 'observed', audience: input.audience,
       context: input.context, verifiedAt: input.source.observedAt,
-      text: input.text.slice(0, 20_000), evidence: [input.source], dependsOn: [],
+      text, evidence: [input.source], dependsOn: [],
       manualAuthority: false, reason: 'Read-only legacy memory import' });
+  }
+
+  legacyImportConflicts(memoryId: string): Array<{ sourceId: string; sourceVersion: string;
+    detectedAt: string; reason: string }> {
+    const rows = this.database.prepare(`SELECT source_id,source_version,detected_at,reason
+      FROM memory_import_conflicts WHERE memory_id=? ORDER BY detected_at`)
+      .all(memoryId) as Array<{ source_id: string; source_version: string;
+        detected_at: string; reason: string }>;
+    return rows.map((row) => ({ sourceId: row.source_id, sourceVersion: row.source_version,
+      detectedAt: row.detected_at, reason: row.reason }));
   }
 
   close(): void { this.sources.close(); }
