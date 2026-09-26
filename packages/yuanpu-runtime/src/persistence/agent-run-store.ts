@@ -135,6 +135,20 @@ export class AgentRunStore {
     return output ? { ...run, output: JSON.parse(output.output_json) as AgentRunOutput } : run;
   }
 
+  /** Work navigation must keep the selected conversation stable while a persisted run can still act on it. */
+  hasActiveDesktopWorkRun(workspaceId: string): boolean {
+    const row = this.database.prepare(`SELECT 1 AS active
+      FROM yp_agent_runs r
+      JOIN yp_conversation_bindings b ON b.binding_id = r.binding_id
+      LEFT JOIN yp_work_conversations w ON w.conversation_id = b.conversation_id
+      WHERE b.namespace = 'desktop'
+        AND r.status IN ('queued', 'running', 'waiting_approval')
+        AND ((w.workspace_id = ? AND w.working_directory = b.workspace_id)
+          OR (b.conversation_id = 'default' AND b.workspace_id = ?))
+      LIMIT 1`).get(workspaceId, workspaceId) as { active: number } | undefined;
+    return Boolean(row);
+  }
+
   submit(input: {
     request: AgentRunRequest;
     requestFingerprint: string;

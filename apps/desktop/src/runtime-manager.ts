@@ -693,9 +693,9 @@ export class RuntimeManager {
     });
   }
 
-  selectWorkConversation(conversationId: string): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
+  selectWorkConversation(conversationId: string, previewArchived?: boolean): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
     return this.request(RUNTIME_ROUTES.workConversations, {
-      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId }),
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId, previewArchived }),
     });
   }
 

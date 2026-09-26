@@ -1204,6 +1204,11 @@ async function serve(): Promise<void> {
           return;
         }
         if (request.method === 'POST') {
+          if (metadata.agentRuns.hasActiveDesktopWorkRun(workScope)) {
+            response.statusCode = 409;
+            response.end(JSON.stringify({ error: '当前工作任务仍在运行或等待授权，完成后再新建会话。' }));
+            return;
+          }
           const body = await readJsonBody(request, true);
           const folderId = isRecord(body) ? body.folderId : undefined;
           const requestId = isRecord(body) ? body.requestId : undefined;
@@ -1227,12 +1232,27 @@ async function serve(): Promise<void> {
         }
         if (request.method === 'PUT') {
           const body = await readJsonBody(request);
-          if (!isRecord(body) || typeof body.conversationId !== 'string') {
+          if (!isRecord(body) || typeof body.conversationId !== 'string'
+            || (body.previewArchived !== undefined && typeof body.previewArchived !== 'boolean')) {
             response.statusCode = 400;
             response.end(JSON.stringify({ error: 'A Work conversation id is required.' }));
             return;
           }
-          try { response.end(JSON.stringify(workConversations.select(home.config.workingDirectory, body.conversationId))); }
+          const selected = workConversations.listExisting(workScope).find((item) => item.current);
+          if (selected?.id !== body.conversationId && metadata.agentRuns.hasActiveDesktopWorkRun(workScope)) {
+            response.statusCode = 409;
+            response.end(JSON.stringify({ error: '当前工作任务仍在运行或等待授权，完成后再切换会话。' }));
+            return;
+          }
+          try {
+            if (body.previewArchived === true) {
+              const archived = workConversations.listExisting(workScope).find((item) => item.id === body.conversationId && item.archived);
+              if (!archived) throw new Error('Unknown archived Work conversation.');
+              response.end(JSON.stringify(archived));
+            } else {
+              response.end(JSON.stringify(workConversations.select(home.config.workingDirectory, body.conversationId)));
+            }
+          }
           catch { response.statusCode = 404; response.end(JSON.stringify({ error: 'Unknown Work conversation.' })); }
           return;
         }
@@ -1242,6 +1262,11 @@ async function serve(): Promise<void> {
             if (!isRecord(body) || typeof body.conversationId !== 'string') throw new Error('A Work conversation ID is required.');
             if (Object.hasOwn(body, 'folderId') || Object.hasOwn(body, 'workingDirectory')) {
               throw new Error('Moving a Work conversation requires the dedicated directory migration.');
+            }
+            if (Object.hasOwn(body, 'archived') && metadata.agentRuns.hasActiveDesktopWorkRun(workScope)) {
+              response.statusCode = 409;
+              response.end(JSON.stringify({ error: '当前工作任务仍在运行或等待授权，完成后再归档会话。' }));
+              return;
             }
             response.end(JSON.stringify(workConversations.updateConversation(workScope, body.conversationId, {
               title: body.title as string | undefined, iconId: body.iconId as string | undefined,
