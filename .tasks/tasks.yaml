@@ -1394,7 +1394,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-041
     title: "接通本地与企业微信独立助理"
-    status: ready
+    status: in_progress
     goal: "已配对用户从本地和企业微信访问同一助理，保持独立会话及可靠原路回复。"
     scope:
       in: ["按选定通信契约接入本地和已有企微长连接", "身份/会话/回复路由持久映射、幂等与重连", "旧 assistant/企微共享 session 绑定迁移、来源事件、宿主服务 API"]
@@ -1422,15 +1422,14 @@ tasks:
     investigation_hints: ["入口 apps/runtime/src/wecom-channel.ts、packages/yuanpu-runtime/src/channels、persistence/assistant-link-store.ts、apps/desktop/src/preload.ts 和 host-event-client.ts", "现有 assistant-link、channels、wecom-adapter、task-019-runtime-recovery 测试可复用；先回放事件再 pnpm check", "真实企业微信验收在阶段卡执行；适配器可引用 runtime-kit，助理核心不能反向依赖它"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "work-conversations-sol1-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T14:39:09.284Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/work-conversations"
+      branch: "task/task-041-assistant-channel"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-042
     title: "独立助理与双入口阶段验证"
     status: pending
