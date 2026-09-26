@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
@@ -52,6 +53,39 @@ async function stopWorker(child) {
   child.send({ kind: 'shutdown' });
   await new Promise((resolveExit) => child.once('exit', resolveExit));
 }
+
+test('headless Worker performs local daily and weekly checks, then stops with the host', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-automation-worker-'));
+  const assistantHome = join(root, 'assistant');
+  const worker = startWorker(assistantHome);
+  t.after(async () => { await stopWorker(worker.child); await rm(root, { recursive: true, force: true }); });
+  worker.child.on('message', (message) => {
+    if (message.kind === 'source-request' && message.method === 'listChanges') {
+      worker.child.send({ kind: 'source-result', id: message.id,
+        value: { events: [], nextCursor: message.args[1] } });
+    }
+  });
+  await nextMessage(worker.child, (message) => message.kind === 'ready');
+  const state = join(assistantHome, 'state.sqlite');
+  const deadline = Date.now() + 12_000;
+  let completed = 0;
+  while (Date.now() < deadline && completed < 2) {
+    try {
+      const database = new DatabaseSync(state);
+      try { completed = database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+        WHERE kind IN ('daily-check','weekly-check') AND status='completed'`).get().n; }
+      finally { database.close(); }
+    } catch { /* first pump may still be creating the database */ }
+    if (completed < 2) await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+  }
+  assert.equal(completed, 2);
+  await stopWorker(worker.child);
+  const database = new DatabaseSync(state);
+  try {
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checkpoints').get().n, 2);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checks').get().n, 2);
+  } finally { database.close(); }
+});
 
 test('one headless Worker owns Home and a second writer is rejected', async (t) => {
   const assistantHome = await home(t);

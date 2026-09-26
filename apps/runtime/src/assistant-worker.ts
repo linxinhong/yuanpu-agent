@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { AssistantMemoryRepository, assertSafeDirectory, createAssistantExecutor, resolveAssistantHome,
+import { AssistantAutomationEngine, AssistantAutomationStore, AssistantMemoryRepository,
+  assertSafeDirectory, createAssistantExecutor, resolveAssistantHome,
   type AssistantSession, type AssistantSourceHost } from '@yuanpu-agent/assistant';
+import { assistantAutomationHandler } from './assistant-automation-handler.js';
 import { assistantModelHost, type AssistantModelConfig } from './assistant-model.js';
 import { bundledAssistantSkillFiles } from './assistant-skill-assets.generated.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
@@ -97,6 +99,9 @@ export async function runAssistantWorker(): Promise<void> {
   const active = new Map<string, { cancel(): Promise<void>; result: Promise<TaskRecord> }>();
   const tasks = join(paths.root, 'tasks');
   let memory: AssistantMemoryRepository | undefined;
+  let automation: AssistantAutomationStore | undefined;
+  let automationEngine: AssistantAutomationEngine | undefined;
+  let automationRun: Promise<unknown> | undefined;
   let sourceTimer: NodeJS.Timeout | undefined;
   let sourcePump: Promise<void> | undefined;
   const sourceRequest = (method: string, args: unknown[]): Promise<unknown> => new Promise((resolve, reject) => {
@@ -121,24 +126,37 @@ export async function runAssistantWorker(): Promise<void> {
     if (closed || sourcePump) return;
     sourcePump = (async () => {
       memory ??= await AssistantMemoryRepository.open(paths.root);
-      await memory.reconcileDeletedSources();
-      for (const feed of ['work', 'assistant', 'work-deletions', 'assistant-deletions', 'legacy-memory']) {
-        await memory.sources.sync(sourceHost, feed, 100);
-      }
-      for (let count = 0; count < 50; count++) {
-        if (closed) break;
-        const event = await memory.processNext(sourceHost);
-        if (!event) break;
-        if (event.feedId === 'legacy-memory' && event.status === 'processed') {
-          const audience = { kind: 'personal' as const, id: 'local-user' };
-          const text = memory.sources.sourceText(event.change.sourceId, audience);
-          if (text?.trim()) await memory.importLegacyMemory({ id: 'legacy-memory', text,
-            source: { sourceId: event.change.sourceId,
-              sourceVersion: event.change.sourceVersion, observedAt: event.change.occurredAt },
-            audience, context: '旧版助理记忆（只读导入，待核实）' });
+      automation ??= new AssistantAutomationStore(memory.sources.database);
+      automationEngine ??= new AssistantAutomationEngine(automation,
+        assistantAutomationHandler(memory, automation));
+      automationEngine.setForeground(active.size > 0);
+      automation.scheduleActivePeriods();
+      try {
+        await memory.reconcileDeletedSources();
+        for (const feed of ['work', 'assistant', 'work-deletions', 'assistant-deletions', 'legacy-memory']) {
+          await memory.sources.sync(sourceHost, feed, 100);
         }
+        for (let count = 0; count < 50; count++) {
+          if (closed) break;
+          const event = await memory.processNext(sourceHost);
+          if (!event) break;
+          if (event.feedId === 'legacy-memory' && event.status === 'processed') {
+            const audience = { kind: 'personal' as const, id: 'local-user' };
+            const text = memory.sources.sourceText(event.change.sourceId, audience);
+            if (text?.trim()) await memory.importLegacyMemory({ id: 'legacy-memory', text,
+              source: { sourceId: event.change.sourceId,
+                sourceVersion: event.change.sourceVersion, observedAt: event.change.occurredAt },
+              audience, context: '旧版助理记忆（只读导入，待核实）' });
+          }
+        }
+        if (!closed && !memory.sources.nextEvent()) await memory.processNext(sourceHost, true);
+      } catch (error) { send({ kind: 'source-error', error: String(error) }); }
+      if (closed) return;
+      automation.reconcileProcessedSources(100);
+      if (!automationRun) {
+        automationRun = automationEngine.tick().catch((error) => send({ kind: 'automation-error',
+          error: String(error) })).finally(() => { automationRun = undefined; });
       }
-      if (!closed && !memory.sources.nextEvent()) await memory.processNext(sourceHost, true);
     })().catch((error) => send({ kind: 'source-error', error: String(error) }))
       .finally(() => { sourcePump = undefined; });
   };
@@ -175,12 +193,14 @@ export async function runAssistantWorker(): Promise<void> {
       for (const pending of pendingModels.values()) pending.reject(new Error('Assistant Worker is stopping.'));
       pendingModels.clear();
       if (sourceTimer) clearInterval(sourceTimer);
+      automationEngine?.stop();
       for (const pending of pendingSources.values()) {
         clearTimeout(pending.timeout);
         pending.reject(new Error('Assistant Worker is stopping.'));
       }
       pendingSources.clear();
       await sourcePump?.catch(() => undefined);
+      await automationRun?.catch(() => undefined);
       memory?.close();
       for (const task of active.values()) await task.cancel().catch(() => undefined);
       await Promise.allSettled([...active.values()].map((task) => task.result));
@@ -268,7 +288,11 @@ export async function runAssistantWorker(): Promise<void> {
         return record;
       })();
       active.set(message.id, { cancel, result });
-      void result.finally(() => active.delete(message.id)).catch(() => undefined);
+      automationEngine?.setForeground(true);
+      void result.finally(() => {
+        active.delete(message.id);
+        automationEngine?.setForeground(active.size > 0);
+      }).catch(() => undefined);
       reply(result);
     });
     send({ kind: 'ready', pid: process.pid });

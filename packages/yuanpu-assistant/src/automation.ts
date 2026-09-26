@@ -29,7 +29,7 @@ export interface AutomationJob {
 }
 
 export interface AutomationProposal { costUsd: number; value?: unknown; }
-export type AutomationOutcome = 'applied' | 'unknown' | 'absent';
+export type AutomationOutcome = 'applied' | 'unknown' | 'absent' | 'deferred';
 export interface AutomationHandler {
   /** Check an earlier attempt before any possible external side effect. */
   lookup(job: AutomationJob): Promise<AutomationOutcome>;
@@ -59,6 +59,10 @@ const schema = `
   CREATE TABLE IF NOT EXISTS automation_source_links (
     feed_id TEXT NOT NULL, event_id TEXT NOT NULL,
     job_id TEXT, PRIMARY KEY(feed_id,event_id)
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS automation_checkpoints (
+    effect_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES automation_jobs(job_id),
+    snapshot_json TEXT NOT NULL, checked_at TEXT NOT NULL
   ) STRICT;
 `;
 
@@ -256,6 +260,17 @@ export class AssistantAutomationStore {
   }
 
   priority(kind: AutomationKind): number { return priorities[kind]; }
+
+  hasCheckpoint(effectId: string): boolean {
+    return Boolean(this.database.prepare('SELECT 1 FROM automation_checkpoints WHERE effect_id=?').get(effectId));
+  }
+
+  recordCheckpoint(job: AutomationJob, snapshot: unknown): void {
+    const serialized = JSON.stringify(snapshot);
+    if (serialized.length > 16_000) throw new Error('Automation checkpoint exceeds budget.');
+    this.database.prepare(`INSERT OR IGNORE INTO automation_checkpoints(effect_id,job_id,snapshot_json,checked_at)
+      VALUES (?,?,?,?)`).run(job.effectId, job.jobId, serialized, this.now().toISOString());
+  }
 }
 
 /** Runs proposals outside SQLite; only a current, budget-compliant result may be applied. */
@@ -307,6 +322,11 @@ export class AssistantAutomationEngine {
       if (prior === 'unknown') {
         this.store.finish(job.jobId, 'waiting', 'External result unknown; query status before retry',
           new Date(this.now().getTime() + 60_000));
+        return this.store.get(job.jobId);
+      }
+      if (prior === 'deferred') {
+        this.store.finish(job.jobId, 'waiting', 'Awaiting the owning assistant skill',
+          new Date(this.now().getTime() + 3_600_000));
         return this.store.get(job.jobId);
       }
       if (controller.signal.aborted || this.foreground || this.paused || this.stopped) return undefined;

@@ -152,3 +152,34 @@ test('budget, restart and unknown result never replay an external effect blindly
   assert.equal(store.get(interrupted.jobId).status, 'completed');
   assert.equal(applied, 0);
 });
+
+test('unimplemented skill jobs stay durable while a periodic checkpoint recovers without replay', async (t) => {
+  const context = await fixture(t);
+  let store = new AssistantAutomationStore(context.sources.database, context.clock.now);
+  const pending = store.enqueue({ kind: 'review-work', dedupeKey: 'waiting-skill', audience });
+  let applied = 0;
+  let engine = new AssistantAutomationEngine(store, {
+    lookup: async (job) => job.kind === 'review-work' ? 'deferred'
+      : store.hasCheckpoint(job.effectId) ? 'applied' : 'absent',
+    prepare: async () => ({ costUsd: 0, value: { sourceCount: 0 } }),
+    apply: async (job, proposal) => { store.recordCheckpoint(job, proposal.value); applied++; },
+  }, context.clock.now);
+  await engine.tick();
+  assert.equal(store.get(pending.jobId).status, 'waiting');
+  const [daily] = store.scheduleActivePeriods();
+  await engine.tick();
+  assert.equal(store.get(daily.jobId).status, 'completed');
+  assert.equal(applied, 1);
+  context.sources.database.prepare("UPDATE automation_jobs SET status='running' WHERE job_id=?")
+    .run(daily.jobId);
+  await context.reopen();
+  store = new AssistantAutomationStore(context.sources.database, context.clock.now);
+  engine = new AssistantAutomationEngine(store, {
+    lookup: async (job) => store.hasCheckpoint(job.effectId) ? 'applied' : 'unknown',
+    prepare: async () => { throw new Error('Checkpoint must prevent rerun'); },
+    apply: async () => { applied++; },
+  }, context.clock.now);
+  await engine.tick();
+  assert.equal(store.get(daily.jobId).status, 'completed');
+  assert.equal(applied, 1);
+});
