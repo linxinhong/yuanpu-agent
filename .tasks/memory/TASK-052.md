@@ -32,3 +32,12 @@
 - 聊天内路径链接工具更名 `shared/work-file-links.ts`（extract/split/normalize）；`classifyWorkFile`/格式化函数迁入 `viewer/core/`；`message-content.tsx` 只改导入。样式仍全部在 `muse-theme.css`（theme-contract 继续覆盖）。
 - 验证：pnpm check 全过（app 15 测试）、vite 构建含 pdf worker、浏览器冒烟（work 文件页签空态正常、助理面板无文件入口）。
 - 测试限制：`viewer/preview/*` 无法被 node:test（tsx）加载——pdf worker 的 `?url` 导入是 Vite 专有转换；viewer-modules.test.mjs 只覆盖 core/files，preview 行为靠构建与桌面冒烟。
+
+## 2026-09-27 库选型与标签页/工具栏设计（4e82a70）
+
+- 深度调研了 ~/projects/deepseek-harness（dsh）的同类实现（右侧栏文件树 + 文档预览 tab）并吸收其经验；用户据调研拍板：文本/代码用 **shiki**（弃 Monaco——oniguruma wasm 触发渲染进程 CSP `script-src 'self'` 禁 unsafe-eval，故用 shiki 的 **JS 正则引擎** + 懒加载语法包 + github-light/dark 双主题单例），目录树用 **@pierre/trees**，新增 **@pierre/diffs** 查看修改替换效果。zcode 本身用 @pierre/diffs 的 File 组件 + shiki（wasm 引擎）+ 自研 Markdown 渲染 + pdf.js。
+- 标签页/工具栏按用户提供的「审查」参考图实现：胶囊标签条（树 tab + 每个文件一个可关 tab，「+」重开树）；每视图一条工具栏——文件：左「最终内容｜替换效果」切换 + `+N -N` 统计（绿/红），右「定位到树 / 复制路径 / 刷新」；树：左「工作区 · N 个文件」，右「刷新」。
+- 替换效果链路：内存版本缓存（per conversation+path，上限 200 条）→ 重新读取时对比 content/updatedAt → 检测到修改自动切到 diff 视图；diff 由自研 `createUnifiedDiff`（前缀/后缀裁剪 + LCS + 上下文行 + 区域/产出行双护栏）生成统一 patch 交给 `PatchDiff` 渲染。diff 与最终内容两个视图可选手动切换，未变更的 refetch 不打扰当前视图。
+- runtime 递归列举（`recursive=1`）：flat entries + `MAX_TREE_ENTRIES=5000` 截断标记、符号链接逃逸跳过、realpath 访问集切环、深度上限；供 @pierre/trees 的路径优先数据模型。
+- 测试 24/24（app）+ 11/11（runtime 相关）+ 全量 pnpm check 通过；浏览器冒烟截图验证树/标签条/高亮/diff。修复：shiki 双主题并发取色竞态（改串行）、LCS 重放需三态步骤（match/remove/insert，布尔编码会把匹配行错标为删除）。
+- 已知限制/后续候选：diff 仅对比「上次查看」版本（无磁盘历史）；PDF 视口附近渲染、tab 滚动位置恢复、树懒加载（dsh 式 per-level 状态机 + generation 防陈旧）未做；preview/* 不能进 node:test（shadow DOM 库依赖浏览器）。
