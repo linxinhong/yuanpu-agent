@@ -126,11 +126,23 @@ export interface WorkConversation {
   archived: boolean;
 }
 
+/** Public execution summary. Never includes reasoning, tool arguments or results. */
+export interface DesktopReplyRunInfo {
+  runId?: string;
+  source?: 'runtime' | 'transcript';
+  status: AgentRunRecord['status'];
+  createdAt: string;
+  updatedAt: string;
+  events: Array<{ id: number; title: string; detail?: string; at: string }>;
+  tools: Array<{ name: string; status: 'completed' | 'failed' }>;
+}
+
 export interface DesktopTranscriptMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   at: string;
+  run?: DesktopReplyRunInfo;
 }
 
 export interface AssistantLinkStatus {

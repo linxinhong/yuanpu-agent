@@ -16,6 +16,8 @@ const { version } = JSON.parse(await readFile(resolve(appRoot, 'package.json'), 
 
 const greeting = execFileSync(binary, [], { encoding: 'utf8' }).trim();
 const reportedVersion = execFileSync(binary, ['--version'], { encoding: 'utf8' }).trim();
+const agentToolsSmoke = JSON.parse(execFileSync(binary, ['--agent-tools-smoke'], { encoding: 'utf8', timeout: 15000 }).trim());
+assert.deepEqual(agentToolsSmoke, { workflow: 'completed', result: ['native-worker-ok'], reader: true });
 const pythonRoot = resolve(appRoot, '../python-capabilities/dist-artifact/bundle/YuanpuEchoMcp');
 const pythonExecutable = join(
   pythonRoot,

@@ -1,5 +1,7 @@
 import {
   createDemoCapabilitySource,
+  createBuiltinWebSource,
+  createWorkflowCheckpointSource,
   deleteModelSettings,
   createNotificationCapabilitySource,
   CapabilityApprovalStore,
@@ -58,6 +60,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import { smokeBuiltinAgentTools } from './agent-tools-smoke.js';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
@@ -497,7 +500,9 @@ async function serve(): Promise<void> {
   };
   const notificationRouter = new HostNotificationRouter();
   const notificationSource = createNotificationCapabilitySource(notificationRouter);
-  const capabilitySources = [createDemoCapabilitySource(), notificationSource];
+  const webSource = createBuiltinWebSource({ authPath: join(home.appPath, 'auth.json') });
+  const workflowCheckpointSource = createWorkflowCheckpointSource();
+  const capabilitySources = [createDemoCapabilitySource(), notificationSource, webSource, workflowCheckpointSource];
   let pythonSource = createConfiguredPythonSource(
     join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
     pythonConfigFile,
@@ -699,7 +704,7 @@ async function serve(): Promise<void> {
       pythonConfigFile,
     );
     mcp = createYuanpuMcpServer(
-      [createDemoCapabilitySource(), notificationSource, ...(pythonSource ? [pythonSource] : [])],
+      [createDemoCapabilitySource(), notificationSource, webSource, workflowCheckpointSource, ...(pythonSource ? [pythonSource] : [])],
       approvals,
       { discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS },
     );
@@ -1846,6 +1851,8 @@ if (args.includes('--version') || args.includes('-v')) {
     console.error(error);
     process.exitCode = 1;
   });
+} else if (args.includes('--agent-tools-smoke')) {
+  smokeBuiltinAgentTools().then((result) => console.log(JSON.stringify(result))).catch((error) => { console.error(error); process.exitCode = 1; });
 } else if (args.includes('--capability-smoke')) {
   void capabilitySmoke().catch((error) => {
     console.error(error);
