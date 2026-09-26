@@ -74,8 +74,20 @@ test('optional Enterprise WeChat startup failure does not prevent Runtime readin
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (chunk) => { stderr += chunk; });
       child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
+      let assistantWorkerPid;
       scenario.after(async () => {
         child.kill();
+        if (child.exitCode === null && child.signalCode === null) {
+          await new Promise((resolveExit) => child.once('exit', resolveExit));
+        }
+        if (assistantWorkerPid) {
+          const deadline = Date.now() + 5_000;
+          while (Date.now() < deadline) {
+            try { process.kill(assistantWorkerPid, 0); }
+            catch { break; }
+            await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+          }
+        }
         await rm(home, { recursive: true, force: true });
       });
       const ready = await new Promise((resolve, reject) => {
@@ -93,6 +105,7 @@ test('optional Enterprise WeChat startup failure does not prevent Runtime readin
         });
       });
       assert.equal(ready.event, 'ready');
+      assistantWorkerPid = ready.assistantWorkerPid;
       const health = await fetch(`http://${ready.host}:${ready.port}/v1/health`, {
         headers: { authorization: `Bearer ${token}` },
       });

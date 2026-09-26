@@ -14,7 +14,7 @@ export * from './assistant-link-store.js';
 export * from './assistant-host-store.js';
 export * from './work-conversation-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 10;
+export const YUANPU_METADATA_SCHEMA_VERSION = 11;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -409,7 +409,53 @@ const migrations: readonly Migration[] = [{
     ensureWorkDirectorySchema(database);
     ensureAssistantHostSchema(database);
   },
+}, {
+  version: 11,
+  sql: '',
+  apply(database) {
+    const columns = database.prepare('PRAGMA table_info(yp_work_turn_sources)').all() as
+      Array<{ name: string; type: string }>;
+    const eventId = columns.find((column) => column.name === 'event_id');
+    if (eventId && eventId.type !== 'INTEGER') throw new Error('Incompatible Work source event ID.');
+    if (!eventId) database.exec('ALTER TABLE yp_work_turn_sources ADD COLUMN event_id INTEGER');
+    database.exec(`UPDATE yp_work_turn_sources SET event_id = rowid WHERE event_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS yp_work_turn_sources_event_id ON yp_work_turn_sources(event_id);
+      CREATE TABLE IF NOT EXISTS yp_work_source_event_sequence (
+        id INTEGER PRIMARY KEY CHECK(id = 1), next_id INTEGER NOT NULL CHECK(next_id >= 0)
+      ) STRICT;
+      INSERT OR IGNORE INTO yp_work_source_event_sequence(id,next_id)
+        SELECT 1, COALESCE(MAX(event_id), 0) FROM yp_work_turn_sources;
+      UPDATE yp_work_source_event_sequence SET next_id = MAX(next_id,
+        (SELECT COALESCE(MAX(event_id), 0) FROM yp_work_turn_sources)) WHERE id = 1;
+      DROP TRIGGER IF EXISTS yp_work_turn_sources_assign_event_id;
+      CREATE TRIGGER yp_work_turn_sources_assign_event_id
+        AFTER INSERT ON yp_work_turn_sources WHEN NEW.event_id IS NULL BEGIN
+          UPDATE yp_work_source_event_sequence SET next_id = next_id + 1 WHERE id = 1;
+          UPDATE yp_work_turn_sources SET event_id =
+            (SELECT next_id FROM yp_work_source_event_sequence WHERE id = 1)
+            WHERE rowid = NEW.rowid;
+        END;`);
+    assertWorkSourceEventSchema(database);
+  },
 }];
+
+function assertWorkSourceEventSchema(database: DatabaseSync): void {
+  const column = (database.prepare('PRAGMA table_info(yp_work_turn_sources)').all() as
+    Array<{ name: string; type: string }>).find((item) => item.name === 'event_id');
+  const objects = database.prepare(`SELECT name FROM sqlite_master WHERE name IN
+    ('yp_work_turn_sources_event_id','yp_work_turn_sources_assign_event_id',
+     'yp_work_source_event_sequence')`).all() as
+    Array<{ name: string }>;
+  const missing = database.prepare('SELECT 1 FROM yp_work_turn_sources WHERE event_id IS NULL LIMIT 1').get();
+  const sequence = database.prepare('SELECT next_id FROM yp_work_source_event_sequence WHERE id = 1')
+    .get() as { next_id: number } | undefined;
+  const max = database.prepare('SELECT COALESCE(MAX(event_id),0) AS id FROM yp_work_turn_sources')
+    .get() as { id: number };
+  if (column?.type !== 'INTEGER' || objects.length !== 3 || missing
+    || !sequence || sequence.next_id < max.id) {
+    throw new Error('Incompatible Work source event cursor schema.');
+  }
+}
 
 function workDirectoryColumn(database: DatabaseSync): boolean {
   const columns = database.prepare('PRAGMA table_info(yp_work_conversations)').all() as
@@ -510,6 +556,7 @@ function applyMigrations(database: DatabaseSync): number {
   }
   if (!workDirectoryColumn(database)) throw new Error('Missing Work working_directory column.');
   assertCompatibleAssistantHostSchema(database, true);
+  assertWorkSourceEventSchema(database);
   return YUANPU_METADATA_SCHEMA_VERSION;
 }
 

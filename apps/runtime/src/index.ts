@@ -64,6 +64,8 @@ import { smokeBuiltinAgentTools } from './agent-tools-smoke.js';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { AssistantHostService } from './assistant-host.js';
+import { RuntimeAssistantSourceHost } from './assistant-source-host.js';
+export { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { runAssistantWorker } from './assistant-worker.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
@@ -558,6 +560,7 @@ async function serve(): Promise<void> {
   });
   const assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
+    sources: new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost),
     model: {
       appPath: home.appPath,
       agentPath: home.agentPath,
