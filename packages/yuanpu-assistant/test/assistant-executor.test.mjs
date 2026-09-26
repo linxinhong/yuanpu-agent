@@ -60,13 +60,15 @@ test('skills cannot enter through Work, project instructions, external links or 
   await writeFile(join(root, 'AGENTS.md'), 'Project agent instruction: load work-only.');
   await writeFile(join(root, 'agent', 'settings.json'), JSON.stringify({ packages: [workSkill] }));
   assert.deepEqual((await loadAssistantSkills(paths)).map((skill) => skill.name),
-    ['delegate-and-verify', 'review-work']);
+    ['delegate-and-verify', 'follow-up', 'maintain-memory', 'organize-work',
+      'review-work', 'understand-user']);
 
   const localSkill = join(paths.skills, 'assistant-only');
   await mkdir(localSkill);
   await writeFile(join(localSkill, 'SKILL.md'), '---\nname: assistant-only\ndescription: >\n  Assistant-only review\n  guidance.\n---\n\n# Assistant only\n');
   assert.deepEqual((await loadAssistantSkills(paths)).map((skill) => skill.name),
-    ['assistant-only', 'delegate-and-verify', 'review-work']);
+    ['assistant-only', 'delegate-and-verify', 'follow-up', 'maintain-memory',
+      'organize-work', 'review-work', 'understand-user']);
   assert.equal((await loadAssistantSkills(paths))[0].description, 'Assistant-only review guidance.');
 
   const linkedSkill = join(paths.skills, 'work-only');
@@ -145,7 +147,8 @@ test('independent Pi executor makes real loopback rounds and freezes core memory
   const executor = await createAssistantExecutor({ assistantHome: home, host });
   t.after(() => executor.close());
   const first = await executor.openSession();
-  assert.deepEqual(first.skillNames, ['delegate-and-verify', 'review-work']);
+  assert.deepEqual(first.skillNames, ['delegate-and-verify', 'follow-up', 'maintain-memory',
+    'organize-work', 'review-work', 'understand-user']);
   assert.equal((await first.prompt('Hello')).message, 'Verified reply.');
   const originalPrompt = JSON.stringify(requests[0].messages[0]);
   assert.match(originalPrompt, /You are the user’s personal assistant/);

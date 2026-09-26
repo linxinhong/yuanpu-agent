@@ -13,7 +13,7 @@ export interface WorkReviewMaterial {
   sourceId: string;
   sourceVersion: string;
   observedAt: string;
-  kind: 'turn' | 'tool' | 'artifact';
+  kind: 'turn' | 'tool' | 'artifact' | 'delegation';
   text: string;
 }
 
@@ -126,7 +126,7 @@ export function parseWorkReviewProposal(message: string): WorkReviewProposal {
     ledgerCandidates: strings(raw.ledgerCandidates, 8, 500, 'ledger candidates').map(redact) };
 }
 
-function redact(text: string): string {
+export function redactReviewText(text: string): string {
   return text
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
       '[redacted credential]')
@@ -142,6 +142,7 @@ function redact(text: string): string {
     .replace(/\b(?=[A-Za-z0-9_+/-]{24,}\b)(?=[A-Za-z0-9_+/-]*[A-Za-z])(?=[A-Za-z0-9_+/-]*\d)[A-Za-z0-9_+/-]{24,}={0,2}\b/gu,
       '[redacted opaque token]');
 }
+const redact = redactReviewText;
 
 /** A complete claim needs a host-verified artifact satisfying a literal user request. */
 function exactWriteProof(snapshot: WorkReviewSnapshot,
@@ -247,7 +248,8 @@ export class AssistantWorkReviewStore {
       if (text.length < row.text.length) truncated = true;
       characters += text.length;
       const kind = row.source_id.startsWith('work-artifact:') ? 'artifact'
-        : row.source_id.startsWith('work-tool:') ? 'tool' : 'turn';
+        : row.source_id.startsWith('work-tool:') ? 'tool'
+          : row.source_id.startsWith('delegation:') ? 'delegation' : 'turn';
       materials.push({ sourceId: row.source_id, sourceVersion: row.source_version,
         observedAt: row.occurred_at, kind, text });
     }

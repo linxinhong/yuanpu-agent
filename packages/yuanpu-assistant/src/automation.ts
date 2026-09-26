@@ -207,6 +207,9 @@ export class AssistantAutomationStore {
     const origin = event.feedId === 'work-evidence' ? 'work'
       : event.feedId.replace(/-deletions$/u, '');
     if (origin !== 'work' && origin !== 'assistant') return undefined;
+    if (origin === 'assistant' && event.change.kind !== 'deleted'
+      && (event.change.audience.kind !== 'personal'
+        || event.change.audience.id !== 'local-user')) return undefined;
     const kind: AutomationKind = event.change.kind === 'deleted' ? 'maintain-memory'
       : origin === 'work' ? 'review-work' : 'understand-user';
     return this.enqueue({ kind, dedupeKey: `source:${kind}:${event.change.sourceId}:${event.change.sourceVersion}`,
@@ -220,7 +223,7 @@ export class AssistantAutomationStore {
     const rows = this.database.prepare(`SELECT e.* FROM source_events e
       LEFT JOIN automation_source_links l ON l.feed_id=e.feed_id AND l.event_id=e.event_id
       WHERE e.status='processed' AND e.feed_id IN
-        ('work','work-evidence','assistant','work-deletions','assistant-deletions')
+        ('work','work-evidence','assistant','work-deletions','assistant-deletions','delegation')
         AND l.event_id IS NULL ORDER BY e.rowid LIMIT ?`).all(limit) as Array<Record<string, unknown>>;
     for (const row of rows) {
       const event: QueuedSource = { feedId: String(row.feed_id), eventId: String(row.event_id),
@@ -230,7 +233,29 @@ export class AssistantAutomationStore {
           occurredAt: String(row.occurred_at),
           ...(row.content_ref === null ? {} : { contentRef: String(row.content_ref) }),
           ...(row.work_id === null ? {} : { workId: String(row.work_id) }) } };
-      const job = this.enqueueSource(event);
+      let job = this.enqueueSource(event);
+      if (event.feedId === 'delegation' && event.change.workId) {
+        const base = this.database.prepare(`SELECT e.source_id,c.source_version
+          FROM source_events e JOIN source_current c ON c.source_id=e.source_id
+          WHERE e.work_id=? AND e.feed_id IN ('work','work-evidence')
+            AND c.availability='available' AND c.source_version=e.source_version
+          ORDER BY e.rowid DESC LIMIT 1`).get(event.change.workId) as
+          { source_id: string; source_version: string } | undefined;
+        if (!base) continue;
+        job = this.enqueue({ kind: 'review-work',
+          dedupeKey: `delegation-review:${event.change.sourceId}:${event.change.sourceVersion}`,
+          sourceId: base.source_id, sourceVersion: base.source_version,
+          audience: event.change.audience });
+      }
+      if (event.feedId === 'work' && event.change.kind !== 'deleted'
+        && event.change.sourceId.startsWith('work-turn:')
+        && event.change.audience.kind === 'personal'
+        && event.change.audience.id === 'local-user') {
+        this.enqueue({ kind: 'understand-user',
+          dedupeKey: `source:understand-user:${event.change.sourceId}:${event.change.sourceVersion}`,
+          sourceId: event.change.sourceId, sourceVersion: event.change.sourceVersion,
+          audience: event.change.audience });
+      }
       this.database.prepare(`INSERT OR IGNORE INTO automation_source_links(feed_id,event_id,job_id)
         VALUES (?,?,?)`).run(event.feedId, event.eventId, job?.jobId ?? null);
     }

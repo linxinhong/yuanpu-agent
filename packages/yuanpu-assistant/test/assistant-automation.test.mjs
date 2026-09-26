@@ -77,6 +77,29 @@ test('processed source left by a Worker crash is enrolled exactly once after res
   assert.equal(store.next().jobId, job.jobId);
 });
 
+test('processed delegated result recovers a new Work review after restart', async (t) => {
+  const context = await fixture(t);
+  const work = { ...source('1', 'work-v1').change, workId: 'work:one' };
+  context.sources.enqueuePage('work', '0', { nextCursor: '1',
+    events: [{ eventId: '1', change: work }] });
+  context.sources.setCurrent(context.sources.event('work', '1'), 'available',
+    'User: Check this result.\nAssistant: Working.');
+  const delegated = { sourceId: 'delegation:task-one', sourceVersion: 'result-v1',
+    kind: 'created', audience, occurredAt: '2026-09-27T00:00:01.000Z',
+    contentRef: 'delegation-result:task-one:result-v1', workId: 'work:one' };
+  context.sources.enqueuePage('delegation', '0', { nextCursor: '1',
+    events: [{ eventId: '1', change: delegated }] });
+  context.sources.setCurrent(context.sources.event('delegation', '1'), 'available',
+    'Delegated task returned one reference; Work outcome is unverified.');
+  await context.reopen();
+  const store = new AssistantAutomationStore(context.sources.database, context.clock.now);
+  assert.equal(store.reconcileProcessedSources(), 2);
+  const review = store.byKey('delegation-review:delegation:task-one:result-v1');
+  assert.equal(review.kind, 'review-work');
+  assert.equal(review.sourceId, work.sourceId);
+  assert.equal(store.reconcileProcessedSources(), 0);
+});
+
 test('out-of-order delegation status cannot supersede a newer or terminal job', async (t) => {
   const context = await fixture(t);
   let store = new AssistantAutomationStore(context.sources.database, context.clock.now);
