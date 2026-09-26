@@ -130,7 +130,7 @@ server.listen(0, '127.0.0.1', () => {
     setTimeout(() => {
       record('crash', { startNumber });
       process.exit(23);
-    }, 40);
+    }, mode === 'always-crash' ? 150 : 40);
   }
 });
 
