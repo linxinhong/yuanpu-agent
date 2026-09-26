@@ -55,7 +55,8 @@
 | `TASK-045` | `understand-user/`、`maintain-memory/`、`organize-work/`、`follow-up/` 的 `SKILL.md` 与用户理解、记忆、台账和跟进候选行为。 |
 | `TASK-046` | `delegate-and-verify/SKILL.md`、专业子任务委派和证据核验。 |
 | `TASK-048` | `reflect-and-suggest/SKILL.md`、助理侧主动回顾、建议去重与投递。 |
-| `TASK-047` | 跨卡验收七项技能的装载隔离、触发、实际持久产物和专业委派边界。 |
+| `TASK-047` | 跨卡验收前六项技能的装载隔离、触发、实际持久产物和专业委派边界。 |
+| `TASK-050` | 在主动回顾交付后，验收包含 `reflect-and-suggest` 的七项技能完整闭环。 |
 
 阶段验收分别复核无界面后台工作、App 退出、重复事件、错过周期合并、前台优先、用户纠正与遗忘、无证据不提示、建议仅在助理入口出现。状态和依赖以 `.tasks/tasks.yaml` 为准。
 

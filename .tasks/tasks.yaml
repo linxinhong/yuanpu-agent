@@ -1284,7 +1284,7 @@ tasks:
     scope:
       in: ["packages/yuanpu-assistant 构建、类型检查、test 与独立执行器", "Home 路径解析、SOUL/USER/MEMORY 初始化及冻结摘要", "仅助理技能的显式加载与窄 host 接口"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "来源、模型认证、委派和交付均由窄 host 接口注入；assistantHome 显式传入，核心不探测 Electron、固定用户目录或本机 Work 数据库；生命周期由宿主决定。见总体设计“本地先行与云端迁移边界”。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1293,6 +1293,8 @@ tasks:
         expect: "相同机器安装 Work 技能、项目指令和扩展时助理技能清单不变；软链接不能绕过技能根"
       - type: assertion
         expect: "模型回合使用新包实际执行器与隔离文件夹；没有用户资料时不编造画像，长会话提示词不随记忆写入改变"
+      - type: assertion
+        expect: "在不启动 Electron 的测试 host 中用另一绝对 Home 执行助理回合；模型由测试 host 注入，核心不要求本机 Work 文件、桌面凭据路径或修改全局 HOME；来源接入由后续来源存储卡验收。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-037"]
@@ -1309,6 +1311,7 @@ tasks:
       branch: "task/task-038-assistant-core"
       evidence: []
       follow_up_candidates: []
+
   - id: TASK-039
     title: "隔离工作会话并保留历史"
     status: in_progress
@@ -1316,7 +1319,7 @@ tasks:
     scope:
       in: ["Work conversation/session 创建、列表与后续回合路由", "取消全局长期记忆注入；旧 default 只读历史", "落盘后来源事件与重复补扫支持；现有 Work 页接入新建与历史"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "来源 ID 与版本独立于绝对路径和当前连接；内容引用由宿主解析，本卡继续本地持久化与补扫，不实现网络同步。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1325,6 +1328,8 @@ tasks:
         expect: "旧 default 保留可读，重启会话选择与内容不丢失；事件仅在来源落盘后产生，可幂等补扫"
       - type: assertion
         expect: "Work 页不出现助理建议或整理提示；运行、审批、取消和原有技能调用回归通过"
+      - type: assertion
+        expect: "同一工作来源在重启及改变存储根后保持 ID/版本可识别；来源事件可序列化，包含既有受众与不透明内容引用，落盘后即使助理暂不可用仍可补扫。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-037"]
@@ -1341,6 +1346,7 @@ tasks:
       branch: "task/task-039-work-conversations"
       evidence: []
       follow_up_candidates: []
+
   - id: TASK-040
     title: "接入助理进程与 SEA 生命周期"
     status: pending
@@ -1348,7 +1354,7 @@ tasks:
     scope:
       in: ["apps/runtime 专用 Worker 启动与宿主装配", "IPC 就绪/取消/期限/异常恢复；Home 单写锁", "SEA Worker 分发、Desktop 启停和升级清理"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "本卡是 apps/runtime 装配与 SEA 构建集成所有者；不与渠道卡同时编辑共享入口"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "本卡是 apps/runtime 装配与 SEA 构建集成所有者；不与渠道卡同时编辑共享入口", "App 退出停止助理是桌面宿主策略；助理服务装配不导入 Electron，无界面运行可测试。本轮不增加云端启动模式、常驻服务或公网监听。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1357,6 +1363,8 @@ tasks:
         expect: "App 完整退出、父进程异常退出与启动失败均有界回收 Worker；重启获取唯一 Home 写入锁，未完成任务可识别"
       - type: assertion
         expect: "打包 SEA 无系统 Node 依赖地启动 Worker；旧 Runtime 更新/回退与 ready 首行协议保持兼容"
+      - type: assertion
+        expect: "无桌面客户端时测试宿主可启动 Worker 并保持服务；客户端断开不释放 Home 写锁或终止任务，只有明确的宿主停止/父进程退出策略回收 Worker；第二个 Home 写入者被拒绝。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-038", "TASK-039"]
@@ -1381,7 +1389,7 @@ tasks:
     scope:
       in: ["按选定通信契约接入本地和已有企微长连接", "身份/会话/回复路由持久映射、幂等与重连", "旧 assistant/企微共享 session 绑定迁移、来源事件、宿主服务 API"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "渠道、认证与客户端传输适配置于宿主；业务身份、会话和请求 ID 不依赖 socket 地址或连接寿命。每个企微连接只有一个活动宿主所有者；本轮不开放远程访问。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1392,6 +1400,8 @@ tasks:
         expect: "旧绑定、归档、身份权限与交付记录保持；迁移可重试，失败保留原件不回落共享会话"
       - type: assertion
         expect: "未配对身份被拒绝；群聊或其他成员不得进入主人的私人快照/画像；用 fixture 验证即可，真实群聊非本轮门槛"
+      - type: assertion
+        expect: "通过两个本地客户端适配连接同一助理服务，断开再连接仍恢复已接受请求；企微路由不依赖 renderer 存活，身份不能由客户端上传字段自封。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-040"]
@@ -1416,7 +1426,7 @@ tasks:
     scope:
       in: ["独立 Worker 与双入口的 API/IPC/存储业务场景", "真实企业微信一位已授权用户私聊；本地服务调用", "迁移、重启、拒绝身份和 SEA 退出验证"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "由非本阶段主要实现者独立验证；只写验证 harness 和证据，不在验收卡隐藏产品功能", "实际外发测试消息前需明确测试目标与发送授权；可先完成全部离线验收"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "由非本阶段主要实现者独立验证；只写验证 harness 和证据，不在验收卡隐藏产品功能", "实际外发测试消息前需明确测试目标与发送授权；可先完成全部离线验收", "按总体设计“本地先行与云端迁移边界”验证本地可替换接缝；这些测试不是云端部署或网络安全验收。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1425,6 +1435,8 @@ tasks:
         expect: "在隔离 Home 中迁移旧数据、重复入站、强制断开、杀 Worker 和退出 App；历史保留且无重复执行、无孤儿进程"
       - type: assertion
         expect: "发布 .tasks/verification/TASK-042/results.md，逐场景记录 revision+dirty diff、平台、fixture/real、命令和 pass/fail/unverified"
+      - type: assertion
+        expect: "独立测试 host 无 Electron 启动助理、改变 Home 根、断开再 attach 并拒绝第二写入者；记录可迁移边界证据，真实远程同步和云端运行仍标为未实现。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-041"]
@@ -1449,7 +1461,7 @@ tasks:
     scope:
       in: ["来源登记、持久队列、游标、补扫、版本与受众范围", "memories/work/reviews 文档仓库、原子提交、索引与修订", "手工修改、删除来源、遗忘、旧 MEMORY 导入和中文检索"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "助理通过 host 来源接口读取正文和产物，不按 contentRef 直接打开本机绝对路径；来源不可用与已删除分别处理。单写入者维护持久状态，禁止把运行中的 SQLite/会话目录双向文件同步作为设计。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1460,6 +1472,8 @@ tasks:
         expect: "纠正下次查询可见；删除来源撤回仅由其支持的认识；遗忘同时处理摘要、索引、评估、建议和修订，并阻止未变旧来源重新引入"
       - type: assertion
         expect: "中文查询能回到原始证据；不可访问和失效来源明确显示；索引可重建但队列/投递状态不可丢失"
+      - type: assertion
+        expect: "测试来源适配器返回与本地路径无关的正文引用；重复、乱序、暂不可用后恢复及删除事件可重放，ID/版本与受众保持有效；暂时离线不会误作删除或事实撤回。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-042"]
@@ -1484,7 +1498,7 @@ tasks:
     scope:
       in: ["packages/yuanpu-assistant 内部 automation 模块与 state.sqlite 持久队列", "工作/助理/委派/来源变化事件触发及每日每周活跃检查", "幂等合并、前台优先、预算、暂停、失败恢复与 App 退出清理"]
       out: ["用户手动创建的 Runtime 计划迁移", "飞书、微信、钉钉、远程常驻及团队平台", "具体工作评估模型提示词、专业子代理执行、建议渠道 UI"]
-    constraints: ["设计见 docs/assistant-skills-and-automation.md 与 docs/assistant-memory-proposal.md", "助理队列仅由 Assistant Worker 写；不复用 workflows/automation.sqlite 的用户任务表或工作执行器", "保留现有工作区改动；完成需集成并在 main 验证，不推送"]
+    constraints: ["设计见 docs/assistant-skills-and-automation.md 与 docs/assistant-memory-proposal.md", "助理队列仅由 Assistant Worker 写；不复用 workflows/automation.sqlite 的用户任务表或工作执行器", "保留现有工作区改动；完成需集成并在 main 验证，不推送", "调度由 Assistant Worker 与宿主运行状态驱动，不以窗口可见性或 renderer 定时器触发；桌面退出仍停止。本轮不实现跨节点锁、主从切换或云端定时服务。"]
     forbidden: ["把定时检查伪装成用户消息或用户手动计划", "退出 App 后继续后台处理", "用内存 Map 代替跨重启去重记录"]
     acceptance:
       - type: assertion
@@ -1495,6 +1509,8 @@ tasks:
         expect: "用户当前消息优先；纠正与遗忘可以抢占后台工作，取消后迟到模型结果不能落盘；时间和费用预算生效"
       - type: assertion
         expect: "Worker 异常与正常退出后重启可识别未完成任务并恢复，已完成修订不重复提交；外部结果未知时先查状态、不重放副作用"
+      - type: assertion
+        expect: "无界面客户端连接时可控时钟仍触发有效整理检查；停止桌面宿主后不再运行，恢复时合并错过周期；调度不依赖 Electron 事件或前端页面计时器。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-043"]
@@ -1593,7 +1609,7 @@ tasks:
     scope:
       in: ["skills/delegate-and-verify/SKILL.md 与宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "委派接口用逻辑任务 ID 和有范围的来源/结果引用，不假设与助理同机；节点选择、凭据及本地工具路径由宿主执行适配器解析，本轮只交付本地执行器。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1606,6 +1622,8 @@ tasks:
         expect: "子代理无写助理 Home 的能力；对路径/工具访问有可执行约束，不靠提示词承诺；若广泛本地 shell 无法约束，须先收窄工具或落实隔离"
       - type: assertion
         expect: "App 退出清理子任务及工具进程；重启保留记录，未知外部结果先核对不自动重放；原有工作 subagent 功能不回归"
+      - type: assertion
+        expect: "替换测试执行适配器后同一委派可接收、查询和核验不透明结果引用；断线/结果未知保留原任务 ID，不能转交另一执行器盲重跑；助理不直接读取子进程工作目录。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-042"]
@@ -1638,11 +1656,13 @@ tasks:
       - type: assertion
         expect: "通过实际持久文件核对来源、画像、工作状态；用户纠正不复活旧结论，遗忘清除评估/摘要且不被补扫重新创建"
       - type: assertion
-        expect: "七项默认技能均从助理专属目录加载；专业技能只在委派的普通任务环境加载，端到端验证技能触发与产物而非只检查文件存在"
+        expect: "本阶段六项默认技能均从助理专属目录加载；专业技能只在委派的普通任务环境加载，端到端验证技能触发与产物；reflect-and-suggest 由后续主动回顾卡交付并在最终业务验收验证"
       - type: assertion
         expect: "对恶意来源指令、跨会话身份、路径绕过和子任务修改助理目录做独立检查；说明保证机制与残余限制"
       - type: assertion
         expect: "发布 .tasks/verification/TASK-047/results.md，区分确定性 fixture、真实模型观察与未验证项，不用综合评分代替验收"
+      - type: assertion
+        expect: "以不暴露本机文件路径的来源和执行适配器复核审阅与委派链；来源暂不可用不会误删记忆，恢复/重复事件不会重复提交，断开界面不终止后台整理；仅证明本地可替换接口，不宣称跨网络同步已实现"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-045", "TASK-046"]
@@ -1704,7 +1724,7 @@ tasks:
     scope:
       in: ["复用今日/任务/记忆/连接页面，接入真实助理服务", "来源导航、工作评估详情、编辑纠正/遗忘、暂停整理与同步状态", "委派详情/取消/继续追问与可信投递状态；旧本地保存记忆迁移入口"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "同一实施者拥有 chat.tsx、assistant-home、共享样式和 preload 界面接入；保留工作区未提交布局", "若新增重大页面结构超出现有方案，按 UI Delivery 给出可审阅方案；普通数据接入继续复用已批准布局"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "同一实施者拥有 chat.tsx、assistant-home、共享样式和 preload 界面接入；保留工作区未提交布局", "若新增重大页面结构超出现有方案，按 UI Delivery 给出可审阅方案；普通数据接入继续复用已批准布局", "界面通过助理服务客户端获取记忆、来源与任务，不直接读取 assistant Home；地址、认证与传输留在适配层。本轮保留本地入口，不增加云端设置页。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1715,6 +1735,8 @@ tasks:
         expect: "本地与企微入口状态清晰，只有企微配置入口；不出现其他平台占位或虚构健康画像"
       - type: assertion
         expect: "沿用已接受 v003 双面板及三主题，缩放/键盘/长文本/草稿/断线恢复可用；Work 页面没有建议或整理提示"
+      - type: assertion
+        expect: "用可控服务适配器断开/重连界面后，按既有请求 ID 恢复任务状态；记忆修改通过版本化服务提交，界面没有第二份可写的权威记忆或本机文件读取捷径。"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-048"]
@@ -1750,6 +1772,8 @@ tasks:
         expect: "打包 App 可运行独立 Worker，完整退出回收所有子进程；既有工作技能、审批、连接、计划和更新/回退未回归"
       - type: assertion
         expect: "发布 .tasks/verification/TASK-050/results.md，含 revision/diff、场景、测试命令、截图脱敏、真实/fixture 标识及 pass/fail/unverified；无证据不宣称跨平台发布完成"
+      - type: assertion
+        expect: "七项默认技能全部交付并从助理专属目录加载，主动回顾与前期六项技能形成真实闭环；沿用前阶段无界面/来源适配/单写入边界证据，不把本地通过宣称为云端已可部署"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-049"]
