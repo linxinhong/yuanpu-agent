@@ -2302,7 +2302,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-064
     title: "修复旧 default 工作会话启动时的证据补扫"
-    status: ready
+    status: in_progress
     goal: "已有旧 default Pi 会话和绑定时，Runtime 能启动、只读显示历史，并安全补扫工作证据，不要求旧会话伪装成新会话。"
     scope:
       in: ["修复 WorkEvidenceStore 对旧 default 的绑定核验与启动扫描兼容", "增加临时 Home 的 Runtime 启动、旧 Pi JSONL 历史和证据补扫回归测试"]
@@ -2322,11 +2322,11 @@ tasks:
     investigation_hints: ["TASK-060 隔离 Electron 重启复现：旧 default 只有 yp_conversation_bindings 行，没有 yp_work_conversations 行；启动 scanSavedWorkTurns 调用 WorkEvidenceStore.recordToolResults 抛 Work evidence is not bound to a local conversation", "从 packages/yuanpu-runtime/src/persistence/work-evidence-store.ts 与 apps/runtime/src/index.ts 的现有路径和 packages/yuanpu-runtime/test/work-conversation.test.mjs 的 legacy fixture 入手"]
     escalation_conditions: ["若旧绑定无法可靠证明同一工作目录和身份，保持拒绝并记录迁移决策，不隐式授权"]
     result:
-      owner: null
+      owner: "legacy-work-repair-sol-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T23:43:47.457Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/.codex/worktrees/legacy-work-repair/yuanpu-agent"
+      branch: "task/task-064-legacy-work-evidence"
       evidence: []
       follow_up_candidates: []
