@@ -1879,7 +1879,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-054
     title: "修复助理与工作目录的 SQLite v8 迁移冲突"
-    status: ready
+    status: in_progress
     goal: "已有 Work 目录版 schema v8 的用户数据库升级后可创建独立助理表，历史会话和配对保持可读。"
     scope:
       in: ["识别 schema v8 助理版与 Work 目录版两种历史形态", "幂等且原子的助理表补建与版本推进", "合成旧库升级、重启重试和现有数据保留回归"]
@@ -1903,11 +1903,11 @@ tasks:
     investigation_hints: ["packages/yuanpu-runtime/src/persistence/index.ts 的迁移与 schema 常量、packages/yuanpu-runtime/test/persistence.test.mjs", "apps/runtime/scripts/native/smoke.mjs 的 schema 断言；TASK-042 的 .tasks/verification/TASK-042/results.md", "先以合成 v8 Work 目录库重现缺表，再实现带事务的修复；复测 v8 助理版、v9 缺表版及新库，最后全量与当前平台 SEA"]
     escalation_conditions: ["若出现同名表结构不兼容或真实库比 v9 更新，先停止写入并记录实际 schema，不自动猜测迁移", "修复不触碰或打印真实用户内容"]
     result:
-      owner: null
+      owner: "assistant-architecture-schema-repair-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T15:42:45.864Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
+      branch: "task/task-054-assistant-schema-repair"
       evidence: []
       follow_up_candidates: []
