@@ -2,7 +2,7 @@
 
 - 日期：2026-09-27；owner conversation-tree-sol-055-10677；分支 task/task-055-work-tree-contract，worktree .worktrees/conversation-tree-sol。
 - 关键词：Work folder tree、SQLite v13、稳定目录 ID、标签、普通归档、requestId、创建意图、协议 v5。
-- 来源：claim 9c9648c；实现 375bbba、重试修复 9ecd819，依赖独立测试稳定性提交 89806d1。合并 main 2106926 得到 3f442bf；尚未集成 main 或 complete 卡。
+- 来源：claim 9c9648c；实现 375bbba、重试修复 9ecd819，依赖独立测试稳定性提交 89806d1。主线集成提交 `4015d50`，后续交接补充于 `a59d4b8` 合入；卡状态由任务工具结项。
 
 ## 入口与行为
 
@@ -23,7 +23,7 @@
 
 ## 限制与后续
 
-- 未运行 macOS SEA/native smoke、Windows/Linux、真实用户库写入迁移或桌面树 UI 手工验收；已覆盖合成旧库升级及重复打开，native smoke schema 断言已改 v13。
+- 合并后的 macOS arm64 `build:native && smoke:native` 已通过；Windows/Linux、真实用户库写入迁移及桌面树 UI 手工验收未运行。合成旧库升级及重复打开已覆盖，native smoke schema 断言已改 v13。
 - requestId 对未来文件夹/标签调用仍可选；后续树 UI 应为每次创建生成并在重试时复用。无 ID 的调用可创建多个同名节点；现有新会话按钮已传稳定重试 ID。
 - JavaScript 文件 API 无跨 SQLite/文件系统原子提交；意图恢复只删除空的未提交叶目录。恶意同一用户进程持续在检查与 mkdir 间替换父路径仍需底层目录句柄式原子操作才能完全消除；当前实现复验并拒绝继续。
-- 下一步由单一 main writer 集成提交与本记忆，在 main 复验后由任务工具 complete；本分支不改 main 或 push。
+- 主线已按 v13→v14 顺序接入 TASK-061，并接入 TASK-046；任务工具的完成证据记录最终校验。未推送。

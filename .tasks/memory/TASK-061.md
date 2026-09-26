@@ -1,6 +1,6 @@
 # TASK-061 建立工作工具结果与产物的助理来源契约
 
-- Owner：`root-assistant-artifacts-20260927-061-10414`；branch `task/task-061-assistant-artifact-sources`；worktree `.worktrees/assistant-artifacts`。核心提交 `a0438e4`，合入 TASK-051 为 `91e11ab`；路径安全复核后改为 write 内容快照，合入 TASK-055 v13 后以 v14 扩展。主线集成与卡状态尚待完成。
+- Owner：`root-assistant-artifacts-20260927-061-10414`；branch `task/task-061-assistant-artifact-sources`；worktree `.worktrees/assistant-artifacts`。核心提交 `a0438e4`，合入 TASK-051 为 `91e11ab`；路径安全复核后改为 write 内容快照，合入 TASK-055 v13 后以 v14 扩展。主线集成提交 `3408b8b`；卡状态由任务工具结项。
 
 ## 契约与实现
 
@@ -12,6 +12,6 @@
 ## 验证与边界
 
 - 临时 Home + 环回模型的真实 Runtime/Pi `write` 回合验证三类来源分别可读，Worker 持久入队、重启不重复及显式删除后撤回。拒绝测试覆盖错误受众、未知 ref、根外/绝对/遍历请求路径、超大/含 NUL 内容、Pi 会话文件/目录 symlink 与孤立工具结果；改动当前文件或将其换成 symlink 不影响历史写入快照。聚焦 runner：`1790446485810653000`（v13→v14 迁移/Work）、`1790446887004440000`（快照初版）、`1790447529979514000`（最终迁移/配对/来源测试 21/21）、`1790447752371688000`（Pi 根目录 symlink）。第一次并行全量运行 `1790447183524844000` 因运行中源码变更且 Runtime 子测试长时间未结束而主动终止，不作最终验收。最终 `pnpm check && pnpm build:native && pnpm smoke:native` 在 Node 24.15.0/pnpm 11.22.0/macOS arm64、提交 `64731c8` 上全过，runner `1790447641133747000`，changed_during_run=false；其后只新增上述回归测试与本证据，不改生产代码。
-- TASK-055 v13 必须先于本卡 v14 进入主线并应用于真实用户库；本卡未访问真实 `~/.yuanpu`。TASK-062 负责用户界面的来源撤销操作；本卡仅实现可消费的宿主删除事件契约。平台原生行为目前仅在 macOS arm64 有待最后 smoke，Windows/Linux 未验证。
+- TASK-055 v13 已先于本卡 v14 进入主线；真实用户库尚未应用此迁移，本卡未访问真实 `~/.yuanpu`。TASK-062 负责用户界面的来源撤销操作；本卡仅实现可消费的宿主删除事件契约。主线 macOS arm64 `build:native && smoke:native` 已通过，Windows/Linux 未验证。
 - 同机恶意进程若能同时篡改整个 `sessions` 根目录，Node 的常规路径 API 无法提供目录 FD 相对的原子遍历；当前静态 symlink 与文件 FD 无跟随检查不承诺防御这种同用户 Home 目录竞态。工作文件完全不读取，因此不受 Work 父目录 ABA 切换影响。超 32 MiB 的历史 Pi Session 只读补扫不可用，不宣称全量回填。
 - 检索：本 host 无 zvec-grep 工具；基于已知 `AgentRunStore`、`SessionManager`、`RuntimeAssistantSourceHost`、`yp_work_turn_sources` 在 `apps/runtime`、`packages/yuanpu-runtime`、`packages/yuanpu-assistant` 和对应任务卡做限定 `rg`，未创建索引。
