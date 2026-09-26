@@ -141,6 +141,24 @@ test('legacy Pi backfill skips a symlinked session file', async (context) => {
   assert.deepEqual(readYuanpuChatTranscript(workspace, 'legacy-safe-session', sessions), []);
 });
 
+test('legacy Pi backfill skips a symlinked managed sessions directory', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-root-link-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const sessions = join(root, 'sessions');
+  await mkdir(workspace);
+  const pi = SessionManager.create(workspace, sessions, { id: 'linked-root-session' });
+  pi.appendMessage({ role: 'user', content: 'private message', timestamp: Date.now() });
+  pi.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'private reply' }],
+    api: 'anthropic-messages', provider: 'anthropic', model: 'fixture', stopReason: 'stop',
+    usage, timestamp: Date.now() });
+  const outside = join(root, 'outside-sessions');
+  await rename(sessions, outside);
+  await symlink(outside, sessions);
+  assert.deepEqual(readYuanpuChatTranscript(workspace, 'linked-root-session', sessions), []);
+  assert.deepEqual(readYuanpuSavedToolResults(workspace, 'linked-root-session', sessions), []);
+});
+
 test('legacy Pi backfill requires a matching assistant tool call before accepting a result', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-pairing-'));
   context.after(() => rm(root, { recursive: true, force: true }));
