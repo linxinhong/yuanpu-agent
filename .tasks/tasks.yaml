@@ -2156,7 +2156,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-060
     title: "工作会话文件夹树完整业务验收"
-    status: ready
+    status: in_progress
     goal: "独立确认真实桌面用户能把工作会话按文件夹组织、物理移动、安全找回、搜索和归档，而不丢失 Pi 历史或工作文件。"
     scope:
       in: ["在可用 Electron/Runtime 环境走真实 UI 与服务端持久化全旅程", "验证重启、故障恢复、旧 default、根外目录拒绝与三主题树操作", "记录截图、revision、真实/fixture 标识、失败与未验证项"]
@@ -2178,15 +2178,14 @@ tasks:
     investigation_hints: ["从 .tasks/ui/conversation-management/prototype-v003.md 的新建、树移动、搜索、归档旅程出发；对比工作对话右侧栏文件预览（TASK-052）的验收结果", "复用 .tasks/verification/TASK-058/results.md 的真实后端/故障证据，只新增 UI、主题、键盘、重启组合场景；用 pnpm check 守仓库门禁"]
     escalation_conditions: ["若当前环境无法运行 Electron，记录浏览器 UI 与 Runtime 真实服务各自证据及未验证的桌面组合，不标整体完成", "发现迁移后 Pi 历史或文件丢失立即停止后续移动，退回安全搬迁工作会话及文件夹的磁盘目录（TASK-056）修复"]
     result:
-      owner: null
+      owner: "conversation-verifier-sol-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T22:47:14.290Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
+      branch: "task/task-060-work-tree-acceptance"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-061
     title: "建立工作工具结果与产物的助理来源契约"
     status: done
