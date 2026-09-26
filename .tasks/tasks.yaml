@@ -2300,3 +2300,33 @@ tasks:
       branch: "task/task-063-browser-tab"
       evidence: []
       follow_up_candidates: []
+  - id: TASK-064
+    title: "修复旧 default 工作会话启动时的证据补扫"
+    status: ready
+    goal: "已有旧 default Pi 会话和绑定时，Runtime 能启动、只读显示历史，并安全补扫工作证据，不要求旧会话伪装成新会话。"
+    scope:
+      in: ["修复 WorkEvidenceStore 对旧 default 的绑定核验与启动扫描兼容", "增加临时 Home 的 Runtime 启动、旧 Pi JSONL 历史和证据补扫回归测试"]
+      out: ["改变旧 default 只读约束", "迁移用户工作目录或修改 Pi 上游包"]
+    constraints: ["旧 default 只接受本地 desktop/local-user 的精确 Pi 绑定与工作目录，不能放宽新会话的身份与来源授权", "保留原始 Pi JSONL；验收者在 TASK-060 的隔离 Electron 场景复测"]
+    forbidden: ["跳过所有旧会话扫描以掩盖启动失败", "将任意未绑定 Pi 会话登记为 Work 证据"]
+    acceptance:
+      - type: assertion
+        expect: "已有旧 default 绑定和 Pi JSONL 的临时 Home 启动 Runtime 成功，旧历史只读可见；可确定的工具结果补扫不重复且不越权"
+      - type: assertion
+        expect: "错误身份、错误 Pi session 或无绑定的证据登记仍被拒绝；新 Work 会话的现有行为保持不变"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-059", "TASK-061"]
+    risk_level: "L3"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["TASK-060 隔离 Electron 重启复现：旧 default 只有 yp_conversation_bindings 行，没有 yp_work_conversations 行；启动 scanSavedWorkTurns 调用 WorkEvidenceStore.recordToolResults 抛 Work evidence is not bound to a local conversation", "从 packages/yuanpu-runtime/src/persistence/work-evidence-store.ts 与 apps/runtime/src/index.ts 的现有路径和 packages/yuanpu-runtime/test/work-conversation.test.mjs 的 legacy fixture 入手"]
+    escalation_conditions: ["若旧绑定无法可靠证明同一工作目录和身份，保持拒绝并记录迁移决策，不隐式授权"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
