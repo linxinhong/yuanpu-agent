@@ -1801,3 +1801,38 @@ tasks:
       branch: null
       evidence: []
       follow_up_candidates: []
+
+  - id: TASK-052
+    title: "工作对话右侧栏文件预览"
+    status: in_progress
+    goal: "用户在工作对话右侧「文件」栏浏览当前工作区目录树并预览文本/Markdown/图片/PDF；聊天消息中的文件路径可点击直达预览。"
+    scope:
+      in: ["protocol 文件清单/读取契约、路由与 DesktopBridge 方法", "runtime sidecar 工作区只读文件路由与路径安全（containment + realpath）", "desktop runtime-manager/main/preload 三处接线", "renderer 文件树、预览组件、聊天内路径点击（仅 work surface）", "pdfjs-dist 渲染 PDF"]
+      out: ["任何文件写入、编辑、删除、移动能力", "助理（assistant）surface 的文件预览", "Office/PPTX/音视频预览与 PDF 分段按需加载", "修改 Pi 上游镜像；覆盖已有未提交改动"]
+    constraints: ["渲染层只持有 conversationId 与工作区相对路径，不接触绝对路径；root 由 sidecar 从会话记录解析", "sidecar 强制相对路径 + containment + realpath 复验防符号链接逃逸；通道整体只读", "大小上限：文本 256KB 截断、图片 8MB、PDF 20MB；NUL/控制字符占比判二进制，二进制不按文本渲染", "样式只用已声明 --yp-* token（theme-contract 保持通过）；遵守 composition-boundary 契约", "保留当前工作区增量；完成需集成并在 main 验证，本轮不推送"]
+    forbidden: ["在预览通道提供任何写入/删除/执行能力", "把绝对路径暴露给 renderer 或写入持久层", "将构建成功或 fixture 当作 UI 验收通过"]
+    acceptance:
+      - type: assertion
+        expect: "工作对话右侧「文件」tab 展示当前会话工作区目录树（目录懒加载），点击文本/Markdown/图片/PDF 文件在栏内看到对应预览；>256KB 文本明确标注截断"
+      - type: assertion
+        expect: "聊天消息中的工作区相对路径（含 codespan）渲染为可点击链接，点击打开「文件」tab 并预览；路径不存在、在工作区外或超限时预览区显示明确错误，不崩溃"
+      - type: assertion
+        expect: "sidecar 单测覆盖：拒绝 ..、绝对路径与符号链接逃逸，未授权/不存在会话返回 404；文本截断、二进制判定、图片与 PDF base64 读取正确"
+      - type: assertion
+        expect: "切换/新建工作会话后文件树与预览状态重置；assistant surface 不出现文件入口；右侧栏现有动态/运行 tab、拖宽与最大化行为不回归"
+      - type: command
+        run: "pnpm check"
+    dependencies: []
+    risk_level: "L3"
+    recommended_model: "glm-5.3"
+    investigation_hints: ["协议入口 packages/yuanpu-protocol/src/index.ts（RUNTIME_ROUTES、WorkConversation、DesktopBridge）；runtime 路由参考 apps/runtime/src/index.ts 的 desktopTranscript 分支与 workConversations.row(workScope, id) 取 working_directory 的方式", "新模块 apps/runtime/src/workspace-files.ts 与 workspace-directory.ts 并列；containment 写法参考 packages/yuanpu-runtime/src/packages/index.ts:144 附近", "renderer 入口 apps/app/src/modules/chat.tsx activity-panel（activityTab/rightPanelWidth 最大化机制）；Markdown 复用 shared/message-content.tsx；宽度函数 shared/panel-resize.ts", "测试范式：node:test + tsx register 动态导入 TS（apps/app/test/panel-resize.test.mjs）；runtime 路由测试按 apps/runtime/test/runtime.test.mjs loopback 模式", "pdfjs-dist worker 用 Vite ?url 导入；如与构建冲突，记录最小替代（同步模式）并回归"]
+    escalation_conditions: ["如现有 DesktopBridge/协议契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "pdfjs-dist 与 Vite/SEA 打包冲突或体积不可接受时，记录证据并将 PDF 降级为「下载/暂不支持」提示后完成其余验收"]
+    result:
+      owner: "zcode-80975"
+      attempts: 0
+      claimed_at: "2026-09-26T15:16:49.231Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/file-preview"
+      branch: "task/task-052-file-preview"
+      evidence: []
+      follow_up_candidates: []
