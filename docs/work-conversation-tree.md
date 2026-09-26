@@ -43,3 +43,28 @@
 4. 完整业务验收覆盖新建、嵌套、重命名、移动、重启、搜索、归档恢复、标签、图标及旧 `default`，区分真实数据与 fixture。
 
 分支会话、任意外部路径导入和云端团队同步不在这组卡内；它们继续沿各自功能边界规划。
+
+## 受控目录搬迁实现（TASK-056）
+
+`POST /v1/work/move` 接受 `requestId`、`kind`、稳定节点 `id` 与 `targetFolderId`；
+Desktop 使用 `moveWorkNode`，协议版本为 6。相同请求可安全重试；普通 PATCH 仍不能直接改 cwd 或父节点。
+迁移结果与会话列表提供旧目录提示，历史正文、来源版本和 run 请求中的绝对路径不变。
+
+Runtime 的 `WorkDirectoryMoveCoordinator` 对 HTTP 读取/提交/管理操作使用租约，移动期间拒绝新租约，
+现有读操作完成前拒绝启动移动；来源补扫在移动期间跳过。当前采用全局 Work 闸门，优先保证一致性。
+受影响会话有 queued/running/waiting_approval、后台子任务、工作流、活动目标或持久 checkpoint 时拒绝；
+只有唯一匹配的 Work/Pi 绑定可搬迁。无缓存的会话也会检查持久工具状态，未知状态失败关闭。
+
+迁移意图复用 `yp_runtime_metadata` 的 `work.move.<requestId>` 键，不单独占用 schema 版本。
+流程为：记录意图 → 同卷 rename 工作目录与 cwd 派生工具状态目录 → 原子替换 JSONL header →
+单一 SQLite 事务更新全部 live cwd/绑定/树路径并标记 committed → 验证 Pi 发现 → 保存 done。
+未 committed 的故障回滚到旧目录；committed 后重启续迁到新目录。启动修复先于 Agent scheduler、来源扫描及 HTTP 服务。
+若目录身份冲突、正文被并发改写或权限阻止恢复，则保留意图并禁止继续读写，不覆盖或删除冲突对象。
+JSONL 正文逐字节保留，header 未知字段与权限保留；Pi session ID 和 JSONL 文件位置保持不变。
+
+自动搬迁拒绝根外 cwd、跨卷、符号链接、特殊文件、已存在目标、额外 session 绑定及损坏/歧义历史。
+含 linked Git worktree 的 `.git` 文件、主库 worktrees 注册目录或 `core.worktree` 配置也拒绝，
+因为直接 rename 会破坏 Git 的绝对注册关系；需要未来的显式 Git 搬迁流程。
+预检与 inode/device 复验保护普通应用内竞争，但 Node 文件 API 不能消除恶意同用户进程在检查与 rename 间替换路径的 TOCTOU；
+不将本实现描述为对同用户恶意进程的原子文件系统隔离。Windows 的目录 fsync 不受 Node 支持，
+本轮强杀恢复与 POSIX 权限测试在 macOS 执行，其他平台仍需实际验证。

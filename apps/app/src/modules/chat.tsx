@@ -946,6 +946,8 @@ export function ChatPanel({
                 </div>}
               </article>
             )}
+            {surface === 'work' && Boolean(workConversationsQuery.data?.find((item) => item.id === workConversationId)?.previousWorkingDirectories?.length)
+              && <p className="archive-notice" role="status">工作目录已移动。历史消息中的旧绝对路径保留原文，可能已失效；请从右侧文件树打开当前文件。</p>}
             {archiveOpen && archiveQuery.isLoading && <p className="archive-notice">正在读取原桌面会话…</p>}
             {archiveOpen && archiveQuery.error && <p className="archive-notice" role="alert">原桌面会话读取失败：{formatError(archiveQuery.error)}</p>}
             {archiveOpen && archiveQuery.data?.length === 0 && <p className="archive-notice">原桌面会话还没有消息。</p>}

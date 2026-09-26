@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 import type { NotificationNavigationTarget } from './host-events.js';
 import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
@@ -47,6 +47,7 @@ export const RUNTIME_ROUTES = {
   desktopTranscript: '/v1/desktop/transcript',
   workConversations: '/v1/work/conversations',
   workFolders: '/v1/work/folders',
+  workMove: '/v1/work/move',
   workTags: '/v1/work/tags',
   workOrder: '/v1/work/order',
   workFiles: '/v1/work/files',
@@ -130,6 +131,8 @@ export interface WorkConversation {
   createdAt: string;
   updatedAt: string;
   workingDirectory: string;
+  /** Historical absolute paths may still appear verbatim in old messages. */
+  previousWorkingDirectories?: string[];
   current: boolean;
   archived: boolean;
   archivedAt: string | null;
@@ -138,6 +141,19 @@ export interface WorkConversation {
   folderId: string | null;
   sortOrder: number;
   tagIds: string[];
+}
+
+export interface WorkMoveRequest {
+  requestId: string;
+  kind: 'folder' | 'conversation';
+  id: string;
+  targetFolderId: string | null;
+}
+export interface WorkMoveResult {
+  requestId: string;
+  conversationIds: string[];
+  previousDirectories: Array<{ conversationId: string; path: string }>;
+  warning: string;
 }
 
 export interface WorkFolder {
@@ -454,6 +470,7 @@ export interface DesktopBridge {
   createWorkConversation(folderId?: string, requestId?: string): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string): Promise<WorkConversation>;
   updateWorkConversation(conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }): Promise<WorkConversation>;
+  moveWorkNode(request: WorkMoveRequest): Promise<WorkMoveResult>;
   listWorkFolders(): Promise<WorkFolder[]>;
   createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<WorkFolder>;
   updateWorkFolder(folderId: string, patch: { name?: string; iconId?: string }): Promise<WorkFolder>;

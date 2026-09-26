@@ -19,6 +19,7 @@ const bridge: DesktopBridge = {
   createWorkConversation: (folderId, requestId) => ipcRenderer.invoke('work:conversations:create', folderId, requestId),
   selectWorkConversation: (conversationId) => ipcRenderer.invoke('work:conversations:select', conversationId),
   updateWorkConversation: (conversationId, patch) => ipcRenderer.invoke('work:conversations:update', conversationId, patch),
+  moveWorkNode: (request) => ipcRenderer.invoke('work:move', request),
   listWorkFolders: () => ipcRenderer.invoke('work:folders:list'),
   createWorkFolder: (parentId, name, iconId, requestId) => ipcRenderer.invoke('work:folders:create', parentId, name, iconId, requestId),
   updateWorkFolder: (folderId, patch) => ipcRenderer.invoke('work:folders:update', folderId, patch),
