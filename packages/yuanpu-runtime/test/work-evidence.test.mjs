@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 
-import { openYuanpuMetadataDatabase, readYuanpuSavedToolResults } from '../dist/index.mjs';
+import { openYuanpuMetadataDatabase, readYuanpuChatTranscript,
+  readYuanpuSavedToolResults } from '../dist/index.mjs';
 
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -55,8 +56,9 @@ test('saved Pi tool result and verified file descriptor become distinct stable W
   fixture.prepare('INSERT INTO yp_agent_run_outputs(run_id,output_json,created_at) VALUES (?,?,?)')
     .run('run-note', JSON.stringify({ message: 'Done.', tools: [{ name: 'write', status: 'completed' }],
       toolResults: [{ ...saved[0] }], artifacts: [{ entryId: saved[0].entryId,
+        toolCallId: saved[0].toolCallId,
         relativePath: 'note.md', sha256: createHash('sha256').update('verified note').digest('hex'),
-        size: 13 }] }), '2026-09-27T00:00:01Z');
+        size: 13, text: 'verified note' }] }), '2026-09-27T00:00:01Z');
   fixture.close();
 
   assert.equal(metadata.workEvidence.recordToolResults(conversation.id, piSessionId, saved), 1);
@@ -118,4 +120,23 @@ test('historical file result without a verified descriptor stays unavailable acr
   assert.equal(reopened.workEvidence.sourceById(artifactId).sourceVersion, artifact.sourceVersion);
   assert.equal(reopened.workEvidence.sourcePage(0, 10).length, 2);
   reopened.close();
+});
+
+test('legacy Pi backfill skips a symlinked session file', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-symlink-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const sessions = join(root, 'sessions');
+  await mkdir(workspace);
+  const pi = SessionManager.create(workspace, sessions, { id: 'legacy-safe-session' });
+  pi.appendMessage({ role: 'user', content: 'private message', timestamp: Date.now() });
+  pi.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'private reply' }],
+    api: 'anthropic-messages', provider: 'anthropic', model: 'fixture', stopReason: 'stop',
+    usage, timestamp: Date.now() });
+  const original = pi.getSessionFile();
+  const outside = join(root, 'outside.jsonl');
+  await rename(original, outside);
+  await symlink(outside, original);
+  assert.deepEqual(readYuanpuSavedToolResults(workspace, 'legacy-safe-session', sessions), []);
+  assert.deepEqual(readYuanpuChatTranscript(workspace, 'legacy-safe-session', sessions), []);
 });

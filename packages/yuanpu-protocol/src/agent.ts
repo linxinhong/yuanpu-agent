@@ -63,8 +63,9 @@ export interface AgentRunOutput {
   /** Bounded text returned by executed tools. Call IDs are stable within the Pi session. */
   toolResults?: Array<{ entryId: string; toolCallId: string; name: string; status: 'completed' | 'failed';
     text: string; truncated: boolean }>;
-  /** Verified at Work execution settlement; reverified by the Host on each source read. */
-  artifacts?: Array<{ entryId: string; relativePath: string; sha256: string; size: number }>;
+  /** Successful write-tool content snapshots; path is a requested label, never a read locator. */
+  artifacts?: Array<{ entryId: string; toolCallId: string; relativePath: string;
+    sha256: string; size: number; text: string }>;
 }
 
 export interface AgentRunRecord {

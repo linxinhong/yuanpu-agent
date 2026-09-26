@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isAbsolute, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AssistantSourceChange } from '@yuanpu-agent/protocol';
 import type { SavedWorkToolResult } from '../pi/index.js';
@@ -132,21 +133,30 @@ export class WorkEvidenceStore {
       for (const row of rows) {
         const output = JSON.parse(row.output_json) as { artifacts?: unknown; toolResults?: unknown };
         if (!Array.isArray(output.artifacts) || !Array.isArray(output.toolResults)) continue;
+        let recordedBytes = 0;
+        let recordedCount = 0;
         for (const item of output.artifacts) {
           if (!item || typeof item !== 'object' || typeof item.entryId !== 'string'
+            || typeof item.toolCallId !== 'string' || !item.toolCallId
             || typeof item.relativePath !== 'string' || typeof item.sha256 !== 'string'
+            || typeof item.text !== 'string'
             || typeof item.size !== 'number' || !Number.isSafeInteger(item.size)
             || item.size < 0 || item.size > 256 * 1024 || !/^[a-f0-9]{64}$/u.test(item.sha256)
-            || !item.relativePath || item.relativePath.includes('\0')) continue;
+            || !item.relativePath || item.relativePath.includes('\0') || isAbsolute(item.relativePath)
+            || item.relativePath.split(sep).some((segment: string) => !segment || segment === '..' || segment === '.')
+            || Buffer.byteLength(item.text, 'utf8') !== item.size
+            || hash(item.text) !== item.sha256) continue;
+          if (recordedCount >= 16 || recordedBytes + item.size > 256 * 1024) continue;
           const result = output.toolResults.find((candidate: unknown) => candidate && typeof candidate === 'object'
             && 'entryId' in candidate && candidate.entryId === item.entryId
             && 'status' in candidate && candidate.status === 'completed'
-            && 'name' in candidate && (candidate.name === 'write' || candidate.name === 'edit')) as
-            { name: string } | undefined;
+            && 'name' in candidate && candidate.name === 'write'
+            && 'toolCallId' in candidate && candidate.toolCallId === item.toolCallId) as
+            { name: string; toolCallId: string } | undefined;
           if (!result) continue;
           const sourceId = `work-artifact:${piSessionId}:${item.entryId}`;
-          const version = hash(JSON.stringify([row.run_id, item.entryId, item.relativePath,
-            item.sha256, item.size]));
+          const version = hash(JSON.stringify([row.run_id, item.entryId, item.toolCallId,
+            item.relativePath, item.sha256, item.size, 'completed']));
           const contentRef = `work-evidence:${hash(sourceId)}`;
           const existing = this.database.prepare(`SELECT source_version FROM yp_work_evidence_sources
             WHERE source_id=?`).get(sourceId) as { source_version: string } | undefined;
@@ -157,11 +167,13 @@ export class WorkEvidenceStore {
           }
           const added = this.database.prepare(`INSERT OR IGNORE INTO yp_work_evidence_sources
             (source_id,content_ref,source_version,kind,conversation_id,pi_session_id,run_id,
-             entry_id,tool_name,result_status,relative_path,file_sha256,file_size,committed_at,audience_id)
-            VALUES (?,?,?,'artifact',?,?,?,?,?,'completed',?,?,?,?,'local-user')`)
+             entry_id,tool_name,result_status,text_content,relative_path,file_sha256,file_size,committed_at,audience_id)
+            VALUES (?,?,?,'artifact',?,?,?,?,?,'completed',?,?,?,?,?,'local-user')`)
             .run(sourceId, contentRef, version, conversationId, piSessionId, row.run_id,
-              item.entryId, result.name, item.relativePath, item.sha256, item.size, row.updated_at);
+              item.entryId, result.name, item.text, item.relativePath, item.sha256, item.size, row.updated_at);
           inserted += Number(added.changes);
+          recordedCount++;
+          recordedBytes += item.size;
         }
       }
       this.database.exec('COMMIT');
@@ -218,6 +230,32 @@ export class WorkEvidenceStore {
     const row = this.database.prepare('SELECT * FROM yp_work_evidence_sources WHERE content_ref=?')
       .get(contentRef) as EvidenceRow | undefined;
     return row && fromRow(row);
+  }
+
+  /** The durable successful run is the authority for a write payload snapshot. */
+  artifactOutputMatches(source: WorkEvidenceSource): boolean {
+    if (source.kind !== 'artifact' || !source.runId || source.text === undefined) return false;
+    const row = this.database.prepare(`SELECT o.output_json FROM yp_agent_runs r
+      JOIN yp_agent_run_outputs o ON o.run_id=r.run_id
+      WHERE r.run_id=? AND r.entry_point='desktop' AND r.status='succeeded'`)
+      .get(source.runId) as { output_json: string } | undefined;
+    if (!row) return false;
+    try {
+      const output = JSON.parse(row.output_json) as { artifacts?: unknown; toolResults?: unknown };
+      if (!Array.isArray(output.artifacts) || !Array.isArray(output.toolResults)) return false;
+      const artifact = output.artifacts.find((item: unknown) => item && typeof item === 'object'
+        && 'entryId' in item && item.entryId === source.entryId
+        && 'relativePath' in item && item.relativePath === source.relativePath
+        && 'sha256' in item && item.sha256 === source.fileSha256
+        && 'size' in item && item.size === source.fileSize
+        && 'text' in item && item.text === source.text) as { toolCallId?: unknown } | undefined;
+      return Boolean(artifact && typeof artifact.toolCallId === 'string'
+        && output.toolResults.some((item: unknown) => item && typeof item === 'object'
+          && 'entryId' in item && item.entryId === source.entryId
+          && 'toolCallId' in item && item.toolCallId === artifact.toolCallId
+          && 'name' in item && item.name === 'write'
+          && 'status' in item && item.status === 'completed'));
+    } catch { return false; }
   }
 
   /** Recheck the local owner and run every time the host resolves a reference. */

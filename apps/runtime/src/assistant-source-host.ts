@@ -8,7 +8,6 @@ import type { AssistantHostStore, AssistantSourceLifecycleStore,
   WorkConversationStore, WorkEvidenceStore } from '@yuanpu-agent/runtime-kit';
 import { readYuanpuSavedToolResults } from '@yuanpu-agent/runtime-kit';
 import type { AssistantAudience, AssistantSourceChange } from '@yuanpu-agent/protocol';
-import { inspectWorkArtifact } from './work-artifact.js';
 
 const feeds = ['work', 'work-evidence', 'assistant', 'work-deletions',
   'assistant-deletions', 'legacy-memory'] as const;
@@ -170,7 +169,8 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
     }
     if (sourceId.startsWith('work-artifact:') && current.kind !== 'deleted') {
       const artifact = this.workEvidence?.sourceById(sourceId);
-      if (!artifact?.fileSha256 || artifact.fileSize === undefined || !artifact.relativePath) {
+      if (!artifact?.fileSha256 || artifact.fileSize === undefined
+        || !artifact.relativePath || artifact.text === undefined) {
         return { status: 'temporarily_unavailable', sourceVersion: current.sourceVersion };
       }
     }
@@ -227,15 +227,12 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
           text: `Tool ${source.toolName} (${source.resultStatus})${source.runId ? `, run ${source.runId}` : ', historical run unbound'}:\n${source.text ?? ''}`
             .slice(0, maxCharacters) };
       }
-      if (!source.relativePath || !source.fileSha256 || source.fileSize === undefined) {
-        return { status: 'temporarily_unavailable' };
-      }
-      const artifact = await inspectWorkArtifact(workspace, source.relativePath, source.entryId);
-      if (!artifact || artifact.sha256 !== source.fileSha256 || artifact.size !== source.fileSize) {
+      if (!source.relativePath || !source.fileSha256 || source.fileSize === undefined
+        || source.text === undefined || !this.workEvidence?.artifactOutputMatches(source)) {
         return { status: 'temporarily_unavailable' };
       }
       return { status: 'available', sourceVersion,
-        text: `Verified Work artifact ${source.relativePath}, run ${source.runId ?? 'unknown'}:\n${artifact.text}`
+        text: `Successful write payload for requested Work path ${source.relativePath}, run ${source.runId}:\n${source.text}`
           .slice(0, maxCharacters) };
     }
     const source = this.assistant.resolveContentRef(contentRef, audience.id);

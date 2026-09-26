@@ -8,7 +8,7 @@ import {
   type CreateYuanpuChatOptions,
   type YuanpuChatSession,
 } from '@yuanpu-agent/runtime-kit';
-import { inspectWorkArtifact } from './work-artifact.js';
+import { registerWorkWriteArtifact } from './work-artifact.js';
 
 interface RuntimeAgentExecutorOptions {
   getCapabilityClient(): CapabilityToolClient;
@@ -84,16 +84,18 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
         },
       });
       const artifacts = [];
+      let artifactBytes = 0;
       if (input.run.owner.entryPoint === 'desktop'
         && input.run.context.conversation.conversationId.startsWith('work:')) {
         for (const candidate of result.artifactCandidates ?? []) {
           const toolResult = result.toolResults?.find((item) =>
             item.toolCallId === candidate.toolCallId && item.status === 'completed');
           if (!toolResult) continue;
-          const artifact = await inspectWorkArtifact(input.run.context.workspaceId,
-            candidate.relativePath, toolResult.entryId);
-          if (artifact) artifacts.push({ entryId: artifact.entryId, relativePath: artifact.relativePath,
-            sha256: artifact.sha256, size: artifact.size });
+          const artifact = registerWorkWriteArtifact(input.run.context.workspaceId,
+            candidate.requestedPath, toolResult.entryId, candidate.content);
+          if (!artifact || artifactBytes + artifact.size > 256 * 1024 || artifacts.length >= 16) continue;
+          artifactBytes += artifact.size;
+          artifacts.push({ ...artifact, toolCallId: candidate.toolCallId });
         }
       }
       const output = { message: result.message, tools: result.tools,

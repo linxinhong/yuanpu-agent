@@ -49,8 +49,9 @@ test('host rechecks saved Work tool and artifact refs, and emits explicit deleti
     .run('a'.repeat(64), 'b'.repeat(64), binding, '2026-09-27T00:00:00Z', '2026-09-27T00:00:01Z');
   fixture.prepare('INSERT INTO yp_agent_run_outputs(run_id,output_json,created_at) VALUES (?,?,?)')
     .run('run-1', JSON.stringify({ message: 'Done', tools: [], toolResults: saved,
-      artifacts: [{ entryId: saved[0].entryId, relativePath: 'report.md',
-        sha256: createHash('sha256').update('# verified report\n').digest('hex'), size: 18 }] }),
+      artifacts: [{ entryId: saved[0].entryId, toolCallId: saved[0].toolCallId, relativePath: 'report.md',
+        sha256: createHash('sha256').update('# verified report\n').digest('hex'),
+        size: 18, text: '# verified report\n' }] }),
       '2026-09-27T00:00:01Z');
   fixture.close();
   metadata.workEvidence.recordToolResults(conversation.id, piSessionId, saved);
@@ -70,12 +71,12 @@ test('host rechecks saved Work tool and artifact refs, and emits explicit deleti
   assert.equal((await host.readSource('unknown', tool.sourceId, tool.sourceVersion, person, 1_000)).status,
     'temporarily_unavailable');
   await writeFile(join(workspace, 'report.md'), '# changed\n');
-  assert.equal((await host.readSource(artifact.contentRef, artifact.sourceId, artifact.sourceVersion,
-    person, 1_000)).status, 'temporarily_unavailable');
+  assert.match((await host.readSource(artifact.contentRef, artifact.sourceId, artifact.sourceVersion,
+    person, 1_000)).text, /verified report/);
   await rm(join(workspace, 'report.md'));
   await symlink(join(root, 'automation.sqlite'), join(workspace, 'report.md'));
-  assert.equal((await host.readSource(artifact.contentRef, artifact.sourceId, artifact.sourceVersion,
-    person, 1_000)).status, 'temporarily_unavailable');
+  assert.match((await host.readSource(artifact.contentRef, artifact.sourceId, artifact.sourceVersion,
+    person, 1_000)).text, /verified report/);
   host.markDeleted('work', tool.sourceId);
   assert.equal((await host.currentSource(tool.sourceId, person)).status, 'deleted');
   const deleted = await host.listChanges('work-deletions', '0', 10);

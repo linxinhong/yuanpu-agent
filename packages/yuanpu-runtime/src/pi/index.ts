@@ -3,6 +3,7 @@ import {
   DefaultResourceLoader,
   defineTool,
   ModelRuntime,
+  parseSessionEntries,
   SessionManager,
   SettingsManager,
   type AgentToolResult,
@@ -19,7 +20,9 @@ import {
 } from '../capabilities/contracts.js';
 import { Type } from 'typebox';
 import { readFile } from 'node:fs/promises';
-import { join, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { closeSync, constants, fstatSync, lstatSync, openSync,
+  readdirSync, readSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { GoalManager, createGoalTool, auditWithSubagent } from '../builtin/goals/index.js';
 import { WorkflowManager, createWorkflowTools } from '../builtin/workflows/index.js';
@@ -35,6 +38,49 @@ export { BUILTIN_SUBAGENTS } from './subagents/profiles.js';
 
 export const PI_UPSTREAM_VERSION = '0.86.1';
 
+const maximumSavedSessionBytes = 32 * 1024 * 1024;
+
+/** Read only regular files in the managed Pi Session directory; skip symlink entries. */
+function savedSessionBranch(cwd: string, piSessionId: string, directory: string) {
+  try {
+    const root = lstatSync(directory);
+    if (!root.isDirectory() || root.isSymbolicLink()) return [];
+    for (const name of readdirSync(directory)) {
+      if (!name.endsWith('.jsonl')) continue;
+      const path = join(directory, name);
+      const entry = lstatSync(path);
+      if (!entry.isFile() || entry.isSymbolicLink() || entry.size > maximumSavedSessionBytes) continue;
+      const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const opened = fstatSync(fd);
+        if (!opened.isFile() || opened.size > maximumSavedSessionBytes) continue;
+        const headerBytes = Buffer.alloc(Math.min(opened.size, 64_000));
+        readSync(fd, headerBytes, 0, headerBytes.length, 0);
+        const headerLine = headerBytes.toString('utf8').split('\n').find((line) => line.trim());
+        if (!headerLine) continue;
+        let header: { type?: unknown; id?: unknown; cwd?: unknown };
+        try { header = JSON.parse(headerLine); } catch { continue; }
+        if (header.type !== 'session' || header.id !== piSessionId
+          || typeof header.cwd !== 'string' || resolve(header.cwd) !== resolve(cwd)) continue;
+        const bytes = Buffer.alloc(opened.size + 1);
+        let count = 0;
+        while (count < bytes.length) {
+          const read = readSync(fd, bytes, count, bytes.length - count, count);
+          if (!read) break;
+          count += read;
+        }
+        if (count !== opened.size) continue;
+        let content: string;
+        try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, count)); }
+        catch { continue; }
+        const entries = parseSessionEntries(content);
+        return SessionManager.inMemory(cwd, { id: piSessionId }, entries).getBranch();
+      } finally { closeSync(fd); }
+    }
+  } catch { return []; }
+  return [];
+}
+
 /** Read only the visible text branch; never expose tool arguments or model diagnostics. */
 export function readYuanpuChatTranscript(
   cwd: string,
@@ -43,10 +89,7 @@ export function readYuanpuChatTranscript(
   limit = 100,
   completedOnly = false,
 ): DesktopTranscriptMessage[] {
-  const path = SessionManager.findById(cwd, piSessionId, directory);
-  if (!path) return [];
-  const session = SessionManager.open(path, directory, cwd);
-  return summarizeTranscript(session.getBranch(), { limit, completedOnly });
+  return summarizeTranscript(savedSessionBranch(cwd, piSessionId, directory), { limit, completedOnly });
 }
 
 export interface SavedWorkToolResult {
@@ -62,10 +105,7 @@ export interface SavedWorkToolResult {
 /** Read only persisted Pi tool results; never infer an artifact from result prose. */
 export function readYuanpuSavedToolResults(cwd: string, piSessionId: string,
   directory: string): SavedWorkToolResult[] {
-  const path = SessionManager.findById(cwd, piSessionId, directory);
-  if (!path) return [];
-  const session = SessionManager.open(path, directory, cwd);
-  return session.getBranch().flatMap((entry) => {
+  return savedSessionBranch(cwd, piSessionId, directory).flatMap((entry) => {
     if (entry.type !== 'message' || entry.message.role !== 'toolResult') return [];
     const text = entry.message.content.filter((block) => block.type === 'text')
       .map((block) => block.text).join('\n');
@@ -211,7 +251,7 @@ export interface YuanpuChatResult {
   tools: Array<{ name: string; status: 'completed' | 'failed' }>;
   toolResults?: Array<{ entryId: string; toolCallId: string; name: string; status: 'completed' | 'failed';
     text: string; truncated: boolean }>;
-  artifactCandidates?: Array<{ toolCallId: string; relativePath: string }>;
+  artifactCandidates?: Array<{ toolCallId: string; requestedPath: string; content: string }>;
   pendingApprovalRequestId?: string;
 }
 
@@ -394,7 +434,7 @@ export async function createYuanpuChatSession(
     let text = '';
     let modelFailed = false;
     const toolStates = new Map<string, 'completed' | 'failed'>();
-    const toolStarts = new Map<string, { name: string; path?: string }>();
+    const toolStarts = new Map<string, { name: string; path?: string; content?: string }>();
     const existingEntryIds = new Set(sessionManager.getBranch().map((entry) => entry.id));
     const artifactCandidates: NonNullable<YuanpuChatResult['artifactCandidates']> = [];
     let pendingApprovalRequestId: string | undefined;
@@ -408,7 +448,9 @@ export async function createYuanpuChatSession(
       if (event.type === 'tool_execution_start') {
         const path = event.args && typeof event.args === 'object' && typeof event.args.path === 'string'
           ? event.args.path : undefined;
-        toolStarts.set(event.toolCallId, { name: event.toolName, path });
+        const content = event.args && typeof event.args === 'object' && typeof event.args.content === 'string'
+          ? event.args.content : undefined;
+        toolStarts.set(event.toolCallId, { name: event.toolName, path, content });
       }
       if (event.type === 'tool_execution_end') {
         const details = event.result?.details as {
@@ -417,15 +459,10 @@ export async function createYuanpuChatSession(
         const status = event.isError || details?.capabilityError ? 'failed' : 'completed';
         toolStates.set(event.toolName, status);
         const start = toolStarts.get(event.toolCallId);
-        const workspace = options.context?.workspaceId;
-        if (status === 'completed' && start?.path && workspace
-          && (start.name === 'write' || start.name === 'edit')) {
-          const path = resolve(workspace, start.path);
-          const relativePath = relative(workspace, path);
-          if (relativePath && relativePath !== '..' && !relativePath.startsWith(`..${sep}`)
-            && !isAbsolute(relativePath)) {
-            artifactCandidates.push({ toolCallId: event.toolCallId, relativePath });
-          }
+        if (status === 'completed' && start?.name === 'write'
+          && start.path && start.content !== undefined) {
+          artifactCandidates.push({ toolCallId: event.toolCallId,
+            requestedPath: start.path, content: start.content });
         }
         toolStarts.delete(event.toolCallId);
         if (
