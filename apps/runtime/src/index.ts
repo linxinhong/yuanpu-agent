@@ -621,10 +621,10 @@ async function serve(): Promise<void> {
       model: home.config.model,
     },
   });
-    const assistantSources = new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
-      metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md'),
-      metadata.workEvidence, home.sessionsPath);
-    let delegations: AssistantDelegationService;
+  const assistantSources = new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
+    metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md'),
+    metadata.workEvidence, home.sessionsPath);
+  let delegations: AssistantDelegationService;
   const professionalAdapter = new LocalProfessionalAdapter({
     root: join(home.workflowsPath, 'professional-tasks'),
     assistantHome: join(home.root, 'assistant'),

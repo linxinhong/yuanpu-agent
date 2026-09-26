@@ -229,6 +229,7 @@ export class AssistantWorkerManager {
 
   async stop(): Promise<void> {
     this.shouldRun = false;
+    this.ready = false;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = undefined;
     const child = this.child;
@@ -236,6 +237,7 @@ export class AssistantWorkerManager {
     await this.startPromise?.catch(() => undefined);
     const late = this.child;
     if (late && late !== child) await this.terminate(late);
+    this.child = undefined;
     this.rejectPending(new Error('Assistant Worker stopped.'));
   }
 }
