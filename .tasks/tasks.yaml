@@ -2117,7 +2117,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-059
     title: "接入工作会话文件夹树管理界面"
-    status: in_progress
+    status: done
     goal: "用户在现有工作对话左栏像管理文件一样管理会话，且能看清文件夹层级、拖动结果、标签、归档与搜索定位。"
     scope:
       in: ["左侧工作树、紧凑工具栏、面包屑、折叠/缩进、选中态及三主题样式", "新建会话/文件夹、行内重命名、更换图标、添加标签、归档/恢复、排序与拖放/移动到菜单", "树搜索、消息结果定位、空态/失败恢复和键盘操作"]
@@ -2144,14 +2144,19 @@ tasks:
       owner: "conversation-tree-ui-sol-10677-10677"
       attempts: 0
       claimed_at: "2026-09-26T20:21:11.427Z"
-      completed_at: null
+      completed_at: "2026-09-26T22:45:47.115Z"
       worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
       branch: "task/task-059-work-tree-ui"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-059 integrated", status: "passed", summary: "Implementation branch task/task-059-work-tree-ui at 4a1340c merged into main as fa699e2; no unrelated .zcode change included."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Ran on main at 002fdc0 after concurrent build ended: full build, Yuanpu TypeScript checks and all tests passed; Runtime 123/123. The earlier check was invalidated by another task building the same checkout and is not counted."}
+        - {type: "test", check: "Work tree browser journey", status: "passed", summary: "Isolated Runtime and browser journey covered nested folders, create/rename/icon/tags, Pi JSONL search and result location, physical move, archive/restore, 55-result paging, three themes, and narrow windows. Evidence: docs/frontend/evidence/task-059/results.md and screenshots."}
+        - {type: "review", check: "independent UI/code review", status: "passed", summary: "Independent reviewer found and saw fixes for persistent run guard, pagination, reorder with archived siblings, ordinary selection guard, and 480px panel access; no remaining P1/P2 in final review."}
+        - {type: "limitation", check: "desktop business journey", status: "unverified", summary: "Actual Electron UI, restart and fault recovery combination reserved for independent TASK-060. Non-macOS platforms unverified."}
       follow_up_candidates: []
   - id: TASK-060
     title: "工作会话文件夹树完整业务验收"
-    status: pending
+    status: ready
     goal: "独立确认真实桌面用户能把工作会话按文件夹组织、物理移动、安全找回、搜索和归档，而不丢失 Pi 历史或工作文件。"
     scope:
       in: ["在可用 Electron/Runtime 环境走真实 UI 与服务端持久化全旅程", "验证重启、故障恢复、旧 default、根外目录拒绝与三主题树操作", "记录截图、revision、真实/fixture 标识、失败与未验证项"]
