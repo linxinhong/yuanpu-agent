@@ -7,7 +7,15 @@ const { createReadOnlyProfessionalTaskHost } = require('../dist/index.cjs');
 
 test('production task grant scopes every source read and refuses model-proposed execution', async () => {
   const reads = [];
-  const sources = { async readDelegatedSource(ref) { reads.push(ref); return `source:${ref}`; } };
+  let version = 'version-one';
+  const sources = {
+    async delegatedSourceVersion() { return version; },
+    async readDelegatedSource(ref, expectedVersion) {
+      reads.push([ref, expectedVersion]);
+      if (expectedVersion !== version) throw new Error('Delegated source changed after authorization.');
+      return `source:${ref}`;
+    },
+  };
   const host = createReadOnlyProfessionalTaskHost(sources);
   const brief = { taskId: 'task_one', assistantSessionId: 'assistant_one',
     skillName: 'reviewer', goal: 'Review', completionCriteria: ['Cite source'],
@@ -17,7 +25,9 @@ test('production task grant scopes every source read and refuses model-proposed 
   assert.equal(await grant.readSource('work-turn:one'), 'source:work-turn:one');
   await assert.rejects(grant.readSource('work-turn:two'), /outside this task grant/);
   await assert.rejects(grant.executeCapability({ name: 'fixture.inspect', arguments: {} }), /trusted user grant/);
-  assert.deepEqual(reads, ['work-turn:one']);
+  version = 'version-two';
+  await assert.rejects(grant.readSource('work-turn:one'), /changed after authorization/);
+  assert.deepEqual(reads, [['work-turn:one', 'version-one'], ['work-turn:one', 'version-one']]);
   await assert.rejects(host.authorizeTask({ ...brief, readOnly: false }), /trusted user grant/);
   await assert.rejects(host.authorizeTask({ ...brief,
     authorizedCapabilities: ['fixture.inspect'] }), /trusted user grant/);

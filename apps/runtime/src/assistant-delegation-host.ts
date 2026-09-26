@@ -8,11 +8,13 @@ export function createReadOnlyProfessionalTaskHost(sources: RuntimeAssistantSour
       if (!brief.readOnly || brief.authorizedCapabilities.length) {
         throw new Error('Professional execution requires a trusted user grant.');
       }
-      const refs = new Set(brief.contextRefs);
+      const versions = new Map(await Promise.all(brief.contextRefs.map(async (ref) =>
+        [ref, await sources.delegatedSourceVersion(ref)] as const)));
       return {
         async readSource(ref) {
-          if (!refs.has(ref)) throw new Error('Source reference is outside this task grant.');
-          return sources.readDelegatedSource(ref);
+          const version = versions.get(ref);
+          if (!version) throw new Error('Source reference is outside this task grant.');
+          return sources.readDelegatedSource(ref, version);
         },
         async executeCapability() {
           throw new Error('Professional execution requires a trusted user grant.');
