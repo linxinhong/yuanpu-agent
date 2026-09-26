@@ -396,6 +396,9 @@ export async function runAssistantWorker(): Promise<void> {
     const shutdown = async () => {
       if (closed) return;
       closed = true;
+      // A stalled model Session or host IPC must not keep the App's private Worker alive.
+      // Incomplete jobs and atomic file revisions are recovered on the next start.
+      const deadline = setTimeout(() => process.exit(0), 4_000);
       monitor?.dispose();
       for (const pending of pendingModels.values()) pending.reject(new Error('Assistant Worker is stopping.'));
       pendingModels.clear();
@@ -420,6 +423,7 @@ export async function runAssistantWorker(): Promise<void> {
       await executor.close();
       lock.exec('ROLLBACK');
       lock.close();
+      clearTimeout(deadline);
       process.exit(0);
     };
     monitor = installParentProcessMonitor(bootstrap.parentPid, () => { void shutdown(); });
