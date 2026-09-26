@@ -1939,7 +1939,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-055
     title: "建立工作会话文件夹与标签管理契约"
-    status: in_progress
+    status: done
     goal: "用户可用稳定 ID 管理任意层级文件夹、会话名称与图标、标签及可恢复归档；新会话在选定文件夹下拥有独立工作目录。"
     scope:
       in: ["Work 文件夹/会话/标签的 SQLite 元数据、兼容迁移与排序", "Runtime 管理路由、Yuanpu 协议 DTO、DesktopBridge/IPC 接线", "新建文件夹与会话、服务端重命名、图标、标签、归档/恢复、同级排序的服务行为"]
@@ -1966,14 +1966,18 @@ tasks:
       owner: "conversation-tree-sol-055-10677"
       attempts: 0
       claimed_at: "2026-09-26T17:22:28.143Z"
-      completed_at: null
+      completed_at: "2026-09-26T18:49:11.841Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-tree-sol"
       branch: "task/task-055-work-tree-contract"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-055 implementation and task memory are integrated in main via 4015d50 and subsequent ancestry; tested clean checkout at d5e6088."}
+        - {type: "review", check: "independent contract and recovery review", status: "passed", summary: "Independent reviewer checked protocol v5 compatibility, workspace symlink checks, persisted create intent recovery, and requestId retry conflicts; findings were fixed before integration."}
+        - {type: "test", check: "integrated pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 at d5e6088: focused Work/persistence/Runtime checks and full pnpm check passed; worktree-kit log .git/worktrees/conversation-tree-sol/coding-owner/1790448389953958000.log. An initial parallel Desktop crash fixture ECONNRESET passed in isolated package rerun and full recheck."}
+        - {type: "document", check: "task memory", status: "passed", summary: ".tasks/memory/TASK-055.md records source revision, entry points, verification, and remaining limits."}
       follow_up_candidates: []
   - id: TASK-056
     title: "安全搬迁工作会话及文件夹的磁盘目录"
-    status: pending
+    status: ready
     goal: "用户把会话或文件夹移到树中其他位置时，实际工作目录随之搬迁，Pi 历史、下一轮运行和文件预览继续指向正确目录。"
     scope:
       in: ["单会话与文件夹子树移动的受控磁盘迁移", "受影响会话的 cwd、绑定、Pi JSONL header 关联更新与迁移恢复", "运行中冲突、目标占用、根外目录、符号链接与中途失败处理"]
@@ -2008,7 +2012,7 @@ tasks:
 
   - id: TASK-057
     title: "实现工作文件夹与会话内容搜索"
-    status: pending
+    status: ready
     goal: "用户按文件夹名、会话名、标签或已保存的消息正文找到会话，结果带可定位的树路径与消息位置。"
     scope:
       in: ["Work 管理搜索契约、Runtime 查询和分页/边界限制", "Pi JSONL 可见用户/助理消息的检索或可重建本地索引", "归档筛选、祖先路径、摘要和结果定位标识"]
