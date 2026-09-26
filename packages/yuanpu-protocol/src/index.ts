@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 import type { NotificationNavigationTarget } from './host-events.js';
 import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
@@ -46,6 +46,9 @@ export const RUNTIME_ROUTES = {
   assistantMirrors: '/v1/assistant/mirrors',
   desktopTranscript: '/v1/desktop/transcript',
   workConversations: '/v1/work/conversations',
+  workFolders: '/v1/work/folders',
+  workTags: '/v1/work/tags',
+  workOrder: '/v1/work/order',
   workFiles: '/v1/work/files',
   workFileContent: '/v1/work/files/content',
   modelSettings: '/v1/settings/models',
@@ -129,6 +132,32 @@ export interface WorkConversation {
   workingDirectory: string;
   current: boolean;
   archived: boolean;
+  archivedAt: string | null;
+  title: string;
+  iconId: string;
+  folderId: string | null;
+  sortOrder: number;
+  tagIds: string[];
+}
+
+export interface WorkFolder {
+  id: string;
+  parentId: string | null;
+  name: string;
+  iconId: string;
+  relativeDirectory: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  system?: boolean;
+}
+
+export interface WorkTag {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface WorkFileEntry {
@@ -412,8 +441,16 @@ export interface DesktopBridge {
     clientMessageId?: string): Promise<AgentRunReceipt>;
   getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
   listWorkConversations(): Promise<WorkConversation[]>;
-  createWorkConversation(workingDirectory?: string): Promise<WorkConversation>;
+  createWorkConversation(folderId?: string, requestId?: string): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string): Promise<WorkConversation>;
+  updateWorkConversation(conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }): Promise<WorkConversation>;
+  listWorkFolders(): Promise<WorkFolder[]>;
+  createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<WorkFolder>;
+  updateWorkFolder(folderId: string, patch: { name?: string; iconId?: string }): Promise<WorkFolder>;
+  listWorkTags(): Promise<WorkTag[]>;
+  createWorkTag(name: string, color?: string, requestId?: string): Promise<WorkTag>;
+  updateWorkTag(tagId: string, patch: { name?: string; color?: string }): Promise<WorkTag>;
+  reorderWorkSiblings(kind: 'folder' | 'conversation', parentId: string | null, ids: string[]): Promise<void>;
   listWorkFiles(conversationId: string, dirPath?: string, options?: { recursive?: boolean }): Promise<WorkDirectoryListing>;
   readWorkFile(conversationId: string, filePath: string): Promise<WorkFilePreview>;
   getAssistantLink(): Promise<AssistantLinkStatus>;

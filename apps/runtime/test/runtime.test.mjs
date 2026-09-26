@@ -255,11 +255,66 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const initialWork = await fetch(workEndpoint, { headers }).then((response) => response.json());
   assert.equal(initialWork.length, 1);
   assert.equal(initialWork[0].current, true);
-  assert.match(initialWork[0].workingDirectory, new RegExp(`^${home}/workspace/\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-[a-f0-9]{10}$`));
+  assert.match(initialWork[0].workingDirectory, new RegExp(`^${home}/workspace/c-[a-f0-9-]{36}$`));
   assert.equal((await stat(initialWork[0].workingDirectory)).isDirectory(), true);
   const createdWork = await fetch(workEndpoint, { method: 'POST', headers }).then((response) => response.json());
   assert.notEqual(createdWork.id, initialWork[0].id);
   assert.notEqual(createdWork.workingDirectory, initialWork[0].workingDirectory);
+  const workHeaders = { ...headers, 'content-type': 'application/json' };
+  const folderEndpoint = `http://${ready.host}:${ready.port}/v1/work/folders`;
+  const parent = await fetch(folderEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ parentId: null, name: 'Research', iconId: 'folder' }) }).then((response) => response.json());
+  const childFolder = await fetch(folderEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ parentId: parent.id, name: 'Models', iconId: 'code',
+      requestId: '11111111-1111-4111-8111-111111111111' }) }).then((response) => response.json());
+  const childRetry = await fetch(folderEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ parentId: parent.id, name: 'Models', iconId: 'code',
+      requestId: '11111111-1111-4111-8111-111111111111' }) }).then((response) => response.json());
+  assert.equal(childRetry.id, childFolder.id);
+  assert.equal((await fetch(folderEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ parentId: parent.id, name: 'Different', iconId: 'code',
+      requestId: '11111111-1111-4111-8111-111111111111' }) })).status, 400);
+  const nested = await fetch(workEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ folderId: childFolder.id,
+      requestId: '22222222-2222-4222-8222-222222222222' }) }).then((response) => response.json());
+  const nestedRetry = await fetch(workEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ folderId: childFolder.id,
+      requestId: '22222222-2222-4222-8222-222222222222' }) }).then((response) => response.json());
+  assert.equal(nestedRetry.id, nested.id);
+  assert.equal(nested.folderId, childFolder.id);
+  assert.equal((await stat(nested.workingDirectory)).isDirectory(), true);
+  assert.match(nested.workingDirectory, /\/f-[a-f0-9-]{36}\/f-[a-f0-9-]{36}\/c-[a-f0-9-]{36}$/);
+  assert.equal((await fetch(workEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ workingDirectory: '/tmp/arbitrary' }) })).status, 400);
+  const renamed = await fetch(folderEndpoint, { method: 'PATCH', headers: workHeaders,
+    body: JSON.stringify({ folderId: parent.id, name: 'Renamed' }) }).then((response) => response.json());
+  assert.equal(renamed.relativeDirectory, parent.relativeDirectory);
+  assert.equal((await fetch(folderEndpoint, { method: 'PATCH', headers: workHeaders,
+    body: JSON.stringify({ folderId: parent.id, parentId: childFolder.id }) })).status, 400);
+  assert.equal((await fetch(folderEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ parentId: 'folder:foreign', name: 'bad' }) })).status, 400);
+  assert.equal((await fetch(folderEndpoint, { method: 'PATCH', headers: workHeaders,
+    body: JSON.stringify({ folderId: parent.id, iconId: 'execute-file' }) })).status, 400);
+  const tagEndpoint = `http://${ready.host}:${ready.port}/v1/work/tags`;
+  const tag = await fetch(tagEndpoint, { method: 'POST',
+    headers: workHeaders, body: JSON.stringify({ name: 'review', color: 'blue',
+      requestId: '33333333-3333-4333-8333-333333333333' }) }).then((response) => response.json());
+  assert.equal((await fetch(tagEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ name: 'review', color: 'red',
+      requestId: '33333333-3333-4333-8333-333333333333' }) })).status, 400);
+  const edited = await fetch(workEndpoint, { method: 'PATCH', headers: workHeaders,
+    body: JSON.stringify({ conversationId: nested.id, title: 'Plan', tagIds: [tag.id], archived: true }) })
+    .then((response) => response.json());
+  assert.equal(edited.archived, true);
+  assert.deepEqual(edited.tagIds, [tag.id]);
+  assert.equal((await stat(nested.workingDirectory)).isDirectory(), true);
+  assert.equal((await fetch(workEndpoint, { method: 'PUT', headers: workHeaders,
+    body: JSON.stringify({ conversationId: nested.id }) })).status, 404);
+  const restored = await fetch(workEndpoint, { method: 'PATCH', headers: workHeaders,
+    body: JSON.stringify({ conversationId: nested.id, archived: false }) }).then((response) => response.json());
+  assert.equal(restored.workingDirectory, nested.workingDirectory);
+  assert.equal((await fetch(workEndpoint, { method: 'PATCH', headers: workHeaders,
+    body: JSON.stringify({ conversationId: 'default', archived: false }) })).status, 400);
   const switchedWork = await fetch(workEndpoint, { method: 'PUT',
     headers: { ...headers, 'content-type': 'application/json' },
     body: JSON.stringify({ conversationId: initialWork[0].id }),
@@ -568,7 +623,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.deepEqual(scheduleHistory, []);
   assert.deepEqual(health, {
     version: '0.1.0',
-    protocolVersion: 4,
+    protocolVersion: 5,
     piVersion: '0.86.1',
     mcpTools: ['search_capabilities', 'execute_capability'],
     configRoot: home,

@@ -687,9 +687,9 @@ export class RuntimeManager {
     return this.request(RUNTIME_ROUTES.workConversations);
   }
 
-  createWorkConversation(workingDirectory?: string): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
+  createWorkConversation(folderId?: string, requestId?: string): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
     return this.request(RUNTIME_ROUTES.workConversations, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workingDirectory }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ folderId, requestId }),
     });
   }
 
@@ -697,6 +697,34 @@ export class RuntimeManager {
     return this.request(RUNTIME_ROUTES.workConversations, {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId }),
     });
+  }
+
+  updateWorkConversation(conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }) {
+    return this.request<import('@yuanpu-agent/protocol').WorkConversation>(RUNTIME_ROUTES.workConversations, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId, ...patch }),
+    });
+  }
+  listWorkFolders(): Promise<import('@yuanpu-agent/protocol').WorkFolder[]> { return this.request(RUNTIME_ROUTES.workFolders); }
+  createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<import('@yuanpu-agent/protocol').WorkFolder> {
+    return this.request(RUNTIME_ROUTES.workFolders, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parentId, name, iconId, requestId }) });
+  }
+  updateWorkFolder(folderId: string, patch: { name?: string; iconId?: string }): Promise<import('@yuanpu-agent/protocol').WorkFolder> {
+    return this.request(RUNTIME_ROUTES.workFolders, { method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ folderId, ...patch }) });
+  }
+  listWorkTags(): Promise<import('@yuanpu-agent/protocol').WorkTag[]> { return this.request(RUNTIME_ROUTES.workTags); }
+  createWorkTag(name: string, color?: string, requestId?: string): Promise<import('@yuanpu-agent/protocol').WorkTag> {
+    return this.request(RUNTIME_ROUTES.workTags, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, color, requestId }) });
+  }
+  updateWorkTag(tagId: string, patch: { name?: string; color?: string }): Promise<import('@yuanpu-agent/protocol').WorkTag> {
+    return this.request(RUNTIME_ROUTES.workTags, { method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tagId, ...patch }) });
+  }
+  reorderWorkSiblings(kind: 'folder' | 'conversation', parentId: string | null, ids: string[]): Promise<void> {
+    return this.request(RUNTIME_ROUTES.workOrder, { method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind, parentId, ids }) });
   }
 
   listWorkFiles(conversationId: string, dirPath?: string, options?: { recursive?: boolean }): Promise<import('@yuanpu-agent/protocol').WorkDirectoryListing> {
