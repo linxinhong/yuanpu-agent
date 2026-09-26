@@ -163,8 +163,9 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
     method: 'POST', headers, body: 'null',
   })).status, 400);
 
-  const workConversationId = (await fetch(`${origin}/v1/work/conversations`, { headers })
-    .then((response) => response.json())).find((item) => item.current).id;
+  const workConversation = (await fetch(`${origin}/v1/work/conversations`, { headers })
+    .then((response) => response.json())).find((item) => item.current);
+  const workConversationId = workConversation.id;
   const submission = await fetch(`${origin}/v1/agent/runs`, {
     method: 'POST',
     headers,
@@ -177,7 +178,7 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
         authorityId: 'local-desktop',
         authenticatedBy: 'electron',
       },
-      workspaceId: workspace,
+      workspaceId: workConversation.workingDirectory,
       conversation: { namespace: 'desktop', conversationId: workConversationId },
       input: { type: 'text', text: 'fixture' },
       idempotencyKey: 'notification-target-fixture',

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -255,8 +255,11 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const initialWork = await fetch(workEndpoint, { headers }).then((response) => response.json());
   assert.equal(initialWork.length, 1);
   assert.equal(initialWork[0].current, true);
+  assert.match(initialWork[0].workingDirectory, new RegExp(`^${home}/workspace/\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-[a-f0-9]{10}$`));
+  assert.equal((await stat(initialWork[0].workingDirectory)).isDirectory(), true);
   const createdWork = await fetch(workEndpoint, { method: 'POST', headers }).then((response) => response.json());
   assert.notEqual(createdWork.id, initialWork[0].id);
+  assert.notEqual(createdWork.workingDirectory, initialWork[0].workingDirectory);
   const switchedWork = await fetch(workEndpoint, { method: 'PUT',
     headers: { ...headers, 'content-type': 'application/json' },
     body: JSON.stringify({ conversationId: initialWork[0].id }),
@@ -278,6 +281,17 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const health = await fetch(`http://${ready.host}:${ready.port}/v1/health`, { headers }).then((response) =>
     response.json(),
   );
+  const shortcutUrl = `http://${ready.host}:${ready.port}/v1/settings/hotkeys`;
+  assert.equal((await fetch(shortcutUrl)).status, 401);
+  assert.deepEqual((await fetch(shortcutUrl, { headers }).then((response) => response.json())).bindings, {});
+  const savedShortcut = await fetch(shortcutUrl, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'conversation.interrupt', binding: null }),
+  });
+  assert.equal(savedShortcut.status, 200);
+  assert.equal((await savedShortcut.json()).bindings['conversation.interrupt'], null);
+  assert.equal(JSON.parse(await readFile(join(home, 'app', 'config.json'), 'utf8')).hotkeys['conversation.interrupt'], null);
   const greeting = await fetch(
     `http://${ready.host}:${ready.port}/v1/greeting?name=Integration`,
     { headers },

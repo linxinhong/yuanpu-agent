@@ -1811,7 +1811,7 @@ tasks:
 
   - id: TASK-052
     title: "工作对话右侧栏文件预览"
-    status: in_progress
+    status: done
     goal: "用户在工作对话右侧「文件」栏浏览当前工作区目录树并预览文本/Markdown/图片/PDF；聊天消息中的文件路径可点击直达预览。"
     scope:
       in: ["protocol 文件清单/读取契约、路由与 DesktopBridge 方法", "runtime sidecar 工作区只读文件路由与路径安全（containment + realpath）", "desktop runtime-manager/main/preload 三处接线", "renderer 文件树、预览组件、聊天内路径点击（仅 work surface）", "pdfjs-dist 渲染 PDF"]
@@ -1838,12 +1838,15 @@ tasks:
       owner: "zcode-80975"
       attempts: 0
       claimed_at: "2026-09-26T15:16:49.231Z"
-      completed_at: null
+      completed_at: "2026-09-26T17:08:16.307Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/file-preview"
       branch: "task/task-052-file-preview"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-052 owner commits 9e3717a/206913b/4e82a70/ebc77a0 merged into main via 0b26465; c004683 adapts file routes to per-conversation working_directory, converts preview styles to rem and switches shiki to a single dual-theme tokenization. Pre-merge working-tree increments preserved in aadf6f8."}
+        - {type: "test", check: "unit, route and contract tests", status: "passed", summary: "apps/runtime: workspace-files 10 unit tests (containment, .., absolute paths, symlink escape/cycles, truncation cap) + loopback route test against the built sidecar (recursive listing, 400/404/401). apps/app 35 tests incl. unified-diff generator, version cache, shiki mapping, theme contract (rem) and composition boundary. Full pnpm check green on merged main (Node 24.15.0, pnpm 11.22.0)."}
+        - {type: "boundary", check: "UI browser smoke", status: "passed", summary: "Vite preview with a stubbed desktop bridge verified: pierre tree over the recursive listing with auto-expansion, review-style tab strip (tree tab + closable file tabs + reopen), toolbar (最终内容/替换效果 toggle, +N -N stats, locate/copy/refresh), shiki tokens carrying --shiki-light/--shiki-dark and the @pierre/diffs replacement view rendering added hunks; screenshots captured."}
+        - {type: "boundary", check: "limits", status: "unverified", summary: "Diff compares only the last-viewed version (no on-disk history); PDF viewport-adjacent rendering, per-tab scroll restoration and dsh-style lazy tree deferred; live Electron interaction and real WeCom flows not exercised in this pass."}
       follow_up_candidates: []
-
   - id: TASK-053
     title: "设置全局字体配置"
     status: done
@@ -1928,7 +1931,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-055
     title: "建立工作会话文件夹与标签管理契约"
-    status: pending
+    status: ready
     goal: "用户可用稳定 ID 管理任意层级文件夹、会话名称与图标、标签及可恢复归档；新会话在选定文件夹下拥有独立工作目录。"
     scope:
       in: ["Work 文件夹/会话/标签的 SQLite 元数据、兼容迁移与排序", "Runtime 管理路由、Yuanpu 协议 DTO、DesktopBridge/IPC 接线", "新建文件夹与会话、服务端重命名、图标、标签、归档/恢复、同级排序的服务行为"]

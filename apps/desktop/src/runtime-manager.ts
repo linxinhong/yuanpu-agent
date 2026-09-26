@@ -24,6 +24,8 @@ import {
   type ModelSettings,
   type ModelCatalog,
   type SaveModelSettingsInput,
+  type HotkeySettings,
+  type SaveHotkeyInput,
   type RuntimeUpdateState,
   type HostEvent,
   type HostEventReceipt,
@@ -452,6 +454,18 @@ export class RuntimeManager {
     return this.request(RUNTIME_ROUTES.modelSettings);
   }
 
+  getHotkeySettings(): Promise<HotkeySettings> {
+    return this.request(RUNTIME_ROUTES.hotkeySettings);
+  }
+
+  saveHotkeySetting(input: SaveHotkeyInput): Promise<HotkeySettings> {
+    return this.request(RUNTIME_ROUTES.hotkeySettings, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
   getModelCatalog(provider?: string): Promise<ModelCatalog> {
     if (typeof RUNTIME_ROUTES.modelCatalog !== 'string') {
       throw new Error('模型列表尚未就绪，请重新启动桌面应用。');
@@ -673,14 +687,28 @@ export class RuntimeManager {
     return this.request(RUNTIME_ROUTES.workConversations);
   }
 
-  createWorkConversation(): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
-    return this.request(RUNTIME_ROUTES.workConversations, { method: 'POST' });
+  createWorkConversation(workingDirectory?: string): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
+    return this.request(RUNTIME_ROUTES.workConversations, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workingDirectory }),
+    });
   }
 
   selectWorkConversation(conversationId: string): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
     return this.request(RUNTIME_ROUTES.workConversations, {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId }),
     });
+  }
+
+  listWorkFiles(conversationId: string, dirPath?: string, options?: { recursive?: boolean }): Promise<import('@yuanpu-agent/protocol').WorkDirectoryListing> {
+    const query = new URLSearchParams({ conversationId });
+    if (dirPath) query.set('path', dirPath);
+    if (options?.recursive) query.set('recursive', '1');
+    return this.request(`${RUNTIME_ROUTES.workFiles}?${query}`);
+  }
+
+  readWorkFile(conversationId: string, filePath: string): Promise<import('@yuanpu-agent/protocol').WorkFilePreview> {
+    const query = new URLSearchParams({ conversationId, path: filePath });
+    return this.request(`${RUNTIME_ROUTES.workFileContent}?${query}`);
   }
 
   getAssistantLink(): Promise<AssistantLinkStatus> {

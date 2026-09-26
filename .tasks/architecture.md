@@ -11,3 +11,5 @@
 独立助理：[会话、记忆、工作评估、委派与双入口设计](../docs/assistant-memory-proposal.md)。开发从固定助理契约并验证 Pi 会话适配（TASK-037）开始，任务状态仅见注册表。
 
 助理默认技能与内部自动化：[职责、触发、队列和主动边界](../docs/assistant-skills-and-automation.md)。
+
+工作会话文件夹树：[数据、磁盘与会话边界](../docs/work-conversation-tree.md)，视觉与交互基线见[原型 v003](ui/conversation-management/prototype-v003.md)。
