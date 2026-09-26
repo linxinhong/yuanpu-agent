@@ -1471,12 +1471,12 @@ tasks:
       follow_up_candidates: ["TASK-054"]
   - id: TASK-043
     title: "实现来源与可修订记忆存储"
-    status: pending
+    status: ready
     goal: "助理可靠收集工作和自身对话证据，维护可追溯、可纠正、可遗忘的个人记忆。"
     scope:
       in: ["来源登记、持久队列、游标、补扫、版本与受众范围", "memories/work/reviews 文档仓库、原子提交、索引与修订", "手工修改、删除来源、遗忘、旧 MEMORY 导入和中文检索"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "助理通过 host 来源接口读取正文和产物，不按 contentRef 直接打开本机绝对路径；来源不可用与已删除分别处理。单写入者维护持久状态，禁止把运行中的 SQLite/会话目录双向文件同步作为设计。"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "助理通过 host 来源接口读取正文和产物，不按 contentRef 直接打开本机绝对路径；来源不可用与已删除分别处理。单写入者维护持久状态，禁止把运行中的 SQLite/会话目录双向文件同步作为设计。", "本卡消费已通过本地进程和 fixture 验证的 Work/助理来源契约；TASK-042 的真实企业微信往返仍独立验收，本卡不得声称真实渠道已验证。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1491,7 +1491,7 @@ tasks:
         expect: "测试来源适配器返回与本地路径无关的正文引用；重复、乱序、暂不可用后恢复及删除事件可重放，ID/版本与受众保持有效；暂时离线不会误作删除或事实撤回。"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-042"]
+    dependencies: ["TASK-041", "TASK-054"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["入口 packages/yuanpu-assistant/src 的新 source/memory 存储模块，复用宿主来源接口而非连接 automation.sqlite", "测试临时 Home、崩溃提交恢复、重复事件、编辑冲突及权限范围；先 assistant test 再 pnpm check", "旧 agent/memory/MEMORY.md 与 Pi 会话只读导入，不清空；大文件保留引用与有预算摘要"]
