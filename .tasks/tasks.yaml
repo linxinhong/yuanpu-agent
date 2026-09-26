@@ -1239,7 +1239,7 @@ tasks:
 
   - id: TASK-037
     title: "固定助理契约并验证 Pi 会话适配"
-    status: in_progress
+    status: done
     goal: "以运行证据确定独立助理、双入口及工作评估的服务边界，解除下游实现不确定性。"
     scope:
       in: ["yuanpu-protocol 的 assistantId/身份/会话/来源/审阅/记忆/委派/回复契约及版本策略", "本地与企业微信归一化输入的 Pi client/server 垂直适配探针；状态订阅和重连", "选型结论、兼容迁移方案和相邻契约测试"]
@@ -1266,14 +1266,20 @@ tasks:
       owner: "assistant-architecture-sol1"
       attempts: 0
       claimed_at: "2026-09-26T12:59:43.360Z"
-      completed_at: null
+      completed_at: "2026-09-26T13:19:08.865Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
       branch: "task/task-037-assistant-contract"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-037 implementation af5333b and handoff 71bfa34 merged into main 9a00589; Pi upstream unchanged."}
+        - {type: "test", check: "focused protocol and Pi integration", status: "passed", summary: "On integrated main 9a00589, protocol build and 3 assistant contract tests passed; 2 real Pi server/client Session/Harness probe tests passed, including stale attachment, denied unpaired attach, response loss and persisted ledger reload."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0, pnpm 11.22.0; full build, Yuanpu typechecks and tests passed on main 9a00589 with preserved pre-existing unrelated dirty worktree changes. runtime-kit 164 tests, apps/runtime 27 tests."}
+        - {type: "review", check: "independent contract and failure review", status: "passed", summary: "Independent Sol reviewer reproduced personal audience mismatch and fixture attach authorization gap; both repaired with regression coverage before final pnpm check. Reviewer confirmed probe calls actual Pi server/client and Session/Harness."}
+        - {type: "boundary", check: "next-stage verification limits", status: "unverified", summary: "Probe uses fixture attach capability and JSON accepted-request ledger. Real WeCom pairing, production concurrent crash consistency and SEA lifecycle remain TASK-040/TASK-041/TASK-042 acceptance, not proven by TASK-037."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-037.md integrated with source revision, entry points, test commands and unresolved boundaries."}
       follow_up_candidates: []
   - id: TASK-038
     title: "创建独立助理包与专属执行环境"
-    status: pending
+    status: ready
     goal: "助理可使用独立 Home、会话与专属技能执行一次真实 Agent 回合。"
     scope:
       in: ["packages/yuanpu-assistant 构建、类型检查、test 与独立执行器", "Home 路径解析、SOUL/USER/MEMORY 初始化及冻结摘要", "仅助理技能的显式加载与窄 host 接口"]
@@ -1306,7 +1312,7 @@ tasks:
 
   - id: TASK-039
     title: "隔离工作会话并保留历史"
-    status: pending
+    status: ready
     goal: "新建工作从独立上下文开始，历史可读且回合形成可靠来源。"
     scope:
       in: ["Work conversation/session 创建、列表与后续回合路由", "取消全局长期记忆注入；旧 default 只读历史", "落盘后来源事件与重复补扫支持；现有 Work 页接入新建与历史"]
