@@ -155,6 +155,40 @@ export type WorkFilePreview =
   | { kind: 'pdf'; path: string; base64: string; size: number; updatedAt: string }
   | { kind: 'unsupported'; path: string; reason: string; size?: number };
 
+/** One control command addressed to the embedded browser session of a Work conversation. */
+export interface BrowserControlCommand {
+  method: 'navigate' | 'back' | 'forward' | 'reload' | 'screenshot' | 'snapshot' | 'click' | 'type' | 'scroll' | 'evaluate';
+  conversationId: string;
+  url?: string;
+  fullPage?: boolean;
+  x?: number;
+  y?: number;
+  deltaX?: number;
+  deltaY?: number;
+  text?: string;
+  expression?: string;
+}
+
+/** Result of one embedded-browser control command. */
+export interface BrowserControlResult {
+  ok: boolean;
+  method: BrowserControlCommand['method'];
+  url?: string;
+  title?: string;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  base64?: string;
+  text?: string;
+  error?: string;
+}
+
+export interface BrowserGuestAttachPayload {
+  /** Stable key of the webview guest (per browser tab). */
+  key: string;
+  webContentsId: number;
+  conversationId: string;
+}
+
 /** Public execution summary. Never includes reasoning, tool arguments or results. */
 export interface DesktopReplyRunInfo {
   runId?: string;
@@ -415,6 +449,11 @@ export interface DesktopBridge {
   createWorkConversation(workingDirectory?: string): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string): Promise<WorkConversation>;
   listWorkFiles(conversationId: string, dirPath?: string, options?: { recursive?: boolean }): Promise<WorkDirectoryListing>;
+  browserAttachGuest(payload: BrowserGuestAttachPayload): Promise<void>;
+  browserDetachGuest(key: string): Promise<void>;
+  openInSystemBrowser(url: string): Promise<void>;
+  onBrowserGuestCrashed(listener: (guestKey: string) => void): () => void;
+  onBrowserSessionRequest(listener: (conversationId: string) => void): () => void;
   readWorkFile(conversationId: string, filePath: string): Promise<WorkFilePreview>;
   getAssistantLink(): Promise<AssistantLinkStatus>;
   bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;

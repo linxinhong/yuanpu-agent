@@ -1,5 +1,7 @@
 import {
   createDemoCapabilitySource,
+  createBuiltinBrowserSource,
+  BrowserControlClient,
   createBuiltinWebSource,
   createWorkflowCheckpointSource,
   deleteModelSettings,
@@ -104,6 +106,7 @@ interface RuntimeBootstrap {
   token: string;
   approvalPublicKey: string;
   parentPid: number;
+  browserControl?: { port: number; token: string };
 }
 
 async function readBootstrap(): Promise<RuntimeBootstrap> {
@@ -125,10 +128,17 @@ async function readBootstrap(): Promise<RuntimeBootstrap> {
   ) {
     throw new Error('Runtime bootstrap credentials are invalid');
   }
+  const browserControl = value.browserControl;
+  const endpoint = browserControl
+    && Number.isSafeInteger(browserControl.port) && Number(browserControl.port) > 0
+    && typeof browserControl.token === 'string' && browserControl.token.length >= 32
+    ? { port: Number(browserControl.port), token: browserControl.token }
+    : undefined;
   return {
     token: value.token,
     approvalPublicKey: value.approvalPublicKey,
     parentPid: Number(value.parentPid),
+    ...(endpoint ? { browserControl: endpoint } : {}),
   };
 }
 
@@ -412,7 +422,7 @@ function readConfigInput(value: unknown): PluginConfigInput {
 async function serve(): Promise<void> {
   const portIndex = args.indexOf('--port');
   const requestedPort = portIndex >= 0 ? Number(args[portIndex + 1]) : 0;
-  const { token, approvalPublicKey, parentPid } = await readBootstrap();
+  const { token, approvalPublicKey, parentPid, browserControl } = await readBootstrap();
   const approvalVerificationKey = createPublicKey({
     key: Buffer.from(approvalPublicKey, 'base64'),
     format: 'der',
@@ -520,8 +530,14 @@ async function serve(): Promise<void> {
   const notificationRouter = new HostNotificationRouter();
   const notificationSource = createNotificationCapabilitySource(notificationRouter);
   const webSource = createBuiltinWebSource({ authPath: join(home.appPath, 'auth.json') });
+  const browserControlClient = browserControl ? new BrowserControlClient(browserControl) : undefined;
   const workflowCheckpointSource = createWorkflowCheckpointSource();
   const capabilitySources = [createDemoCapabilitySource(), notificationSource, webSource, workflowCheckpointSource];
+  if (browserControlClient) {
+    capabilitySources.push(createBuiltinBrowserSource({
+      execute: (command) => browserControlClient.execute(command),
+    }));
+  }
   let pythonSource = createConfiguredPythonSource(
     join(home.appPath, 'capabilities', 'builtin.python.echo', 'home'),
     pythonConfigFile,

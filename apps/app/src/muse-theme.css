@@ -853,3 +853,25 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .file-diff-stats b { font-size: 0.6875rem; font-weight: 650; }
 .file-diff-stats .add { color: var(--yp-success); }
 .file-diff-stats .del { color: #b03d36; }
+
+/* Embedded browser tab (viewer/browser). */
+.browser-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.browser-view.hidden { display: none; }
+.browser-toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
+.browser-nav-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: none; border: 0; border-radius: 8px; padding: 0; color: var(--yp-text-muted); background: transparent; cursor: pointer; }
+.browser-nav-button:hover { color: var(--yp-text); background: var(--yp-surface-subtle); }
+.browser-nav-button:disabled { color: var(--yp-text-subtle); cursor: default; background: transparent; }
+.browser-nav-button svg { width: 15px; height: 15px; }
+.browser-nav-forward svg { transform: rotate(180deg); }
+.browser-reloading svg { animation: browser-spin 0.9s linear infinite; }
+@keyframes browser-spin { to { transform: rotate(360deg); } }
+.browser-address { flex: 1; min-width: 0; border: 1px solid var(--yp-border-control); border-radius: 999px; padding: 6px 14px; color: var(--yp-text); background: var(--yp-surface); font-size: 0.75rem; }
+.browser-address:focus { outline: none; border-color: var(--yp-accent); }
+.browser-viewport { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; border: 1px solid var(--yp-border-subtle); border-radius: 10px; overflow: hidden; background: #fff; }
+.browser-guest { flex: 1; min-height: 320px; width: 100%; }
+.browser-error { position: absolute; inset: auto 12px 12px; margin: 0; }
+.browser-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.file-tab-add-wrap { position: relative; }
+.file-tab-add-menu { position: absolute; z-index: 5; top: 30px; left: 0; display: flex; flex-direction: column; min-width: 120px; border: 1px solid var(--yp-border); border-radius: 10px; padding: 4px; background: var(--yp-surface); box-shadow: 0 6px 20px rgb(25 38 49 / 14%); }
+.file-tab-add-menu button { border: 0; border-radius: 7px; padding: 7px 10px; color: var(--yp-text); background: transparent; cursor: pointer; font-size: 0.75rem; text-align: left; }
+.file-tab-add-menu button:hover { background: var(--yp-surface-subtle); }

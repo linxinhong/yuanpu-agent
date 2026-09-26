@@ -27,6 +27,7 @@ import { AssistantHome } from './assistant-home.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
 import { normalizeWorkspacePath } from '../shared/work-file-links.js';
 import { FileWorkspace } from '../viewer/files/file-tabs.js';
+import type { ViewerBrowserHost } from '../viewer/host/browser-host.js';
 import type { ViewerFileHost } from '../viewer/host/file-host.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
@@ -749,6 +750,27 @@ export function ChatPanel({
     }
     : undefined;
 
+  const [browserRequest, setBrowserRequest] = useState(0);
+  const browserHost: ViewerBrowserHost | undefined = surface === 'work' && desktop
+    ? {
+      attachGuest: (payload) => desktop.browserAttachGuest(payload),
+      detachGuest: (key) => desktop.browserDetachGuest(key),
+      openInSystemBrowser: (url) => desktop.openInSystemBrowser(url),
+      // Guest rebuild is handled inside BrowserView through webview events.
+      onGuestCrashed: () => () => {},
+      onSessionRequest: () => () => {},
+    }
+    : undefined;
+
+  // Agent browser commands on this conversation ask the renderer to open the
+  // shared browser tab; the command itself waits for the guest to attach.
+  useEffect(() => {
+    if (surface !== 'work' || !desktop) return;
+    return desktop.onBrowserSessionRequest((conversationId) => {
+      if (conversationId === workConversationId) setBrowserRequest((value) => value + 1);
+    });
+  }, [desktop, surface, workConversationId]);
+
   const visibleRun = navigationTarget?.runId
     ? (locatedRun && typeof locatedRun !== 'string' ? locatedRun : undefined)
     : lastRun;
@@ -1089,8 +1111,9 @@ export function ChatPanel({
           ) : (
             <div className="activity-content file-panel">
               {!fileHost || !workConversationId ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
-                : <FileWorkspace key={workConversationId} host={fileHost} scopeKey={workConversationId}
-                  requestPath={filePreviewPath} onActiveFileChange={setFilePreviewPath} />}
+                : <FileWorkspace key={workConversationId} host={fileHost} browserHost={browserHost}
+                  scopeKey={workConversationId} requestPath={filePreviewPath} browserRequest={browserRequest}
+                  onActiveFileChange={setFilePreviewPath} />}
             </div>
           )}
           </>}
