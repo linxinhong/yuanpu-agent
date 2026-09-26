@@ -1686,7 +1686,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
-    status: in_progress
+    status: done
     goal: "证明工作材料能够形成可靠审阅、记忆和台账，并可通过专业子任务完成核验。"
     scope:
       in: ["后端端到端业务验证与独立隔离审查", "纠正/遗忘、评估准确归类、预算抢占和失败恢复", "助理与专业子任务的工具/存储/身份边界"]
@@ -1717,14 +1717,18 @@ tasks:
       owner: "assistant-stage-verifier-047-20260927-10414"
       attempts: 0
       claimed_at: "2026-09-26T20:51:56.431Z"
-      completed_at: null
+      completed_at: "2026-09-26T21:50:29.791Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-stage-verification"
       branch: "task/task-047-assistant-stage-verification"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-047 integrated main", status: "passed", summary: "Independent stage tests and results e1328a3, memory 1672067, merged at f8c078e and finalized at 0286067. Product defects found by this verification were fixed separately in aa40a49 and dc396ff. See .tasks/verification/TASK-047/results.md and .tasks/memory/TASK-047.md."}
+        - {type: "test", check: "real local service chain and memory lifecycle", status: "passed", summary: "Temporary Home plus loopback model drove real Runtime HTTP, Pi Work write, Assistant Worker, read-only professional delegation and source re-review: partial until new host-verified write artifact, then supported. Persisted review/source/follow-up/skills/tool isolation and correction/forget/replay were checked. Focused 54/54 passed; final shutdown regression passed after dc396ff."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Node 24.15.0, pnpm 11.22.0, macOS arm64. Branch runner 1790459052722586000.log exited 0; integrated main f8c078e pnpm check exited 0 with Assistant 38/38, Runtime 118/118, runtime-kit 187/187 and all other packages green. Later 0286067 changed only evidence Markdown."}
+        - {type: "boundary", check: "external model and user-facing channels", status: "unverified", summary: "No external model quality evaluation, real WeCom message, UI correction/deletion action, Windows/Linux or cloud sync was exercised. TASK-048/049/050 and TASK-062 own those later user journeys. No real user Home or credentials were accessed."}
       follow_up_candidates: []
   - id: TASK-048
     title: "实现助理主动回顾与建议投递"
-    status: pending
+    status: ready
     goal: "助理根据工作评估与用户目标主动跟进，在合适的入口提供有依据的建议。"
     scope:
       in: ["skills/reflect-and-suggest/SKILL.md 消费助理内部每日/每周检查，形成独立回顾会话、漏触发合并和预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
