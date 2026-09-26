@@ -1279,7 +1279,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-038
     title: "创建独立助理包与专属执行环境"
-    status: ready
+    status: in_progress
     goal: "助理可使用独立 Home、会话与专属技能执行一次真实 Agent 回合。"
     scope:
       in: ["packages/yuanpu-assistant 构建、类型检查、test 与独立执行器", "Home 路径解析、SOUL/USER/MEMORY 初始化及冻结摘要", "仅助理技能的显式加载与窄 host 接口"]
@@ -1301,15 +1301,14 @@ tasks:
     investigation_hints: ["新增 packages/yuanpu-assistant/src 与 test；参照 packages/yuanpu-runtime/src/pi/index.ts 装配责任但不调用其工作工厂", "pnpm-workspace.yaml 已覆盖 packages/*；根 package.json 用 @yuanpu-agent/* 自动收集检查，核对新包脚本", "用 loopback 模型和测试 host 验证装配，先 pnpm --filter @yuanpu-agent/assistant test 再 pnpm check；该脚本由本卡创建"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-architecture-sol1"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T13:19:33.783Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
+      branch: "task/task-038-assistant-core"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-039
     title: "隔离工作会话并保留历史"
     status: ready
