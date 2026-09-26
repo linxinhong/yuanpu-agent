@@ -77,9 +77,10 @@ function getHighlighter(): Promise<HighlighterCore> {
 }
 
 /**
- * Tokenizes code once per theme so both app themes can recolor the same
- * spans. Returns undefined when highlighting is unavailable — the caller
- * falls back to plain text rendering.
+ * Tokenizes code once with both themes so the light and dark app themes can
+ * recolor the same spans (shiki emits both colors per token; a single pass
+ * keeps the token boundaries structurally aligned). Returns undefined when
+ * highlighting is unavailable — the caller falls back to plain text.
  */
 export async function highlightLines(code: string, lang: string): Promise<HighlightedLine[] | undefined> {
   const grammarImport = GRAMMAR_IMPORTS[lang];
@@ -87,21 +88,16 @@ export async function highlightLines(code: string, lang: string): Promise<Highli
   try {
     const highlighter = await getHighlighter();
     await highlighter.loadLanguage(grammarImport());
-    // Serialized on purpose: concurrent tokenizations race shiki core's lazy
-    // theme/language attachment and can drop the dark-side tokens.
-    const light = highlighter.codeToTokens(code, { lang, theme: 'github-light' });
-    const dark = highlighter.codeToTokens(code, { lang, theme: 'github-dark' });
-    return light.tokens.map((lineTokens, lineIndex) => {
-      const darkLine = dark.tokens[lineIndex];
-      if (!darkLine || darkLine.length !== lineTokens.length) {
-        return lineTokens.map((token) => ({ text: token.content, light: token.color ?? '' }));
-      }
-      return lineTokens.map((token, index) => ({
-        text: token.content,
-        light: token.color ?? '',
-        dark: darkLine[index]?.color,
-      }));
+    const result = highlighter.codeToTokens(code, {
+      lang,
+      themes: { light: 'github-light', dark: 'github-dark' },
+      defaultColor: false,
     });
+    return result.tokens.map((lineTokens) => lineTokens.map((token) => ({
+      text: token.content,
+      light: token.htmlStyle?.['--shiki-light'] ?? '',
+      dark: token.htmlStyle?.['--shiki-dark'],
+    })));
   } catch {
     return undefined;
   }

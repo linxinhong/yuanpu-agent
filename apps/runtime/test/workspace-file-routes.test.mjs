@@ -16,9 +16,6 @@ test('work file routes serve the workspace with containment enforcement', async 
     model: 'gpt-5.6-luna',
     workingDirectory: workspace,
   }, null, 2)}\n`);
-  await mkdir(join(workspace, 'sub'));
-  await writeFile(join(workspace, 'notes.md'), '# 工作区笔记\n内容正文。\n');
-  await writeFile(join(workspace, 'sub', 'child.txt'), 'child');
 
   const token = randomBytes(32).toString('hex');
   const approvalPublicKey = generateKeyPairSync('ed25519').publicKey
@@ -56,6 +53,12 @@ test('work file routes serve the workspace with containment enforcement', async 
   assert.equal(created.status, 201);
   const conversation = await created.json();
   assert.match(conversation.id, /^work:/);
+  // Each conversation owns a fresh working directory; the fixtures go there.
+  const conversationWorkspace = conversation.workingDirectory;
+  assert.ok(conversationWorkspace && conversationWorkspace !== workspace);
+  await mkdir(join(conversationWorkspace, 'sub'));
+  await writeFile(join(conversationWorkspace, 'notes.md'), '# 工作区笔记\n内容正文。\n');
+  await writeFile(join(conversationWorkspace, 'sub', 'child.txt'), 'child');
 
   const listing = await send(`/v1/work/files?conversationId=${encodeURIComponent(conversation.id)}`);
   assert.equal(listing.status, 200);
