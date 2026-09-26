@@ -167,8 +167,9 @@ export interface LocalProfessionalAdapterOptions {
   root: string;
   assistantHome: string;
   skillsRoot: string;
-  model: Model<Api>;
-  modelRuntime: ModelRuntime;
+  model?: Model<Api>;
+  modelRuntime?: ModelRuntime;
+  resolveModel?: () => Promise<{ model: Model<Api>; modelRuntime: ModelRuntime }>;
   host: ProfessionalTaskHost;
 }
 
@@ -216,7 +217,16 @@ export class LocalProfessionalAdapter implements DelegationExecutionAdapter {
       taskId: brief.taskId, skillName: brief.skillName,
       contextRefs: brief.contextRefs, authorizedCapabilities: brief.authorizedCapabilities,
     };
-    const opened = await createProfessionalSession({ ...this.options, scope, access });
+    const selected = this.options.resolveModel
+      ? await this.options.resolveModel()
+      : { model: this.options.model, modelRuntime: this.options.modelRuntime };
+    if (!selected.model || !selected.modelRuntime) throw new Error('Professional model is unavailable.');
+    signal.throwIfAborted();
+    const opened = await createProfessionalSession({
+      root: this.options.root, assistantHome: this.options.assistantHome,
+      skillsRoot: this.options.skillsRoot, model: selected.model,
+      modelRuntime: selected.modelRuntime, scope, access,
+    });
     const { session } = opened;
     if (signal.aborted) {
       await session.abort();
