@@ -40,7 +40,8 @@ export interface AssistantSession {
   readonly skillNames: readonly string[];
   prompt(message: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
   invokeSkill(name: string, instructions?: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
-  verifyDelegation(taskId: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
+  verifyDelegation(taskId: string, signal?: AbortSignal,
+    beforeModel?: () => boolean): Promise<AssistantTurnResult>;
   close(): Promise<void>;
 }
 
@@ -191,13 +192,16 @@ export async function createAssistantExecutor(options: {
             }
             return serialize(() => completeTurn(lane, sessionId, lane.skill(name, instructions, BACKGROUND_CONTEXT)), signal);
           },
-          verifyDelegation(taskId, signal) {
+          verifyDelegation(taskId, signal, beforeModel) {
             if (!delegationCoordinator || !/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
               return Promise.reject(new Error('Invalid delegation verification task.'));
             }
             return serialize(async () => {
               automationTaskId = taskId;
               try {
+                if (signal?.aborted) throw new Error('Delegation notification was preempted before model dispatch.');
+                if (beforeModel && !beforeModel()) throw new Error('Delegation notification is no longer current.');
+                if (signal?.aborted) throw new Error('Delegation notification was preempted during model dispatch.');
                 const result = await completeTurn(lane, sessionId, lane.skill('delegate-and-verify',
                   `A delegated task changed state. Query only task ID ${taskId}. This is a proposal phase: do not call link_evidence. If completed, return only JSON {"checks":[{"criterion":"...","evidenceRefs":["..."]}]} with one entry per actual completion criterion and only returned evidence references. For any other state, return only JSON {"checks":[]}. Do not start or follow up another task.`,
                   BACKGROUND_CONTEXT));

@@ -205,7 +205,7 @@ export async function runAssistantWorker(): Promise<void> {
       automationEngine ??= new AssistantAutomationEngine(automation,
         assistantAutomationHandler(memory, automation, {
           current: (taskId) => delegationHost.status(taskId),
-          notify: async (record, signal) => {
+          notify: async (record, signal, beforeModel) => {
             if (closed || !['completed', 'failed', 'cancelled', 'unknown', 'waiting_approval']
               .includes(record.status)) throw new Error('Delegation notification is no longer current.');
             const current = await delegationHost.status(record.taskId);
@@ -214,7 +214,7 @@ export async function runAssistantWorker(): Promise<void> {
               throw new Error('Delegation changed before notification.');
             }
             const session = await executor.openSession(record.assistantSessionId, { createIfMissing: false });
-            const result = await session.verifyDelegation(record.taskId, signal);
+            const result = await session.verifyDelegation(record.taskId, signal, beforeModel);
             return { costUsd: result.costUsd, message: result.message };
           },
           linkEvidence: async (record, checks) => {

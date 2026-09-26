@@ -72,6 +72,10 @@ const schema = `
     effect_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES automation_jobs(job_id),
     started_at TEXT NOT NULL
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS automation_prepared_proposals (
+    effect_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES automation_jobs(job_id),
+    cost_usd REAL NOT NULL, proposal_json TEXT NOT NULL, prepared_at TEXT NOT NULL
+  ) STRICT;
 `;
 
 const priorities: Record<AutomationKind, number> = {
@@ -337,6 +341,22 @@ export class AssistantAutomationStore {
       SELECT ?,job_id,? FROM automation_jobs WHERE job_id=? AND status='running'`)
       .run(job.effectId, this.now().toISOString(), job.jobId);
     return result.changes === 1;
+  }
+
+  preparedProposal(job: AutomationJob): AutomationProposal | undefined {
+    const row = this.database.prepare(`SELECT cost_usd,proposal_json FROM automation_prepared_proposals
+      WHERE effect_id=? AND job_id=?`).get(job.effectId, job.jobId) as
+      { cost_usd: number; proposal_json: string } | undefined;
+    return row && { costUsd: row.cost_usd, value: JSON.parse(row.proposal_json) };
+  }
+
+  /** The billed model proposal is durable before any separate archive evidence write. */
+  savePreparedProposal(job: AutomationJob, proposal: AutomationProposal): void {
+    const serialized = JSON.stringify(proposal.value);
+    if (serialized.length > 16_000) throw new Error('Automation proposal exceeds budget.');
+    this.database.prepare(`INSERT OR IGNORE INTO automation_prepared_proposals
+      (effect_id,job_id,cost_usd,proposal_json,prepared_at) VALUES (?,?,?,?,?)`)
+      .run(job.effectId, job.jobId, proposal.costUsd, serialized, this.now().toISOString());
   }
 
   recordCheckpoint(job: AutomationJob, snapshot: unknown): void {

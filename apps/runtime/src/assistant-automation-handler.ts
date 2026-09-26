@@ -4,7 +4,8 @@ import type { AssistantDelegationRecord } from '@yuanpu-agent/protocol';
 
 export interface DelegationAutomationHost {
   current(taskId: string): Promise<AssistantDelegationRecord | undefined>;
-  notify(record: AssistantDelegationRecord, signal: AbortSignal): Promise<{ costUsd: number; message: string }>;
+  notify(record: AssistantDelegationRecord, signal: AbortSignal,
+    beforeModel: () => boolean): Promise<{ costUsd: number; message: string }>;
   linkEvidence(record: AssistantDelegationRecord,
     checks: Array<{ criterion: string; evidenceRefs: string[] }>): Promise<void>;
 }
@@ -28,6 +29,7 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
     async lookup(job) {
       if (job.kind === 'verify-delegation') {
         if (store.hasCheckpoint(job.effectId)) return 'applied';
+        if (store.preparedProposal(job)) return 'absent';
         if (store.hasEffectAttempt(job.effectId)) return 'unknown';
         if (!delegations || !job.delegationId) return 'deferred';
         const record = await delegations.current(job.delegationId);
@@ -40,17 +42,19 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
     async prepare(job: AutomationJob, signal: AbortSignal): Promise<AutomationProposal> {
       if (signal.aborted) throw signal.reason;
       if (job.kind === 'verify-delegation') {
+        const prepared = store.preparedProposal(job);
+        if (prepared) return prepared;
         if (!delegations || !job.delegationId) throw new Error('Delegation automation host is unavailable.');
         const record = await delegations.current(job.delegationId);
         if (!record || !['completed', 'failed', 'cancelled', 'unknown', 'waiting_approval']
           .includes(record.status)) throw new Error('Delegation is not ready for verification.');
         signal.throwIfAborted();
-        if (!store.beginEffectAttempt(job)) throw new Error('Delegation notification attempt is no longer current.');
-        signal.throwIfAborted();
-        const billed = await delegations.notify(record, signal);
+        const billed = await delegations.notify(record, signal, () => store.beginEffectAttempt(job));
         const checks = parseEvidenceProposal(billed.message);
-        return { costUsd: billed.costUsd, value: { taskId: record.taskId,
+        const proposal = { costUsd: billed.costUsd, value: { taskId: record.taskId,
           status: record.status, updatedAt: record.updatedAt, checks } };
+        store.savePreparedProposal(job, proposal);
+        return proposal;
       }
       const database = memory.sources.database;
       const sources = database.prepare(`SELECT COUNT(*) AS total,
