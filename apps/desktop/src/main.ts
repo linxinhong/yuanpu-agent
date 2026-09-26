@@ -126,6 +126,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('work:conversations:create', trustedHandler((folderId?: string, requestId?: string) => runtime.createWorkConversation(folderId, requestId)));
   ipcMain.handle('work:conversations:select', trustedHandler((conversationId: string) => runtime.selectWorkConversation(conversationId)));
   ipcMain.handle('work:conversations:update', trustedHandler((conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }) => runtime.updateWorkConversation(conversationId, patch)));
+  ipcMain.handle('work:move', trustedHandler((request: import('@yuanpu-agent/protocol').WorkMoveRequest) => runtime.moveWorkNode(request)));
   ipcMain.handle('work:folders:list', trustedHandler(() => runtime.listWorkFolders()));
   ipcMain.handle('work:folders:create', trustedHandler((parentId: string | null, name: string, iconId?: string, requestId?: string) => runtime.createWorkFolder(parentId, name, iconId, requestId)));
   ipcMain.handle('work:folders:update', trustedHandler((folderId: string, patch: { name?: string; iconId?: string }) => runtime.updateWorkFolder(folderId, patch)));

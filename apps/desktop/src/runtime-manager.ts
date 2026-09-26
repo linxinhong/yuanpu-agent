@@ -704,6 +704,9 @@ export class RuntimeManager {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId, ...patch }),
     });
   }
+  moveWorkNode(request: import('@yuanpu-agent/protocol').WorkMoveRequest): Promise<import('@yuanpu-agent/protocol').WorkMoveResult> {
+    return this.request(RUNTIME_ROUTES.workMove, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
+  }
   listWorkFolders(): Promise<import('@yuanpu-agent/protocol').WorkFolder[]> { return this.request(RUNTIME_ROUTES.workFolders); }
   createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<import('@yuanpu-agent/protocol').WorkFolder> {
     return this.request(RUNTIME_ROUTES.workFolders, { method: 'POST', headers: { 'content-type': 'application/json' },

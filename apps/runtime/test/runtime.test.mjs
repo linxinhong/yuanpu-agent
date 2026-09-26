@@ -313,6 +313,27 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const restored = await fetch(workEndpoint, { method: 'PATCH', headers: workHeaders,
     body: JSON.stringify({ conversationId: nested.id, archived: false }) }).then((response) => response.json());
   assert.equal(restored.workingDirectory, nested.workingDirectory);
+  await writeFile(join(nested.workingDirectory, 'moved-preview.txt'), 'preview survives move');
+  const moveRequest = { requestId: randomUUID(), kind: 'conversation', id: nested.id, targetFolderId: parent.id };
+  const moveResponse = await fetch(`http://${ready.host}:${ready.port}/v1/work/move`, {
+    method: 'POST', headers: workHeaders, body: JSON.stringify(moveRequest),
+  });
+  assert.equal(moveResponse.status, 200);
+  const moveResult = await moveResponse.json();
+  assert.deepEqual(moveResult.conversationIds, [nested.id]);
+  assert.match(moveResult.warning, /旧绝对路径/);
+  await assert.rejects(stat(nested.workingDirectory), { code: 'ENOENT' });
+  const relocated = (await fetch(workEndpoint, { headers }).then((response) => response.json()))
+    .find((item) => item.id === nested.id);
+  assert.equal(relocated.folderId, parent.id);
+  assert.deepEqual(relocated.previousWorkingDirectories, [nested.workingDirectory]);
+  const movedPreview = await fetch(`http://${ready.host}:${ready.port}/v1/work/files/content?conversationId=${nested.id}&path=moved-preview.txt`, { headers }).then((response) => response.json());
+  assert.equal(movedPreview.content, 'preview survives move');
+  const retryMove = await fetch(`http://${ready.host}:${ready.port}/v1/work/move`, {
+    method: 'POST', headers: workHeaders, body: JSON.stringify(moveRequest),
+  });
+  assert.deepEqual(await retryMove.json(), moveResult);
+
   assert.equal((await fetch(workEndpoint, { method: 'PATCH', headers: workHeaders,
     body: JSON.stringify({ conversationId: 'default', archived: false }) })).status, 400);
   const switchedWork = await fetch(workEndpoint, { method: 'PUT',
@@ -623,7 +644,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.deepEqual(scheduleHistory, []);
   assert.deepEqual(health, {
     version: '0.1.0',
-    protocolVersion: 5,
+    protocolVersion: 6,
     piVersion: '0.86.1',
     mcpTools: ['search_capabilities', 'execute_capability'],
     configRoot: home,

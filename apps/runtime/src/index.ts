@@ -1,4 +1,6 @@
+import { WorkDirectoryMoveCoordinator, WorkMoveConflict } from './work-directory-move.js';
 import {
+  verifyYuanpuSessionLocation,
   createDemoCapabilitySource,
   createBuiltinWebSource,
   createWorkflowCheckpointSource,
@@ -535,6 +537,19 @@ async function serve(): Promise<void> {
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
   const workConversations = metadata.workConversations;
+  const workMoves = new WorkDirectoryMoveCoordinator({
+    store: workConversations, workspaceId: home.config.workingDirectory,
+    workspaceRoot: home.workspacePath, sessionsRoot: home.sessionsPath,
+    toolStateRoot: join(home.root, 'workflows', 'agent-tools'),
+    assertIdle: async (_ids, sessionIds) => {
+      if ((await approvals.listPending()).some((approval) => sessionIds.includes(approval.sessionId))) {
+        throw new WorkMoveConflict('Work session has a pending capability approval.');
+      }
+    },
+    drainSessions: (ids) => agentExecutor.drainSessions(ids),
+    verifySession: (cwd, id, file) => verifyYuanpuSessionLocation(cwd, id, home.sessionsPath, file),
+  });
+  await workMoves.recover();
   for (const intent of workConversations.pendingCreateIntents(home.config.workingDirectory)) {
     if (!intent.committed) await removeUncommittedWorkspaceDirectory(home.workspacePath, intent.relativeDirectory);
     workConversations.finishCreateIntent(intent.id);
@@ -590,6 +605,7 @@ async function serve(): Promise<void> {
     return currentWorkPromise;
   };
   const scanSavedWorkTurns = (conversationId?: string) => {
+    if (workMoves.busy) return;
     for (const item of workConversations.listExisting(workScope)) {
       if (conversationId && item.id !== conversationId) continue;
       const piSessionId = workConversations.sessionId(home.config.workingDirectory, item.id);
@@ -904,7 +920,18 @@ async function serve(): Promise<void> {
       return;
     }
 
+    let releaseWorkRead: (() => void) | undefined;
     try {
+      if (url.pathname === RUNTIME_ROUTES.workMove && request.method === 'POST') {
+        const body = await readJsonBody(request);
+        if (!isRecord(body)) throw new WorkMoveConflict('Invalid Work move request.');
+        const result = await workMoves.move({ requestId: body.requestId, kind: body.kind,
+          id: body.id, targetFolderId: body.targetFolderId } as import('@yuanpu-agent/protocol').WorkMoveRequest);
+        response.end(JSON.stringify(result));
+        return;
+      }
+      // Covers creation, previews, transcripts, both submission paths, approvals and search.
+      releaseWorkRead = workMoves.acquireRead();
       if (url.pathname === RUNTIME_ROUTES.health && request.method === 'GET') {
         response.end(
           JSON.stringify({
@@ -2074,7 +2101,7 @@ async function serve(): Promise<void> {
       response.statusCode = 404;
       response.end(JSON.stringify({ error: 'Not found' }));
     } catch (error) {
-      response.statusCode = 500;
+      response.statusCode = error instanceof WorkMoveConflict ? 409 : 500;
       const message = error instanceof Error ? error.message : String(error);
       const missingApiKey = message.includes('No API key found');
       const safeMessage = missingApiKey
@@ -2086,7 +2113,7 @@ async function serve(): Promise<void> {
           ? { hint: `Check ${join(home.appPath, 'auth.json')} or the provider environment variable.` }
           : {}),
       }));
-    }
+    } finally { releaseWorkRead?.(); }
   });
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
