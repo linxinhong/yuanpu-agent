@@ -79,6 +79,125 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
   inspection.close();
 });
 
+test('repairs both historical schema v8 shapes and a v9 Work database without losing records', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-v8-collision-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const now = '2026-09-26T00:00:00.000Z';
+  for (const variant of ['work-v8', 'work-v9', 'assistant-v8']) {
+    const path = join(root, `${variant}.sqlite`);
+    const seeded = openYuanpuMetadataDatabase(path);
+    seeded.assistantHost.desktop();
+    seeded.close();
+    const old = new DatabaseSync(path);
+    old.exec('PRAGMA foreign_keys = OFF');
+    old.exec('DELETE FROM yp_schema_migrations WHERE version >= 9; PRAGMA user_version = 8;');
+    old.prepare(`INSERT INTO yp_work_conversations(conversation_id, pi_session_id, workspace_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)`).run(`work-${variant}`, `pi-${variant}`, '/original-workspace', now, now);
+    old.prepare(`INSERT INTO yp_channel_connections(provider, connection_id, provider_account_digest,
+      credential_binding_digest, created_at) VALUES ('wecom', ?, ?, ?, ?)`).run(
+      `connection-${variant}`, 'a'.repeat(64), 'b'.repeat(64), now);
+    old.prepare(`INSERT INTO yp_channel_pairings(provider, connection_id, sender_digest, created_at)
+      VALUES ('wecom', ?, ?, ?)`).run(`connection-${variant}`, 'c'.repeat(64), now);
+    old.prepare(`INSERT INTO yp_desktop_assistant_link(id, contact_id, connection_id, target_id,
+      previous_pi_session_id, linked_pi_session_id, updated_at)
+      VALUES (1, 'old-contact', ?, 'old-target', 'old-desktop', 'old-wecom', ?)`)
+      .run(`connection-${variant}`, now);
+    old.prepare(`INSERT INTO yp_agent_runs(run_id, entry_point, authority_id, subject_id, idempotency_key,
+      request_fingerprint, input_digest, request_metadata_json, status, external_effect_state,
+      created_at, updated_at) VALUES (?, 'desktop', 'local-desktop', 'local-user', ?, ?, ?, '{}',
+      'succeeded', 'none', ?, ?)`).run(`run-${variant}`, `key-${variant}`, 'd'.repeat(64),
+      'e'.repeat(64), now, now);
+    old.prepare(`INSERT INTO yp_assistant_mirror(mirror_id, run_id, part, target_id, content,
+      content_digest, status, created_at, updated_at) VALUES (?, ?, 'assistant', 'old-target',
+      'old archived reply', ?, 'accepted', ?, ?)`).run(`mirror-${variant}`, `run-${variant}`,
+      'f'.repeat(64), now, now);
+    if (variant.startsWith('work')) {
+      old.exec(`DROP TABLE yp_assistant_sources; DROP TABLE yp_assistant_deliveries;
+        DROP TABLE yp_assistant_requests; DROP TABLE yp_assistant_bindings;
+        UPDATE yp_work_conversations SET working_directory = workspace_id;`);
+      if (variant === 'work-v9') {
+        old.prepare('INSERT INTO yp_schema_migrations(version, applied_at) VALUES (9, ?)').run(now);
+        old.exec('PRAGMA user_version = 9');
+      }
+    } else {
+      old.exec('ALTER TABLE yp_work_conversations DROP COLUMN working_directory;');
+    }
+    old.close();
+
+    for (let open = 0; open < 2; open++) {
+      const upgraded = openYuanpuMetadataDatabase(path);
+      assert.equal(upgraded.schemaVersion, YUANPU_METADATA_SCHEMA_VERSION);
+      assert.equal(upgraded.channels.isPaired('wecom', `connection-${variant}`, 'c'.repeat(64)), true);
+      upgraded.close();
+      const inspected = new DatabaseSync(path, { readOnly: true });
+      const assistantTables = inspected.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'
+        AND name IN ('yp_assistant_bindings', 'yp_assistant_requests', 'yp_assistant_deliveries', 'yp_assistant_sources')`).all();
+      assert.equal(assistantTables.length, 4, variant);
+      assert.equal(inspected.prepare('SELECT COUNT(*) AS count FROM yp_assistant_bindings').get().count,
+        variant === 'assistant-v8' ? 1 : 0);
+      assert.equal(inspected.prepare('SELECT COUNT(*) AS count FROM yp_work_conversations').get().count, 1);
+      assert.equal(inspected.prepare('SELECT working_directory FROM yp_work_conversations').get().working_directory,
+        '/original-workspace');
+      assert.equal(inspected.prepare('SELECT previous_pi_session_id FROM yp_desktop_assistant_link').get()
+        .previous_pi_session_id, 'old-desktop');
+      assert.equal(inspected.prepare('SELECT content FROM yp_assistant_mirror').get().content,
+        'old archived reply');
+      assert.equal(inspected.prepare('SELECT MAX(version) AS version FROM yp_schema_migrations').get().version,
+        YUANPU_METADATA_SCHEMA_VERSION);
+      inspected.close();
+    }
+  }
+});
+
+test('incompatible assistant table blocks repair atomically and leaves migration version unchanged', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-v8-conflict-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  openYuanpuMetadataDatabase(path).close();
+  const old = new DatabaseSync(path);
+  old.exec(`PRAGMA foreign_keys = OFF;
+    DELETE FROM yp_schema_migrations WHERE version >= 9;
+    PRAGMA user_version = 8;
+    DROP TABLE yp_assistant_sources; DROP TABLE yp_assistant_deliveries;
+    DROP TABLE yp_assistant_requests; DROP TABLE yp_assistant_bindings;
+    CREATE TABLE yp_assistant_requests (wrong_column TEXT) STRICT;`);
+  old.close();
+  assert.throws(() => openYuanpuMetadataDatabase(path), /incompatible|repair/i);
+  const inspected = new DatabaseSync(path, { readOnly: true });
+  assert.equal(inspected.prepare('SELECT MAX(version) AS version FROM yp_schema_migrations').get().version, 8);
+  assert.equal(inspected.prepare(`SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table'
+    AND name = 'yp_assistant_bindings'`).get().count, 0);
+  inspected.close();
+});
+
+test('a database marked current fails closed if an Assistant Host table is missing', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-current-missing-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  openYuanpuMetadataDatabase(path).close();
+  const damaged = new DatabaseSync(path);
+  damaged.exec('PRAGMA foreign_keys = OFF; DROP TABLE yp_assistant_sources;');
+  damaged.close();
+  assert.throws(() => openYuanpuMetadataDatabase(path), /Missing Assistant Host schema object/);
+});
+
+test('a historical Work directory shape without workspace_id is rejected without version advancement', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-work-shape-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  openYuanpuMetadataDatabase(path).close();
+  const malformed = new DatabaseSync(path);
+  malformed.exec(`PRAGMA foreign_keys = OFF;
+    DELETE FROM yp_schema_migrations WHERE version >= 9;
+    PRAGMA user_version = 8;
+    ALTER TABLE yp_work_conversations DROP COLUMN workspace_id;`);
+  malformed.close();
+  assert.throws(() => openYuanpuMetadataDatabase(path), /Incompatible Work workspace_id column/);
+  const inspected = new DatabaseSync(path, { readOnly: true });
+  assert.equal(inspected.prepare('SELECT MAX(version) AS version FROM yp_schema_migrations').get().version, 8);
+  inspected.close();
+});
+
 test('schema isolates subjects and requires durable approval/effect checkpoints', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-constraints-'));
   context.after(() => rm(root, { recursive: true, force: true }));

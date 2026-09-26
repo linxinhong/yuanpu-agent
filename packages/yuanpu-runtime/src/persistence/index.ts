@@ -14,12 +14,13 @@ export * from './assistant-link-store.js';
 export * from './assistant-host-store.js';
 export * from './work-conversation-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 8;
+export const YUANPU_METADATA_SCHEMA_VERSION = 10;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
   version: number;
   sql: string;
+  apply?: (database: DatabaseSync) => void;
 }
 
 const migrations: readonly Migration[] = [{
@@ -393,7 +394,86 @@ const migrations: readonly Migration[] = [{
       CHECK ((request_id IS NULL) <> (legacy_content_json IS NULL))
     ) STRICT;
   `,
+}, {
+  // Another development line used v8 for this Work directory column. Detect
+  // the shape instead of assuming a migration number uniquely identifies it.
+  version: 9,
+  sql: '',
+  apply: ensureWorkDirectorySchema,
+}, {
+  // Keep the repair above both historical v8 variants and a possible v9 Work
+  // database. No earlier migration number is rewritten or reset.
+  version: 10,
+  sql: '',
+  apply(database) {
+    ensureWorkDirectorySchema(database);
+    ensureAssistantHostSchema(database);
+  },
 }];
+
+function workDirectoryColumn(database: DatabaseSync): boolean {
+  const columns = database.prepare('PRAGMA table_info(yp_work_conversations)').all() as
+    Array<{ name: string; type: string; notnull: number }>;
+  if (!columns.some((column) => column.name === 'conversation_id')) {
+    throw new Error('Work conversation schema is missing; cannot repair metadata.');
+  }
+  const workspace = columns.find((column) => column.name === 'workspace_id');
+  if (!workspace || workspace.type !== 'TEXT' || workspace.notnull !== 1) {
+    throw new Error('Incompatible Work workspace_id column.');
+  }
+  const workingDirectory = columns.find((column) => column.name === 'working_directory');
+  if (!workingDirectory) return false;
+  if (workingDirectory.type !== 'TEXT' || workingDirectory.notnull !== 1) {
+    throw new Error('Incompatible Work working_directory column.');
+  }
+  return true;
+}
+
+function ensureWorkDirectorySchema(database: DatabaseSync): void {
+  if (workDirectoryColumn(database)) return;
+  database.exec(`ALTER TABLE yp_work_conversations ADD COLUMN working_directory TEXT NOT NULL DEFAULT '';
+    UPDATE yp_work_conversations SET working_directory = workspace_id;`);
+}
+
+const assistantHostSchemaSql = migrations.find((migration) => migration.version === 8)!.sql;
+const assistantHostObjects = [
+  'yp_assistant_bindings', 'yp_assistant_active_wecom', 'yp_assistant_requests',
+  'yp_assistant_requests_conversation', 'yp_assistant_deliveries', 'yp_assistant_sources',
+] as const;
+
+function normalizedSchema(sql: string): string {
+  return sql.replace(/\bIF NOT EXISTS\b/gi, '').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function assertCompatibleAssistantHostSchema(database: DatabaseSync, requireAll = false): void {
+  const expected = new DatabaseSync(':memory:');
+  try {
+    expected.exec(assistantHostSchemaSql);
+    const query = 'SELECT type, sql FROM sqlite_master WHERE name = ?';
+    for (const name of assistantHostObjects) {
+      const actual = database.prepare(query).get(name) as { type: string; sql: string } | undefined;
+      if (!actual) {
+        if (requireAll) throw new Error(`Missing Assistant Host schema object: ${name}.`);
+        continue;
+      }
+      const reference = expected.prepare(query).get(name) as { type: string; sql: string };
+      if (actual.type !== reference.type || normalizedSchema(actual.sql) !== normalizedSchema(reference.sql)) {
+        throw new Error(`Incompatible Assistant Host schema object: ${name}.`);
+      }
+    }
+  } finally {
+    expected.close();
+  }
+}
+
+function ensureAssistantHostSchema(database: DatabaseSync): void {
+  assertCompatibleAssistantHostSchema(database);
+  database.exec(assistantHostSchemaSql
+    .replace(/\bCREATE TABLE\b/g, 'CREATE TABLE IF NOT EXISTS')
+    .replace(/\bCREATE (UNIQUE )?INDEX\b/g, (_match, unique: string | undefined) =>
+      `CREATE ${unique ?? ''}INDEX IF NOT EXISTS`));
+  assertCompatibleAssistantHostSchema(database, true);
+}
 
 function applyMigrations(database: DatabaseSync): number {
   database.exec(`
@@ -410,21 +490,26 @@ function applyMigrations(database: DatabaseSync): number {
       `Yuanpu metadata schema ${row.version} is newer than supported ${YUANPU_METADATA_SCHEMA_VERSION}.`,
     );
   }
-  for (const migration of migrations) {
-    if (migration.version <= row.version) continue;
+  const pending = migrations.filter((migration) => migration.version > row.version);
+  if (pending.length) {
     database.exec('BEGIN IMMEDIATE');
     try {
-      database.exec(migration.sql);
-      database.prepare(
-        'INSERT INTO yp_schema_migrations(version, applied_at) VALUES (?, ?)',
-      ).run(migration.version, new Date().toISOString());
-      database.exec(`PRAGMA user_version = ${migration.version}`);
+      for (const migration of pending) {
+        if (migration.sql) database.exec(migration.sql);
+        migration.apply?.(database);
+        database.prepare(
+          'INSERT INTO yp_schema_migrations(version, applied_at) VALUES (?, ?)',
+        ).run(migration.version, new Date().toISOString());
+        database.exec(`PRAGMA user_version = ${migration.version}`);
+      }
       database.exec('COMMIT');
     } catch (error) {
       database.exec('ROLLBACK');
       throw error;
     }
   }
+  if (!workDirectoryColumn(database)) throw new Error('Missing Work working_directory column.');
+  assertCompatibleAssistantHostSchema(database, true);
   return YUANPU_METADATA_SCHEMA_VERSION;
 }
 
