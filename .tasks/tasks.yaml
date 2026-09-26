@@ -1600,7 +1600,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-045
     title: "实现用户理解与自动工作整理技能"
-    status: in_progress
+    status: done
     goal: "助理从有证据的工作评估和直接交流持续理解用户并维护工作台账。"
     scope:
       in: ["skills/understand-user、maintain-memory、organize-work、follow-up 四项专属技能", "USER/MEMORY 有预算摘要与按需专题生长", "work context/focus/commitments/projects 更新及协作反馈", "将评估待核验事项接到宿主委派接口，回收结果后重新审阅并提交修订"]
@@ -1629,10 +1629,17 @@ tasks:
       owner: "root-assistant-organize-045-10414"
       attempts: 0
       claimed_at: "2026-09-26T19:48:59.387Z"
-      completed_at: null
+      completed_at: "2026-09-26T20:50:18.302Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
       branch: "task/task-045-assistant-organize"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated main", status: "passed", summary: "TASK-045 product commit 42c6cdd merged into main e2dab0a; task memory evidence commit 503d8bb. Unrelated dirty .zcode plan was preserved and not staged."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0, macOS arm64, clean detached integrated main e2dab0a; runner .git/worktrees/assistant-final-check/coding-owner/1790455698319137000.log exited 0, changed_during_run=false."}
+        - {type: "command", check: "native build and smoke", status: "passed", summary: "Final TASK-045 product tree passed pnpm build:native && pnpm smoke:native, runner .git/worktrees/assistant-organize/coding-owner/1790455622612548000.log, changed_during_run=false."}
+        - {type: "test", check: "user understanding, Work organization and Worker behavior", status: "passed", summary: "Package tests covered repeated Work evidence, correction order, source deletion, temporary unavailability by claim, third-party quotations, thirteen active Work items, single commitment record, and follow-up retention; real Worker loopback tests covered understanding, review and delegation-result re-review. Runtime child cleanup tests passed after waiting for exit."}
+        - {type: "review", check: "independent read-only failure review", status: "passed", summary: "Independent reviewer checked attribution counterexamples, multi-claim temporary unavailability, >12 Work records, evidence revision permissions, and delegation wake/recovery; no remaining reproducible TASK-045 blocker reported. Natural-language attribution remains conservative heuristic."}
+        - {type: "document", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-045.md records implementation, evidence, source boundaries, recovery, and unverified limits."}
+        - {type: "boundary", check: "external business validation", status: "unverified", summary: "No real external model or complete candidate-to-professional-task-to-re-review production journey was exercised; TASK-047 owns independent business verification. Windows/Linux and cloud execution remain unverified; TASK-048 owns proactive delivery."}
       follow_up_candidates: []
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
@@ -1679,7 +1686,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
-    status: pending
+    status: ready
     goal: "证明工作材料能够形成可靠审阅、记忆和台账，并可通过专业子任务完成核验。"
     scope:
       in: ["后端端到端业务验证与独立隔离审查", "纠正/遗忘、评估准确归类、预算抢占和失败恢复", "助理与专业子任务的工具/存储/身份边界"]
