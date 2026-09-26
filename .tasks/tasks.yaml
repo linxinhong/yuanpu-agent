@@ -2011,7 +2011,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-057
     title: "实现工作文件夹与会话内容搜索"
-    status: ready
+    status: in_progress
     goal: "用户按文件夹名、会话名、标签或已保存的消息正文找到会话，结果带可定位的树路径与消息位置。"
     scope:
       in: ["Work 管理搜索契约、Runtime 查询和分页/边界限制", "Pi JSONL 可见用户/助理消息的检索或可重建本地索引", "归档筛选、祖先路径、摘要和结果定位标识"]
@@ -2033,15 +2033,14 @@ tasks:
     investigation_hints: ["读取入口 packages/yuanpu-runtime/src/pi/index.ts 的 readYuanpuChatTranscript 与 apps/runtime/src/index.ts 的 desktopTranscript；Work 元数据入口 work-conversation-store.ts", "检索 DTO 放 packages/yuanpu-protocol，DesktopBridge 通过 apps/desktop 转发；用临时 Pi JSONL 和真实 store 测试重建/隔离，先 focused 后 pnpm check", "与安全搬迁工作会话及文件夹的磁盘目录（TASK-056）共享稳定 ID/最新路径契约，消息索引不靠一次性的旧绝对 cwd 键定位"]
     escalation_conditions: ["若直接扫描 JSONL 无法满足可交互延迟，再引入可重建索引并注明磁盘占用与失效策略", "若现有摘要 API 不提供安全可见文本，先固定可索引字段，不扩大到原始工具/推理内容"]
     result:
-      owner: null
+      owner: "conversation-search-sol-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T18:53:11.475Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-search-sol"
+      branch: "task/task-057-work-search"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-058
     title: "工作会话文件树后端阶段验证"
     status: pending
