@@ -27,16 +27,25 @@ export function createProfessionalTaskHost(sources: RuntimeAssistantSourceHost,
         return [ref, expected] as const;
       })));
       const allowed = new Set(brief.authorizedCapabilities);
+      const assertCurrentGrant = async (): Promise<void> => {
+        if (approvedGrantId && (!verifyGrant || !await verifyGrant(brief, approvedGrantId))) {
+          throw new Error('Professional task grant is no longer active.');
+        }
+      };
       return {
         async readSource(ref) {
           const version = versions.get(ref);
           if (!version) throw new Error('Source reference is outside this task grant.');
+          await assertCurrentGrant();
           return sources.readDelegatedSource(ref, version);
         },
         async executeCapability(input, signal) {
           if (!allowed.has(input.name) || !capabilities || !approvedGrantId) {
             throw new Error('Professional execution requires a trusted user grant.');
           }
+          signal?.throwIfAborted();
+          await assertCurrentGrant();
+          signal?.throwIfAborted();
           try {
             const output = await capabilities.execute(input, {
               sessionId: brief.assistantSessionId,

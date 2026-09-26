@@ -165,6 +165,39 @@ test('restart never replays an unsettled approved external effect', async (t) =>
   await service.close();
 });
 
+test('cancellation during a signed external effect stays unknown and never replays', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-delegation-effect-cancel-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const input = { ...brief('task_effect_cancel'), readOnly: false,
+    authorizedCapabilities: ['fixture.effect'] };
+  await writeFile(join(root, 'task_effect_cancel.json'), JSON.stringify({ ...input,
+    status: 'waiting_approval', approvedGrantId: 'task-grant',
+    result: { status: 'waiting_approval', approvalRequestId: 'effect-grant' },
+    followUps: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
+  let queries = 0;
+  const adapter = { async run() { throw new Error('replayed'); },
+    async query() { queries++; return { status: 'completed', resultRef: 'stale' }; },
+    async cancel() {}, async close() {} };
+  const service = new AssistantDelegationService(root, adapter);
+  await service.open();
+  await service.beginEffectApproval('task_effect_cancel', 'effect-grant');
+  assert.equal((await service.pendingApprovals()).length, 0);
+  await assert.rejects(service.beginEffectApproval('task_effect_cancel', 'effect-grant'), /no longer awaiting/);
+  const cancelled = await service.cancel('task_effect_cancel', 'assistant_session');
+  assert.equal(cancelled.status, 'unknown');
+  assert.equal(cancelled.result.errorCode, 'cancelled_during_external_effect');
+  assert.equal((await service.settleApproval('task_effect_cancel', 'effect-grant',
+    { status: 'completed', resultRef: 'effect-result' })).status, 'unknown');
+  assert.equal((await service.status('task_effect_cancel')).status, 'unknown');
+  assert.equal(queries, 0);
+  await service.close();
+  const restarted = new AssistantDelegationService(root, adapter);
+  await restarted.open();
+  assert.equal((await restarted.status('task_effect_cancel')).status, 'unknown');
+  assert.equal(queries, 0);
+  await restarted.close();
+});
+
 test('delegation ledger refuses a symlinked root before writing', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'yp-delegation-symlink-'));
   t.after(() => rm(root, { recursive: true, force: true }));

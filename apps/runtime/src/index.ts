@@ -1541,6 +1541,7 @@ async function serve(): Promise<void> {
         const delegatedEffect = execution?.workspaceId.startsWith('assistant-delegation:')
           ? execution.workspaceId.slice('assistant-delegation:'.length) : undefined;
         let approvalSignal: AbortSignal | undefined;
+        let delegatedEffectStarted = false;
         try {
           if (!execution) throw new Error('Approved capability execution is no longer available.');
           if (delegatedEffect) {
@@ -1555,6 +1556,10 @@ async function serve(): Promise<void> {
             approvalSignal = await agentService.beginApproval(execution.runId, body.requestId, {
               executeCapability: body.decision === 'approved',
             });
+          }
+          if (delegatedEffect && body.decision === 'approved') {
+            await delegations.beginEffectApproval(delegatedEffect, body.requestId);
+            delegatedEffectStarted = true;
           }
           await approvals.decide(body.requestId, body.decision);
           if (body.decision === 'denied') {
@@ -1604,16 +1609,22 @@ async function serve(): Promise<void> {
           }
           if (delegatedEffect) {
             const resultRef = `capability-result:${delegatedEffect}:${randomUUID()}`;
-            await delegations.settleApproval(delegatedEffect, body.requestId,
+            const settled = await delegations.settleApproval(delegatedEffect, body.requestId,
               result.isError ? { status: 'failed', errorCode: 'capability_error', summary: message }
                 : { status: 'completed', summary: message, resultRef, evidenceRefs: [resultRef] });
+            if (settled.status === 'unknown') {
+              response.statusCode = 409;
+              response.end(JSON.stringify({ requestId: body.requestId, status: 'result_unknown',
+                message: '专业任务在外部操作期间中断；请查询原任务状态。' }));
+              return;
+            }
           }
           response.end(JSON.stringify({ requestId: body.requestId, status: 'completed', message }));
         } catch (error) {
           if (delegatedEffect) {
             const failure = (error as { failure?: { error?: string } }).failure;
             await delegations.settleApproval(delegatedEffect, body.requestId,
-              { status: failure?.error === 'result_unknown' || failure?.error === 'timeout'
+              { status: delegatedEffectStarted || failure?.error === 'result_unknown' || failure?.error === 'timeout'
                 ? 'unknown' : 'failed', errorCode: failure?.error ?? 'capability_error' })
               .catch(() => undefined);
           }

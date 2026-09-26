@@ -204,7 +204,7 @@ export class AssistantDelegationService {
   async status(taskId: string): Promise<DelegationRecord | undefined> {
     return this.exclusive(taskId, async () => {
       const record = await this.read(taskId);
-      if (!record || record.status !== 'unknown') return record;
+      if (!record || record.status !== 'unknown' || record.effectInFlightApprovalId) return record;
       const resolved = await this.adapter.query(taskId);
       if (!resolved || resolved.status === 'unknown') return record;
       const updated = { ...record, status: resolved.status, result: resolved, updatedAt: new Date().toISOString() };
@@ -225,6 +225,7 @@ export class AssistantDelegationService {
         status: approvalRequestId ? 'waiting_approval' : 'accepted',
         result: approvalRequestId ? { status: 'waiting_approval', approvalRequestId } : undefined,
         approvedGrantId: undefined,
+        effectInFlightApprovalId: undefined,
         followUps: [...current.followUps, text], updatedAt: new Date().toISOString() };
       await this.save(next);
       if (!approvalRequestId) this.dispatch(next, text);
@@ -240,7 +241,8 @@ export class AssistantDelegationService {
       const id = name.slice(0, -5);
       if (!validId(id)) continue;
       const record = await this.read(id);
-      if (record?.status === 'waiting_approval' && record.result?.approvalRequestId
+      if (record?.status === 'waiting_approval' && !record.effectInFlightApprovalId
+        && record.result?.approvalRequestId
         && !record.approvedGrantId) {
         if (Date.parse(record.deadlineAt) <= Date.now()) {
           await this.settleApproval(id, record.result.approvalRequestId,
@@ -261,7 +263,7 @@ export class AssistantDelegationService {
       const record = await this.read(id);
       const approvalRequestId = record?.result?.approvalRequestId;
       if (!record?.approvedGrantId || record.status !== 'waiting_approval' || !approvalRequestId) continue;
-      if (statusOf(approvalRequestId) === 'pending') continue;
+      if (!record.effectInFlightApprovalId && statusOf(approvalRequestId) === 'pending') continue;
       await this.settleApproval(id, approvalRequestId,
         { status: 'unknown', errorCode: 'external_effect_unresolved_after_restart' });
     }
@@ -312,6 +314,14 @@ export class AssistantDelegationService {
       const record = await this.read(taskId);
       if (!record || record.assistantSessionId !== assistantSessionId) throw new Error('Unknown delegation in this Assistant Session.');
       if (['accepted', 'running', 'waiting_approval', 'unknown'].includes(record.status)) {
+        if (record.effectInFlightApprovalId) {
+          const unknown: DelegationRecord = { ...record, status: 'unknown',
+            result: { status: 'unknown', errorCode: 'cancelled_during_external_effect' },
+            updatedAt: new Date().toISOString() };
+          await this.save(unknown);
+          this.onTerminal?.(unknown);
+          return unknown;
+        }
         this.active.get(taskId)?.controller.abort();
         await this.adapter.cancel(taskId);
         const cancelled = { ...record, status: 'cancelled' as const, updatedAt: new Date().toISOString() };
@@ -323,10 +333,27 @@ export class AssistantDelegationService {
   }
 
   /** Called only by the trusted, signed host approval path after it executed or rejected the original request. */
+  async beginEffectApproval(taskId: string, approvalRequestId: string): Promise<DelegationRecord> {
+    return this.exclusive(taskId, async () => {
+      const record = await this.read(taskId);
+      if (!record || record.status !== 'waiting_approval' || !record.approvedGrantId
+        || record.result?.approvalRequestId !== approvalRequestId || record.effectInFlightApprovalId
+        || Date.parse(record.deadlineAt) <= Date.now()) {
+        throw new Error('Delegated effect is no longer awaiting this approval.');
+      }
+      const started: DelegationRecord = { ...record, effectInFlightApprovalId: approvalRequestId,
+        updatedAt: new Date().toISOString() };
+      await this.save(started);
+      return started;
+    });
+  }
+
+  /** Called only by the trusted, signed host approval path after it executed or rejected the original request. */
   async settleApproval(taskId: string, approvalRequestId: string,
     outcome: DelegationResult): Promise<DelegationRecord> {
     return this.exclusive(taskId, async () => {
       const record = await this.read(taskId);
+      if (record?.status === 'unknown' && record.effectInFlightApprovalId === approvalRequestId) return record;
       if (!record || record.status !== 'waiting_approval'
         || record.result?.approvalRequestId !== approvalRequestId) {
         throw new Error('Approval does not match a waiting delegation.');
@@ -336,6 +363,7 @@ export class AssistantDelegationService {
         throw new Error('Invalid settled delegation outcome.');
       }
       const next: DelegationRecord = { ...record, status: outcome.status, result: outcome,
+        effectInFlightApprovalId: outcome.status === 'unknown' ? record.effectInFlightApprovalId : undefined,
         updatedAt: new Date().toISOString() };
       await this.save(next);
       this.onTerminal?.(next);

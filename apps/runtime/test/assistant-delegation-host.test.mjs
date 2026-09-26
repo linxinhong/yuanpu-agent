@@ -35,6 +35,7 @@ test('production task grant scopes every source read and refuses model-proposed 
 
 test('task-level approval binds capabilities but concrete effects still use MCP approval', async () => {
   const calls = [];
+  let grantActive = true;
   const sources = { async delegatedSourceVersion() { return 'v1'; },
     async readDelegatedSource() { return 'source'; } };
   const brief = { taskId: 'task_capability', assistantSessionId: 'session_one',
@@ -48,7 +49,7 @@ test('task-level approval binds capabilities but concrete effects still use MCP 
         approvalRequestId: 'effect_one' } };
       return { content: [{ type: 'text', text: 'inspected' }] };
     },
-  }, async (candidate, grant) => candidate.taskId === brief.taskId && grant === 'task_grant');
+  }, async (candidate, grant) => grantActive && candidate.taskId === brief.taskId && grant === 'task_grant');
   await assert.rejects(host.authorizeTask(brief), /trusted user grant/);
   await assert.rejects(host.authorizeTask(brief, 'other'), /trusted user grant/);
   const access = await host.authorizeTask(brief, 'task_grant');
@@ -62,4 +63,12 @@ test('task-level approval binds capabilities but concrete effects still use MCP 
   assert.match(completed.resultRef, /^capability-result:task_capability:/);
   assert.deepEqual(calls, [['fixture.inspect', 'session_one', 'assistant-delegation:task_capability'],
     ['fixture.inspect', 'session_one', 'assistant-delegation:task_capability']]);
+  grantActive = false;
+  await assert.rejects(access.executeCapability({ name: 'fixture.inspect', arguments: {} }), /no longer active/);
+  assert.equal(calls.length, 2, 'revoked task grant cannot reach MCP');
+  const aborted = new AbortController();
+  aborted.abort();
+  await assert.rejects(access.executeCapability({ name: 'fixture.inspect', arguments: {} }, aborted.signal),
+    /aborted/i);
+  assert.equal(calls.length, 2);
 });

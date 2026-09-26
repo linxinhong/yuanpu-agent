@@ -164,6 +164,8 @@ export interface AssistantDelegationRecord extends AssistantDelegationBrief {
   result?: AssistantDelegationResult;
   /** Host-issued task grant; only trusted approval code can set it. */
   approvedGrantId?: string;
+  /** Durable checkpoint before a signed, concrete external effect is consumed. */
+  effectInFlightApprovalId?: string;
   createdAt: string;
   updatedAt: string;
 }
