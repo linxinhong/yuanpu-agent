@@ -1840,3 +1840,40 @@ tasks:
       branch: "task/task-052-file-preview"
       evidence: []
       follow_up_candidates: []
+
+  - id: TASK-053
+    title: "设置全局字体配置"
+    status: in_progress
+    goal: "用户在设置的通用区配置界面字体大小、正文字体大小与界面字型，选择即时生效、三套主题通用并跨启动保留。"
+    scope:
+      in: ["shared/font-preference 偏好模块：normalize 校验、localStorage 读写、documentElement 变量注入（主题同款模式，无 IPC）", "themes/tokens.css 新增字体 token；muse-theme/styles/management/assistant-home 字号 px→rem 转换与正文 token 化", "设置通用区新增界面字体大小、正文字体大小、界面字型三个设置块（复用 theme-setting/theme-options 控件样式）", "main.tsx 启动时应用字体偏好", "font-preference 单测；theme-contract 增加禁止硬编码 px font-size 的防回归断言"]
+      out: ["代码字体（mono）单独配置", "连续 slider、多窗口差异化、界面整体缩放", "runtime config、protocol、DesktopBridge 或 IPC 链路改动", "修改 Pi 上游镜像；覆盖已有未提交改动"]
+    constraints: ["持久化仅用渲染端 localStorage 键 yuanpu:font:v1；字体 token 仅声明在 themes/tokens.css，dark.css/mindlink.css 不修改", "标准档（界面 100%、正文 14px、系统字型）渲染结果与改造前一致；档位只缩放文字不缩放布局尺寸", "界面字号与正文字号相互独立：界面档位不得缩放聊天正文，正文档位不得影响界面文字", "完成需集成并在 main 验证；本轮不自动提交推送"]
+    forbidden: ["把界面整体 zoom/缩放冒充界面字体大小", "在 muse-theme.css 之外新声明字体 token 或引入第二套字体持久化", "将构建成功当作视觉验收通过"]
+    acceptance:
+      - type: assertion
+        expect: "设置通用区可分别选择界面字体大小（90/100/110/125% 四档）、正文字体大小（13/14/15/16/17px 五档）与字型（系统默认/苹方·思源黑体/微软雅黑/宋体/自定义），选择即时生效，重启应用后保留"
+      - type: assertion
+        expect: "界面档位只改变界面文字大小、聊天正文不变；正文档位只改变消息正文、输入框与 markdown 衍生字号、界面不变；两档在浅色/深色/MindLink 三主题下均生效"
+      - type: assertion
+        expect: "font-preference 单测覆盖非法/越界/缺失字段回退默认；theme-contract 断言四个 CSS 文件无硬编码 px font-size 且字体 token 已在 tokens.css 声明"
+      - type: assertion
+        expect: "标准档下聊天、设置、助理首页、管理页与改造前渲染一致；特大界面档 + 超大正文 + 自定义字型组合无明显溢出或文字挤压"
+      - type: command
+        run: "pnpm --filter @yuanpu-agent/app test"
+      - type: command
+        run: "pnpm check"
+    dependencies: []
+    risk_level: "L2"
+    recommended_model: "glm-5.3"
+    investigation_hints: ["设置样板 apps/app/src/modules/settings.tsx 的 selectTheme（先 apply 再 setState）与 .theme-setting/.theme-options 控件；偏好样板 shared/theme-preference.ts；启动注入点 main.tsx", "字号硬编码分布：muse-theme.css 131、styles.css 65、management.css 27、assistant-home.css 15；正文规则在 muse-theme.css 约 210-244（.message-body p/.message-markdown/h2/h3/pre code/table）与 composer textarea；assistant-home.css L60 的 13px 变体", "rem 基准 16px：Npx→N/16rem；正文衍生 calc(var(--yp-font-size-content) / 14 * N)；成对 px 行高改无量纲比值；theme-contract.test.mjs 的 var(--yp-*)→tokens.css 守护对新 token 自动生效", "测试范式：node:test + tsx register 动态导入 TS（apps/app/test/panel-resize.test.mjs）；normalize 保持纯函数以便 node 环境测试", "主工作区存在未提交增量且与 settings.tsx、main.tsx、muse-theme.css、tokens.css、theme-contract.test.mjs、assistant-home.css 有交集：worktree 基于 main 提交态实施，集成前先核对增量归属并协调合并顺序"]
+    escalation_conditions: ["如 rem 转换后标准档无法保持渲染一致（行高、截断、滚动行为回归），记录差异证据并回到设计协调，不静默接受", "如自定义字型需要第二持久化或协议改动才能满足，停下报告，不私增链路"]
+    result:
+      owner: "zcode-fontconfig-20260926-87617"
+      attempts: 0
+      claimed_at: "2026-09-26T15:34:51.871Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/font-config"
+      branch: "task/task-053-font-config"
+      evidence: []
+      follow_up_candidates: []
