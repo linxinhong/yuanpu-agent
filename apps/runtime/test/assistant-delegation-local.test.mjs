@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import test from 'node:test';
 
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 const require = createRequire(import.meta.url);
-const { createProfessionalSession, createProfessionalTools } = require('../dist/index.cjs');
+const { createProfessionalSession, createProfessionalTools, LocalProfessionalAdapter } = require('../dist/index.cjs');
 
 const skill = (name) => `---\nname: ${name}\ndescription: Fixture professional skill.\n---\n\n# ${name}\nUse only authorized references.\n`;
 
@@ -41,6 +42,7 @@ test('professional task loads only its selected skill and two scoped tools', asy
   let reads = 0;
   let executions = 0;
   const host = {
+    async authorizeTask() {},
     async readSource() { reads++; return 'bounded source'; },
     async executeCapability() { executions++; return { status: 'completed', resultRef: 'result:one' }; },
   };
@@ -73,4 +75,70 @@ test('professional task loads only its selected skill and two scoped tools', asy
   await symlink(other, join(skillsRoot, 'linked'));
   await assert.rejects(createProfessionalSession({ root: join(root, 'delegations'), assistantHome,
     skillsRoot, scope: { ...scope, taskId: 'task_03', skillName: 'linked' }, host, model, modelRuntime }), /regular skill/);
+});
+
+test('local Pi adapter follows up in one isolated task session without leaking Assistant Home', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-professional-turn-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const requests = [];
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    requests.push(body);
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 0,
+      model: 'fixture-model', choices: [{ index: 0,
+        delta: { role: 'assistant', content: `evidence summary ${requests.length}` }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 0,
+      model: 'fixture-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
+  const appPath = join(root, 'app');
+  const skillsRoot = join(root, 'skills');
+  const assistantHome = join(root, 'assistant');
+  await Promise.all([mkdir(appPath), mkdir(join(skillsRoot, 'reviewer'), { recursive: true }), mkdir(assistantHome)]);
+  await writeFile(join(skillsRoot, 'reviewer', 'SKILL.md'), skill('reviewer'));
+  await writeFile(join(assistantHome, 'MEMORY.md'), 'PRIVATE_ASSISTANT_MEMORY_MARKER');
+  await writeFile(join(root, 'AGENTS.md'), 'PRIVATE_PROJECT_INSTRUCTIONS_MARKER');
+  await writeFile(join(appPath, 'models.json'), JSON.stringify({ providers: { fixture: {
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions',
+    models: [{ id: 'fixture-model', name: 'Fixture', reasoning: false, input: ['text'],
+      contextWindow: 128000, maxTokens: 1024 }],
+  } } }));
+  await writeFile(join(appPath, 'auth.json'), JSON.stringify({ fixture: { type: 'api_key', key: 'fixture-only' } }));
+  const modelRuntime = await ModelRuntime.create({ authPath: join(appPath, 'auth.json'),
+    modelsPath: join(appPath, 'models.json') });
+  const model = modelRuntime.getModel('fixture', 'fixture-model');
+  assert.ok(model);
+  const authorizations = [];
+  const adapter = new LocalProfessionalAdapter({ root: join(root, 'delegations'), assistantHome,
+    skillsRoot, model, modelRuntime, host: {
+      async authorizeTask(brief) { authorizations.push(brief.taskId); if (!brief.readOnly) throw new Error('No write grant.'); },
+      async readSource() { return 'bounded source'; },
+      async executeCapability() { throw new Error('No capability grant.'); },
+    } });
+  t.after(() => adapter.close());
+  const brief = { taskId: 'task_one', assistantSessionId: 'assistant_one', skillName: 'reviewer',
+    goal: 'Check only the supplied source.', completionCriteria: ['Return a finding.'],
+    contextRefs: ['source:one'], authorizedCapabilities: [], readOnly: true,
+    deadlineAt: new Date(Date.now() + 60_000).toISOString() };
+  await assert.rejects(adapter.run({ ...brief, taskId: 'task_denied', readOnly: false }, undefined,
+    new AbortController().signal), /No write grant/);
+  assert.equal(requests.length, 0);
+  const first = await adapter.run(brief, undefined, new AbortController().signal);
+  assert.equal(first.status, 'completed');
+  assert.match(first.resultRef, /^delegation-result:task_one:/);
+  assert.equal((await adapter.query(brief.taskId)).resultRef, first.resultRef);
+  const second = await adapter.run(brief, 'Check the finding again.', new AbortController().signal);
+  assert.equal(second.status, 'completed');
+  assert.equal(requests.length, 2);
+  assert.equal(authorizations.length, 3);
+  assert.match(requests[0], /Use only authorized references/);
+  assert.match(requests[1], /Check the finding again/);
+  for (const body of requests) {
+    assert.doesNotMatch(body, /PRIVATE_ASSISTANT_MEMORY_MARKER|PRIVATE_PROJECT_INSTRUCTIONS_MARKER/);
+    assert.doesNotMatch(body, /\"name\":\"bash\"|\"name\":\"read\"|\"name\":\"write\"|\"name\":\"edit\"/);
+  }
 });

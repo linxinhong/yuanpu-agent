@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
@@ -96,6 +97,13 @@ test('approval waits and cannot be converted to a follow-up or repeated executio
   await assert.rejects(service.followUp('task_approval', 'assistant_session', 'repeat'), /not ready/);
   assert.equal((await service.start(approvalBrief)).status, 'waiting_approval');
   assert.equal(runs, 1);
+  await assert.rejects(service.settleApproval('task_approval', 'wrong_approval',
+    { status: 'completed', resultRef: 'result:one' }), /does not match/);
+  const settled = await service.settleApproval('task_approval', 'approval_one',
+    { status: 'completed', resultRef: 'result:approved', evidenceRefs: ['source:one'] });
+  assert.equal(settled.status, 'completed');
+  assert.equal(settled.taskId, approvalBrief.taskId);
+  assert.equal(runs, 1);
   await service.close();
 });
 
@@ -110,4 +118,50 @@ test('delegation ledger refuses a symlinked root before writing', async (t) => {
     async cancel() {}, async close() {},
   });
   await assert.rejects(service.open(), /Symlinked delegation path/);
+});
+
+test('deadline leaves an uncertain task under its original ID and requests cancellation', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-delegation-timeout-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let runs = 0;
+  let cancels = 0;
+  const service = new AssistantDelegationService(root, {
+    async run() { runs++; return new Promise(() => undefined); },
+    async query() { return undefined; },
+    async cancel() { cancels++; },
+    async close() {},
+  });
+  await service.open();
+  const input = { ...brief('task_timeout'), deadlineAt: new Date(Date.now() + 300).toISOString() };
+  await service.start(input);
+  await eventually(async () => (await service.status(input.taskId))?.status === 'unknown');
+  assert.equal(runs, 1);
+  assert.equal(cancels, 1);
+  assert.equal((await service.start(input)).taskId, input.taskId);
+  assert.equal(runs, 1);
+  await service.close();
+});
+
+test('service shutdown aborts an adapter-owned child process', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-delegation-child-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let child;
+  const stopChild = () => { if (child && child.exitCode === null) child.kill('SIGTERM'); };
+  const service = new AssistantDelegationService(root, {
+    async run(_brief, _followUp, signal) {
+      child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+      signal.addEventListener('abort', stopChild, { once: true });
+      return new Promise((resolve) => child.once('exit', () => resolve({ status: 'unknown' })));
+    },
+    async query() { return undefined; },
+    async cancel() { stopChild(); },
+    async close() { stopChild(); },
+  });
+  await service.open();
+  await service.start(brief('task_child'));
+  await eventually(() => child?.pid);
+  const pid = child.pid;
+  await service.close();
+  await eventually(() => child.exitCode !== null || child.signalCode !== null);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });

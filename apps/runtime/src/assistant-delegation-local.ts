@@ -18,6 +18,8 @@ export interface ProfessionalTaskScope {
 }
 
 export interface ProfessionalTaskHost {
+  /** Revalidate the whole model-proposed scope against trusted user grants. */
+  authorizeTask(brief: DelegationBrief): Promise<void>;
   readSource(ref: string): Promise<string>;
   executeCapability(input: { name: string; arguments: Record<string, unknown>; approvalRequestId?: string },
     signal?: AbortSignal): Promise<{ status: 'completed' | 'needs_approval' | 'unknown' | 'failed';
@@ -181,7 +183,11 @@ export class LocalProfessionalAdapter implements DelegationExecutionAdapter {
 
   async query(taskId: string): Promise<DelegationResult | undefined> {
     try {
-      const state = JSON.parse(await readFile(this.stateFile(taskId), 'utf8')) as DelegationResult | { status: 'running' };
+      const file = this.stateFile(taskId);
+      await assertNoSymlinkAncestors(file);
+      const info = await lstat(file);
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe professional result record.');
+      const state = JSON.parse(await readFile(file, 'utf8')) as DelegationResult | { status: 'running' };
       return state.status === 'running' ? { status: 'unknown' } : state;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
@@ -192,6 +198,7 @@ export class LocalProfessionalAdapter implements DelegationExecutionAdapter {
   async run(brief: DelegationBrief, followUp: string | undefined, signal: AbortSignal): Promise<DelegationResult> {
     if (this.active.has(brief.taskId)) throw new Error('Professional task is already running.');
     signal.throwIfAborted();
+    await this.options.host.authorizeTask(brief);
     const scope: ProfessionalTaskScope = {
       taskId: brief.taskId, skillName: brief.skillName,
       contextRefs: brief.contextRefs, authorizedCapabilities: brief.authorizedCapabilities,

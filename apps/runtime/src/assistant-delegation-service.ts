@@ -25,7 +25,8 @@ function validateBrief(brief: DelegationBrief): void {
     || brief.completionCriteria.some((item) => !item.trim() || item.length > 2_000)
     || brief.contextRefs.length > 20 || brief.contextRefs.some((item) => !item || item.length > 300)
     || brief.authorizedCapabilities.length > 10
-    || !Number.isFinite(Date.parse(brief.deadlineAt)) || Date.parse(brief.deadlineAt) <= Date.now()) {
+    || !Number.isFinite(Date.parse(brief.deadlineAt)) || Date.parse(brief.deadlineAt) <= Date.now()
+    || Date.parse(brief.deadlineAt) > Date.now() + 1_800_000) {
     throw new Error('Invalid bounded delegation brief.');
   }
 }
@@ -138,13 +139,29 @@ export class AssistantDelegationService {
 
   private dispatch(record: DelegationRecord, followUp?: string): void {
     const controller = new AbortController();
+    const deadlineAt = followUp ? Date.now() + 300_000 : Date.parse(record.deadlineAt);
+    const timeout = setTimeout(() => controller.abort(new Error('Delegation deadline exceeded.')),
+      Math.max(1, deadlineAt - Date.now()));
+    timeout.unref();
+    let abortListener: (() => void) | undefined;
     const done = (async () => {
       try {
         await this.exclusive(record.taskId, async () => {
           record = { ...record, status: 'running', updatedAt: new Date().toISOString() };
           await this.save(record);
         });
-        const result = await this.adapter.run(record, followUp, controller.signal);
+        const result = await Promise.race([
+          this.adapter.run(record, followUp, controller.signal),
+          new Promise<DelegationResult>((resolveAbort) => {
+            const interrupted = () => {
+              void this.adapter.cancel(record.taskId).catch(() => undefined);
+              resolveAbort({ status: 'unknown', errorCode: 'interrupted_or_timed_out' });
+            };
+            abortListener = interrupted;
+            if (controller.signal.aborted) interrupted();
+            else controller.signal.addEventListener('abort', interrupted, { once: true });
+          }),
+        ]);
         await this.exclusive(record.taskId, async () => {
           const latest = await this.read(record.taskId);
           if (!latest || latest.status !== 'running') return;
@@ -163,7 +180,11 @@ export class AssistantDelegationService {
           await this.save(record);
           this.onTerminal?.(record);
         });
-      } finally { this.active.delete(record.taskId); }
+      } finally {
+        clearTimeout(timeout);
+        if (abortListener) controller.signal.removeEventListener('abort', abortListener);
+        this.active.delete(record.taskId);
+      }
     })();
     this.active.set(record.taskId, { controller, done });
   }
@@ -207,6 +228,27 @@ export class AssistantDelegationService {
         return cancelled;
       }
       return record;
+    });
+  }
+
+  /** Called only by the trusted, signed host approval path after it executed or rejected the original request. */
+  async settleApproval(taskId: string, approvalRequestId: string,
+    outcome: DelegationResult): Promise<DelegationRecord> {
+    return this.exclusive(taskId, async () => {
+      const record = await this.read(taskId);
+      if (!record || record.status !== 'waiting_approval'
+        || record.result?.approvalRequestId !== approvalRequestId) {
+        throw new Error('Approval does not match a waiting delegation.');
+      }
+      if (!['completed', 'failed', 'unknown'].includes(outcome.status)
+        || outcome.status === 'completed' && !outcome.resultRef) {
+        throw new Error('Invalid settled delegation outcome.');
+      }
+      const next: DelegationRecord = { ...record, status: outcome.status, result: outcome,
+        updatedAt: new Date().toISOString() };
+      await this.save(next);
+      this.onTerminal?.(next);
+      return next;
     });
   }
 
