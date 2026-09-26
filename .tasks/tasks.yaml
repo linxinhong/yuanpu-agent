@@ -1557,7 +1557,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-044
     title: "实现助理对工作过程的评估"
-    status: pending
+    status: in_progress
     goal: "助理自动审阅工作目标、过程、结论及产物，发现遗漏并生成有证据的后续动作。"
     scope:
       in: ["工作审阅服务与 skills/review-work/SKILL.md，消费助理自动化触发", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
@@ -1583,15 +1583,14 @@ tasks:
     investigation_hints: ["packages/evals/README.md、src/harness.ts 仅作离线评分/证据方法参考，不修改上游或依赖其生产 runner", "新增 yuanpu-assistant review 模块与技能；输入来自已验证来源仓库，专业核验接口可先返回待委派状态", "临时文件与 loopback 模型验证真实写入；费用上限/取消/新版本重试/误报完成是最近行为测试，再 pnpm check"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-assistant-review-044"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T18:57:54.778Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-work-review"
+      branch: "task/task-044-assistant-work-review"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-045
     title: "实现用户理解与自动工作整理技能"
     status: pending
@@ -1631,7 +1630,7 @@ tasks:
 
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
-    status: in_progress
+    status: done
     goal: "助理通过独立普通任务对话调用专业技能，持续跟进并回收可验证结果。"
     scope:
       in: ["skills/delegate-and-verify/SKILL.md 与宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
@@ -1662,10 +1661,15 @@ tasks:
       owner: "assistant-contract-review-20260927-046-10414"
       attempts: 0
       claimed_at: "2026-09-26T16:28:00.683Z"
-      completed_at: null
+      completed_at: "2026-09-26T18:57:34.243Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
       branch: "task/task-046-assistant-delegation"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "main integration", status: "passed", summary: "TASK-046 branch ef75cdf integrated at main d5e6088. Conflict resolution preserved v14 WorkEvidence Host arguments and delegation service wiring. Assistant Worker shutdown availability race fixed at 4a1d72c."}
+        - {type: "command", check: "clean integrated pnpm check and native smoke", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0 on macOS arm64 at clean detached main 8b8bfb5. pnpm check log .git/worktrees/assistant-final-check/coding-owner/1790448641635590000.log and build:native plus smoke:native log 1790448987951885000.log exited 0, changed_during_run=false."}
+        - {type: "test", check: "delegation and UI behavior", status: "passed", summary: "Temporary Home plus loopback model verifies signed task grant before professional execution, persistent original task ID, Worker completion wake, source reference linking, pre-model foreground preemption recovery, post-dispatch unknown and archive/SQLite failure recovery. Isolated Electron approval click probe passed; no real WeCom message sent for this task."}
+        - {type: "review", check: "independent recovery review", status: "passed", summary: "Read-only reviewer confirmed prior preemption and cross-store commit blockers fixed; model-started unknown is not blindly replayed and metered proposal is persisted before idempotent local evidence linking. Real archive-write then injected failure and SQLite reopen regression added."}
+        - {type: "boundary", check: "business semantics and platform", status: "unverified", summary: "evidence_linked confirms references belong to original task, not semantic business completion. Nonzero-rate model without usage fails conservatively; Windows/Linux and a real professional external-effect account were not exercised."}
       follow_up_candidates: []
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
@@ -2011,7 +2015,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-057
     title: "实现工作文件夹与会话内容搜索"
-    status: ready
+    status: in_progress
     goal: "用户按文件夹名、会话名、标签或已保存的消息正文找到会话，结果带可定位的树路径与消息位置。"
     scope:
       in: ["Work 管理搜索契约、Runtime 查询和分页/边界限制", "Pi JSONL 可见用户/助理消息的检索或可重建本地索引", "归档筛选、祖先路径、摘要和结果定位标识"]
@@ -2033,15 +2037,14 @@ tasks:
     investigation_hints: ["读取入口 packages/yuanpu-runtime/src/pi/index.ts 的 readYuanpuChatTranscript 与 apps/runtime/src/index.ts 的 desktopTranscript；Work 元数据入口 work-conversation-store.ts", "检索 DTO 放 packages/yuanpu-protocol，DesktopBridge 通过 apps/desktop 转发；用临时 Pi JSONL 和真实 store 测试重建/隔离，先 focused 后 pnpm check", "与安全搬迁工作会话及文件夹的磁盘目录（TASK-056）共享稳定 ID/最新路径契约，消息索引不靠一次性的旧绝对 cwd 键定位"]
     escalation_conditions: ["若直接扫描 JSONL 无法满足可交互延迟，再引入可重建索引并注明磁盘占用与失效策略", "若现有摘要 API 不提供安全可见文本，先固定可索引字段，不扩大到原始工具/推理内容"]
     result:
-      owner: null
+      owner: "conversation-search-sol-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T18:53:11.475Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-search-sol"
+      branch: "task/task-057-work-search"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-058
     title: "工作会话文件树后端阶段验证"
     status: pending
@@ -2145,7 +2148,7 @@ tasks:
 
   - id: TASK-061
     title: "建立工作工具结果与产物的助理来源契约"
-    status: in_progress
+    status: done
     goal: "助理能以稳定、授权且可撤回的来源引用读取已保存工作过程中的工具结果和产物，而不依赖文件路径猜测。"
     scope:
       in: ["Work 运行提交时登记有界工具结果和明确产物 ID、版本、受众、所属 run 与不透明引用", "宿主受权解析、暂不可用/删除事件和助理持久来源队列接入", "既有 Pi 会话的只读可恢复补扫与无法确定的历史产物标记"]
@@ -2172,10 +2175,15 @@ tasks:
       owner: "root-assistant-artifacts-20260927-061-10414"
       attempts: 0
       claimed_at: "2026-09-26T17:24:13.822Z"
-      completed_at: null
+      completed_at: "2026-09-26T18:57:21.865Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-artifacts"
       branch: "task/task-061-assistant-artifact-sources"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "main integration", status: "passed", summary: "TASK-055 v13 merged before TASK-061 v14; source implementation integrated at main 3408b8b, follow-up root-symlink test included. Main integration HEAD 8b8bfb5 contains delegation and Worker stop fix."}
+        - {type: "command", check: "clean integrated pnpm check and native smoke", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0, macOS arm64, clean detached main 8b8bfb5. pnpm check log .git/worktrees/assistant-final-check/coding-owner/1790448641635590000.log and build:native plus smoke:native log 1790448987951885000.log exited 0, changed_during_run=false. Offline pinned model metadata used after models.dev timeout."}
+        - {type: "test", check: "real Work/Pi source chain", status: "passed", summary: "Temporary Home and loopback model: successful write tool result and bounded payload snapshot become distinct stable sources, Worker queue deduplicates across restart, explicit deletion withdraws; wrong audience, paths, symlinks and orphan historical results rejected. Main assistant and Runtime packages passed, Runtime 87/87."}
+        - {type: "review", check: "independent authorization and migration review", status: "passed", summary: "Read-only reviewer found no TASK-061 blocker within documented same-user Home trust boundary; verified v13 to v14 migration, settled output matching, Host audience/version/run/deletion rechecks and static symlink refusal."}
+        - {type: "boundary", check: "platform and historical coverage", status: "unverified", summary: "Windows/Linux and real user Home migration not exercised. Historical Pi JSONL over 32 MiB remains unavailable; same-UID concurrent replacement of entire managed sessions root is outside local Home trust boundary. Snapshot is historical write input, not current file state."}
       follow_up_candidates: []
   - id: TASK-062
     title: "接通用户撤销助理来源与权威删除事件"
