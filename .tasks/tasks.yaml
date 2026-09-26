@@ -1355,7 +1355,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-040
     title: "接入助理进程与 SEA 生命周期"
-    status: in_progress
+    status: done
     goal: "助理在 App 内独立运行、可恢复，退出后无孤儿工作进程。"
     scope:
       in: ["apps/runtime 专用 Worker 启动与宿主装配", "IPC 就绪/取消/期限/异常恢复；Home 单写锁", "SEA Worker 分发、Desktop 启停和升级清理"]
@@ -1382,14 +1382,19 @@ tasks:
       owner: "assistant-architecture-sol1"
       attempts: 0
       claimed_at: "2026-09-26T14:03:07.420Z"
-      completed_at: null
+      completed_at: "2026-09-26T14:38:45.184Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
       branch: "task/task-040-assistant-worker"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-040 owner commit 9725eb8 is an ancestor of integrated main 6bf4faa; main retains the builtin-tool entry and SEA smoke from acbcba1."}
+        - {type: "test", check: "assistant Worker behavior and failure review", status: "passed", summary: "Independent reviewer confirmed embedded SEA skills and per-turn cancellation; focused tests cover real loopback host prompt/task/cancel, duplicate IDs, Home lock, interrupted recovery, startup failure readiness, and parent-process cleanup."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 and pnpm 11.22.0: full build, typechecks and tests passed on main 6bf4faa with preserved unrelated dirty worktree changes. A notification test was updated in the dirty tree to use the Work conversation's actual working directory; apps/runtime 33/33 passed."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native on clean integration revision", status: "passed", summary: "On clean integration revision 6bf4faa, darwin-arm64 SEA build and full native smoke passed, including Worker startup with empty PATH, bundled skills, Python artifact and staged Runtime update."}
+        - {type: "boundary", check: "next-stage channel and platform limits", status: "unverified", summary: "Desktop and Enterprise WeChat user-message routing moves to TASK-041. Only darwin-arm64 native behavior was exercised; other platforms and real WeCom delivery remain unverified."}
       follow_up_candidates: []
   - id: TASK-041
     title: "接通本地与企业微信独立助理"
-    status: pending
+    status: ready
     goal: "已配对用户从本地和企业微信访问同一助理，保持独立会话及可靠原路回复。"
     scope:
       in: ["按选定通信契约接入本地和已有企微长连接", "身份/会话/回复路由持久映射、幂等与重连", "旧 assistant/企微共享 session 绑定迁移、来源事件、宿主服务 API"]
