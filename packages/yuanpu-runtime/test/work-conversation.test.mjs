@@ -62,6 +62,63 @@ test('new Work sessions remain isolated and selected across restart while defaul
   reopened.close();
 });
 
+test('nested folders, metadata, tags and archive persist without changing stable paths', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-tree-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  const scope = join(root, 'workspace');
+  let database = openYuanpuMetadataDatabase(path);
+  const store = database.workConversations;
+  const firstId = 'folder:11111111-1111-4111-8111-111111111111';
+  const secondId = 'folder:22222222-2222-4222-8222-222222222222';
+  const firstPath = 'f-11111111-1111-4111-8111-111111111111';
+  const secondPath = `${firstPath}/f-22222222-2222-4222-8222-222222222222`;
+  const first = store.createFolder(scope, firstId, null, '研发', 'folder', firstPath);
+  const second = store.createFolder(scope, secondId, firstId, '模型', 'code', secondPath);
+  assert.equal(second.parentId, first.id);
+  assert.throws(() => store.createFolder('/other', 'folder:33333333-3333-4333-8333-333333333333',
+    firstId, 'wrong scope', 'folder', 'f-33333333-3333-4333-8333-333333333333'), /Unknown Work parent/);
+  assert.throws(() => store.updateFolder(scope, secondId, { iconId: 'shell-command' }), /Invalid icon/);
+  const renamed = store.updateFolder(scope, firstId, { name: '新研发' });
+  assert.equal(renamed.relativeDirectory, firstPath);
+  const one = store.create(scope, join(scope, secondPath, 'c-one'), secondId);
+  const two = store.create(scope, join(scope, secondPath, 'c-two'), secondId);
+  assert.notEqual(store.sessionId(scope, one.id), store.sessionId(scope, two.id));
+  const requestId = '44444444-4444-4444-8444-444444444444';
+  const requested = store.create(scope, join(scope, secondPath, 'c-three'), secondId,
+    'work:33333333-3333-4333-8333-333333333333', requestId);
+  assert.equal(store.conversationForRequest(scope, requestId).id, requested.id);
+  assert.throws(() => store.create(scope, join(scope, secondPath, 'c-four'), secondId,
+    'work:55555555-5555-4555-8555-555555555555', requestId));
+  const intentId = 'work:66666666-6666-4666-8666-666666666666';
+  store.beginCreateIntent(scope, intentId, 'c-66666666-6666-4666-8666-666666666666', 'conversation');
+  assert.deepEqual(store.pendingCreateIntents(scope), [{
+    id: intentId, relativeDirectory: 'c-66666666-6666-4666-8666-666666666666', committed: false,
+  }]);
+  store.finishCreateIntent(intentId);
+  assert.deepEqual(store.pendingCreateIntents(scope), []);
+  store.reorder(scope, 'conversation', secondId, [two.id, one.id, requested.id]);
+  const tag = store.createTag(scope, '排查', 'blue');
+  store.updateConversation(scope, one.id, { title: '接口联调', iconId: 'star', tagIds: [tag.id] });
+  assert.throws(() => store.updateConversation(scope, one.id, { tagIds: ['tag:foreign'] }), /Unknown Work tag/);
+  assert.deepEqual(store.listExisting(scope).find((item) => item.id === one.id).tagIds, [tag.id]);
+  const archived = store.updateConversation(scope, one.id, { archived: true });
+  assert.equal(archived.archived, true);
+  assert.throws(() => store.select(scope, one.id), /Unknown Work conversation/);
+  assert.equal(store.updateConversation(scope, one.id, { archived: false }).archived, false);
+  assert.throws(() => store.updateConversation(scope, 'default', { archived: false }), /Unknown Work conversation/);
+  database.close();
+  database = openYuanpuMetadataDatabase(path);
+  assert.equal(database.workConversations.listFolders(scope).find((item) => item.id === firstId).name, '新研发');
+  assert.equal(database.workConversations.listExisting(scope).find((item) => item.id === one.id).title, '接口联调');
+  assert.equal(database.workConversations.listExisting(scope).find((item) => item.id === one.id).workingDirectory,
+    join(scope, secondPath, 'c-one'));
+  assert.deepEqual(database.workConversations.listExisting(scope).filter((item) => item.folderId === secondId)
+    .map((item) => item.id), [two.id, one.id, requested.id]);
+  assert.equal(database.workConversations.listTags(scope)[0].id, tag.id);
+  database.close();
+});
+
 test('only saved complete turns produce stable source events on repeated scans', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-source-'));
   context.after(() => rm(root, { recursive: true, force: true }));

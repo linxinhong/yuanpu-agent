@@ -71,7 +71,7 @@ import { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 export { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { runAssistantWorker } from './assistant-worker.js';
-import { createWorkspaceDirectory, resolveSelectedWorkspaceDirectory } from './workspace-directory.js';
+import { createManagedWorkspaceDirectory, removeUncommittedWorkspaceDirectory } from './workspace-directory.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
@@ -526,6 +526,10 @@ async function serve(): Promise<void> {
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
   const workConversations = metadata.workConversations;
+  for (const intent of workConversations.pendingCreateIntents(home.config.workingDirectory)) {
+    if (!intent.committed) await removeUncommittedWorkspaceDirectory(home.workspacePath, intent.relativeDirectory);
+    workConversations.finishCreateIntent(intent.id);
+  }
   const scanLegacyAssistantArchives = () => {
     for (const sessionId of metadata.assistantLink.legacySessionIds()) {
       try {
@@ -537,14 +541,33 @@ async function serve(): Promise<void> {
   };
   scanLegacyAssistantArchives();
   const workScope = home.config.workingDirectory;
-  const createWorkConversation = async (selectedDirectory?: string) => {
-    const directory = selectedDirectory === undefined
-      ? await createWorkspaceDirectory(home.workspacePath)
-      : await resolveSelectedWorkspaceDirectory(selectedDirectory);
+  const createWorkConversation = async (folderId: string | null = null, requestId?: string) => {
+    if (folderId === 'uncategorized') folderId = null;
+    const previous = requestId ? workConversations.conversationForRequest(workScope, requestId) : undefined;
+    if (previous) {
+      if (previous.folderId !== folderId) throw new Error('Work create request conflicts with an earlier folder.');
+      return previous;
+    }
+    const folder = folderId ? workConversations.folderRow(workScope, folderId) : undefined;
+    if (folderId && !folder) throw new Error('Unknown Work folder.');
+    const id = `work:${randomUUID()}`;
+    const relative = [folder?.relative_directory, `c-${id.slice(5)}`].filter(Boolean).join('/');
+    workConversations.beginCreateIntent(workScope, id, relative, 'conversation');
     try {
-      return workConversations.create(workScope, directory);
+      const directory = await createManagedWorkspaceDirectory(home.workspacePath,
+        folder?.relative_directory ?? '', `c-${id.slice(5)}`);
+      const created = workConversations.create(workScope, directory, folderId, id, requestId);
+      workConversations.finishCreateIntent(id);
+      return created;
     } catch (error) {
-      if (selectedDirectory === undefined) await rm(directory, { recursive: true, force: true });
+      if (!workConversations.row(workScope, id)) {
+        try {
+          await removeUncommittedWorkspaceDirectory(home.workspacePath, relative);
+          workConversations.finishCreateIntent(id);
+        } catch { /* Keep the intent for startup recovery. */ }
+      }
+      const raced = requestId ? workConversations.conversationForRequest(workScope, requestId) : undefined;
+      if (raced && raced.folderId === folderId) return raced;
       throw error;
     }
   };
@@ -791,7 +814,7 @@ async function serve(): Promise<void> {
       : body.conversationId === undefined ? (await currentWorkConversation()).id
         : typeof body.conversationId === 'string' ? body.conversationId : undefined;
     const workConversation = workConversationId ? workConversations.row(workScope, workConversationId) : undefined;
-    if (body.surface !== 'assistant' && !workConversation) {
+    if (body.surface !== 'assistant' && (!workConversation || workConversation.archived_at)) {
       return { error: 'Unknown or archived Work conversation.' } as const;
     }
     if (body.surface === 'assistant') {
@@ -1105,14 +1128,17 @@ async function serve(): Promise<void> {
         }
         if (request.method === 'POST') {
           const body = await readJsonBody(request, true);
-          const selectedDirectory = isRecord(body) ? body.workingDirectory : undefined;
-          if (selectedDirectory !== undefined && (typeof selectedDirectory !== 'string' || !selectedDirectory.trim())) {
+          const folderId = isRecord(body) ? body.folderId : undefined;
+          const requestId = isRecord(body) ? body.requestId : undefined;
+          if ((body !== undefined && !isRecord(body)) || (isRecord(body) && Object.hasOwn(body, 'workingDirectory'))
+            || (folderId !== undefined && folderId !== null && typeof folderId !== 'string')
+            || (requestId !== undefined && typeof requestId !== 'string')) {
             response.statusCode = 400;
-            response.end(JSON.stringify({ error: 'A selected workspace directory must be a non-empty absolute path.' }));
+            response.end(JSON.stringify({ error: 'A Work folder ID is required; arbitrary directories are not accepted.' }));
             return;
           }
           let created;
-          try { created = await createWorkConversation(selectedDirectory); }
+          try { created = await createWorkConversation(folderId ?? null, requestId); }
           catch (error) {
             response.statusCode = 400;
             response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
@@ -1133,6 +1159,117 @@ async function serve(): Promise<void> {
           catch { response.statusCode = 404; response.end(JSON.stringify({ error: 'Unknown Work conversation.' })); }
           return;
         }
+        if (request.method === 'PATCH') {
+          const body = await readJsonBody(request);
+          try {
+            if (!isRecord(body) || typeof body.conversationId !== 'string') throw new Error('A Work conversation ID is required.');
+            if (Object.hasOwn(body, 'folderId') || Object.hasOwn(body, 'workingDirectory')) {
+              throw new Error('Moving a Work conversation requires the dedicated directory migration.');
+            }
+            response.end(JSON.stringify(workConversations.updateConversation(workScope, body.conversationId, {
+              title: body.title as string | undefined, iconId: body.iconId as string | undefined,
+              archived: body.archived as boolean | undefined, tagIds: body.tagIds as string[] | undefined,
+            })));
+          } catch (error) { response.statusCode = 400; response.end(JSON.stringify({ error: String(error) })); }
+          return;
+        }
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workFolders) {
+        if (request.method === 'GET') { response.end(JSON.stringify(workConversations.listFolders(workScope))); return; }
+        const body = await readJsonBody(request);
+        try {
+          if (!isRecord(body)) throw new Error('Invalid Work folder request.');
+          if (request.method === 'POST') {
+            if (typeof body.name !== 'string' || (body.parentId !== null && body.parentId !== undefined
+              && typeof body.parentId !== 'string') || (body.requestId !== undefined
+              && typeof body.requestId !== 'string')) throw new Error('Invalid Work folder input.');
+            const parentId = body.parentId === 'uncategorized' ? null : body.parentId ?? null;
+            const requestId = body.requestId as string | undefined;
+            const previous = requestId ? workConversations.folderForRequest(workScope, requestId) : undefined;
+            if (previous) {
+              if (previous.parentId !== parentId) throw new Error('Work create request conflicts with an earlier parent.');
+              response.end(JSON.stringify(previous));
+              return;
+            }
+            const parent = parentId ? workConversations.folderRow(workScope, parentId as string) : undefined;
+            if (parentId && !parent) throw new Error('Unknown Work parent folder.');
+            const id = `folder:${randomUUID()}`;
+            const relative = [parent?.relative_directory, `f-${id.slice(7)}`].filter(Boolean).join('/');
+            workConversations.beginCreateIntent(workScope, id, relative, 'folder');
+            try {
+              await createManagedWorkspaceDirectory(home.workspacePath,
+                parent?.relative_directory ?? '', `f-${id.slice(7)}`);
+              const created = workConversations.createFolder(workScope, id, parentId as string | null,
+                body.name, typeof body.iconId === 'string' ? body.iconId : 'folder', relative, requestId);
+              workConversations.finishCreateIntent(id);
+              response.statusCode = 201;
+              response.end(JSON.stringify(created));
+            } catch (error) {
+              if (!workConversations.folderRow(workScope, id)) {
+                try {
+                  await removeUncommittedWorkspaceDirectory(home.workspacePath, relative);
+                  workConversations.finishCreateIntent(id);
+                } catch { /* Keep the intent for startup recovery. */ }
+              }
+              const raced = requestId ? workConversations.folderForRequest(workScope, requestId) : undefined;
+              if (raced && raced.parentId === parentId) { response.end(JSON.stringify(raced)); return; }
+              throw error;
+            }
+            return;
+          }
+          if (request.method === 'PATCH') {
+            if (typeof body.folderId !== 'string') throw new Error('A Work folder ID is required.');
+            if (Object.hasOwn(body, 'parentId') || Object.hasOwn(body, 'relativeDirectory')) {
+              throw new Error('Moving a Work folder requires the dedicated directory migration.');
+            }
+            response.end(JSON.stringify(workConversations.updateFolder(workScope, body.folderId,
+              { name: body.name as string | undefined, iconId: body.iconId as string | undefined })));
+            return;
+          }
+          throw new Error('Unsupported Work folder method.');
+        } catch (error) { response.statusCode = 400; response.end(JSON.stringify({ error: String(error) })); }
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.workTags) {
+        if (request.method === 'GET') { response.end(JSON.stringify(workConversations.listTags(workScope))); return; }
+        const body = await readJsonBody(request);
+        try {
+          if (!isRecord(body)) throw new Error('Invalid Work tag request.');
+          if (request.method === 'POST') {
+            if (typeof body.name !== 'string' || (body.requestId !== undefined
+              && typeof body.requestId !== 'string')) throw new Error('Invalid Work tag name.');
+            const requestId = body.requestId as string | undefined;
+            const previous = requestId ? workConversations.tagForRequest(workScope, requestId) : undefined;
+            if (previous) { response.end(JSON.stringify(previous)); return; }
+            response.statusCode = 201;
+            try {
+              response.end(JSON.stringify(workConversations.createTag(workScope, body.name,
+                body.color as string | undefined, requestId)));
+            } catch (error) {
+              const raced = requestId ? workConversations.tagForRequest(workScope, requestId) : undefined;
+              if (raced) { response.end(JSON.stringify(raced)); return; }
+              throw error;
+            }
+          } else if (request.method === 'PATCH') {
+            if (typeof body.tagId !== 'string') throw new Error('Invalid Work tag ID.');
+            response.end(JSON.stringify(workConversations.updateTag(workScope, body.tagId,
+              { name: body.name as string | undefined, color: body.color as string | undefined })));
+          } else throw new Error('Unsupported Work tag method.');
+        } catch (error) { response.statusCode = 400; response.end(JSON.stringify({ error: String(error) })); }
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.workOrder && request.method === 'PUT') {
+        const body = await readJsonBody(request);
+        try {
+          if (!isRecord(body) || (body.kind !== 'folder' && body.kind !== 'conversation')
+            || (body.parentId !== null && typeof body.parentId !== 'string')
+            || !Array.isArray(body.ids)) throw new Error('Invalid Work order.');
+          workConversations.reorder(workScope, body.kind,
+            body.parentId === 'uncategorized' ? null : body.parentId, body.ids as string[]);
+          response.end(JSON.stringify({ ok: true }));
+        } catch (error) { response.statusCode = 400; response.end(JSON.stringify({ error: String(error) })); }
+        return;
       }
 
       const workFileConversation = (conversationId: string | null): boolean => {

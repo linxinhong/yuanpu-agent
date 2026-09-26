@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { AssistantSourceChange, DesktopTranscriptMessage, WorkConversation } from '@yuanpu-agent/protocol';
+import type { AssistantSourceChange, DesktopTranscriptMessage, WorkConversation, WorkFolder, WorkTag } from '@yuanpu-agent/protocol';
 
 interface WorkRow {
   conversation_id: string;
@@ -8,6 +8,34 @@ interface WorkRow {
   working_directory: string;
   created_at: string;
   updated_at: string;
+  title: string;
+  icon_id: string;
+  folder_id: string | null;
+  sort_order: number;
+  archived_at: string | null;
+}
+
+interface FolderRow {
+  folder_id: string; workspace_id: string; parent_id: string | null; name: string;
+  icon_id: string; relative_directory: string; sort_order: number;
+  created_at: string; updated_at: string;
+}
+interface TagRow { tag_id: string; workspace_id: string; name: string; color: string; created_at: string; updated_at: string }
+
+const icons = new Set(['chat', 'folder', 'briefcase', 'code', 'book', 'star', 'lightning', 'archive']);
+function validName(value: string): string {
+  const name = value.trim();
+  if (!name || name.length > 120 || /[\x00-\x1f]/.test(name)) throw new Error('Invalid display name.');
+  return name;
+}
+function validIcon(icon: string): string {
+  if (!icons.has(icon)) throw new Error('Invalid icon ID.');
+  return icon;
+}
+function validRequestId(requestId: string | undefined): string | null {
+  if (requestId === undefined) return null;
+  if (!/^[0-9a-f-]{36}$/.test(requestId)) throw new Error('Invalid Work create request ID.');
+  return requestId;
 }
 
 interface SourceRow {
@@ -50,25 +78,31 @@ export class WorkConversationStore {
 
   private toConversation(row: WorkRow, currentId: string): WorkConversation {
     return { id: row.conversation_id, createdAt: row.created_at, updatedAt: row.updated_at,
-      workingDirectory: row.working_directory,
-      current: row.conversation_id === currentId, archived: false };
+      workingDirectory: row.working_directory, title: row.title, iconId: row.icon_id,
+      folderId: row.folder_id, sortOrder: row.sort_order, archivedAt: row.archived_at,
+      tagIds: (this.database.prepare('SELECT tag_id FROM yp_work_conversation_tags WHERE conversation_id = ? ORDER BY tag_id')
+        .all(row.conversation_id) as Array<{ tag_id: string }>).map((item) => item.tag_id),
+      current: row.conversation_id === currentId, archived: row.archived_at !== null };
   }
 
   current(workspaceId: string): WorkConversation {
     const selected = this.selectedId(workspaceId);
     const row = selected ? this.row(workspaceId, selected) : undefined;
-    return row ? this.toConversation(row, selected!) : this.create(workspaceId);
+    return row && !row.archived_at ? this.toConversation(row, selected!) : this.create(workspaceId);
   }
 
-  create(workspaceId: string, workingDirectory = workspaceId): WorkConversation {
-    const id = `work:${randomUUID()}`;
+  create(workspaceId: string, workingDirectory = workspaceId, folderId: string | null = null,
+    id = `work:${randomUUID()}`, requestId?: string): WorkConversation {
+    if (folderId && !this.folderRow(workspaceId, folderId)) throw new Error('Unknown Work folder.');
     const piSessionId = randomUUID();
     const now = new Date().toISOString();
+    const sortOrder = this.nextOrder('yp_work_conversations', 'folder_id', workspaceId, folderId);
     this.database.exec('BEGIN IMMEDIATE');
     try {
       this.database.prepare(`INSERT INTO yp_work_conversations
-        (conversation_id, pi_session_id, workspace_id, working_directory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(id, piSessionId, workspaceId, workingDirectory, now, now);
+        (conversation_id, pi_session_id, workspace_id, working_directory, created_at, updated_at, folder_id, sort_order, request_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, piSessionId, workspaceId, workingDirectory, now, now, folderId, sortOrder, validRequestId(requestId));
       this.database.prepare(`INSERT INTO yp_conversation_bindings
         (binding_id, entry_point, authority_id, subject_id, namespace, conversation_id,
          thread_id, pi_session_id, workspace_id, created_at, updated_at)
@@ -82,12 +116,12 @@ export class WorkConversationStore {
       this.database.exec('ROLLBACK');
       throw error;
     }
-    return { id, createdAt: now, updatedAt: now, workingDirectory, current: true, archived: false };
+    return this.toConversation(this.row(workspaceId, id)!, id);
   }
 
   select(workspaceId: string, id: string): WorkConversation {
     const row = this.row(workspaceId, id);
-    if (!row) throw new Error('Unknown Work conversation.');
+    if (!row || row.archived_at) throw new Error('Unknown Work conversation.');
     const now = new Date().toISOString();
     this.database.prepare(`INSERT INTO yp_runtime_metadata(key, value, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
@@ -96,9 +130,15 @@ export class WorkConversationStore {
   }
 
   row(workspaceId: string, id: string): WorkRow | undefined {
-    return this.database.prepare(`SELECT conversation_id, pi_session_id, working_directory, created_at, updated_at
+    return this.database.prepare(`SELECT *
       FROM yp_work_conversations WHERE workspace_id = ? AND conversation_id = ?`)
       .get(workspaceId, id) as WorkRow | undefined;
+  }
+
+  conversationForRequest(workspaceId: string, requestId: string): WorkConversation | undefined {
+    const row = this.database.prepare('SELECT * FROM yp_work_conversations WHERE workspace_id=? AND request_id=?')
+      .get(workspaceId, validRequestId(requestId)) as WorkRow | undefined;
+    return row ? this.toConversation(row, this.selectedId(workspaceId) ?? '') : undefined;
   }
 
   hasWorkingDirectory(workspaceId: string, workingDirectory: string): boolean {
@@ -131,8 +171,8 @@ export class WorkConversationStore {
   /** Scans must not create an empty conversation merely because Runtime started. */
   listExisting(workspaceId: string): WorkConversation[] {
     const currentId = this.selectedId(workspaceId) ?? '';
-    const rows = this.database.prepare(`SELECT conversation_id, pi_session_id, working_directory, created_at, updated_at
-      FROM yp_work_conversations WHERE workspace_id = ? ORDER BY updated_at DESC`)
+    const rows = this.database.prepare(`SELECT *
+      FROM yp_work_conversations WHERE workspace_id = ? ORDER BY folder_id, sort_order, created_at`)
       .all(workspaceId) as unknown as WorkRow[];
     const conversations = rows.map((row) => this.toConversation(row, currentId));
     const legacy = this.database.prepare(`SELECT created_at, updated_at FROM yp_conversation_bindings
@@ -140,8 +180,177 @@ export class WorkConversationStore {
         AND namespace = 'desktop' AND conversation_id = 'default' AND workspace_id = ?`)
       .get(workspaceId) as { created_at: string; updated_at: string } | undefined;
     if (legacy) conversations.push({ id: 'default', createdAt: legacy.created_at, workingDirectory: workspaceId,
-      updatedAt: legacy.updated_at, current: false, archived: true });
+      updatedAt: legacy.updated_at, current: false, archived: true, archivedAt: null,
+      title: '', iconId: 'archive', folderId: null, sortOrder: -1, tagIds: [] });
     return conversations;
+  }
+
+  private nextOrder(table: 'yp_work_folders' | 'yp_work_conversations',
+    parentColumn: 'parent_id' | 'folder_id', workspaceId: string, parentId: string | null): number {
+    const row = this.database.prepare(`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM ${table}
+      WHERE workspace_id = ? AND ${parentColumn} IS ?`).get(workspaceId, parentId) as { next: number };
+    return row.next;
+  }
+
+  beginCreateIntent(workspaceId: string, id: string, relativeDirectory: string,
+    kind: 'folder' | 'conversation'): void {
+    if (!/^(?:f-[0-9a-f-]{36}\/)*[cf]-[0-9a-f-]{36}$/.test(relativeDirectory)) {
+      throw new Error('Invalid Work creation path.');
+    }
+    this.database.prepare(`INSERT INTO yp_work_create_intents(node_id,workspace_id,relative_directory,kind)
+      VALUES (?,?,?,?)`).run(id, workspaceId, relativeDirectory, kind);
+  }
+  finishCreateIntent(id: string): void {
+    this.database.prepare('DELETE FROM yp_work_create_intents WHERE node_id=?').run(id);
+  }
+  pendingCreateIntents(workspaceId: string): Array<{ id: string; relativeDirectory: string; committed: boolean }> {
+    const rows = this.database.prepare(`SELECT i.node_id, i.relative_directory,
+      CASE WHEN i.kind='folder' THEN f.folder_id ELSE c.conversation_id END AS committed_id
+      FROM yp_work_create_intents i
+      LEFT JOIN yp_work_folders f ON f.folder_id=i.node_id
+      LEFT JOIN yp_work_conversations c ON c.conversation_id=i.node_id
+      WHERE i.workspace_id=?`).all(workspaceId) as Array<{
+      node_id: string; relative_directory: string; committed_id: string | null;
+    }>;
+    return rows.map((row) => ({ id: row.node_id, relativeDirectory: row.relative_directory,
+      committed: Boolean(row.committed_id) }));
+  }
+
+  folderRow(workspaceId: string, id: string): FolderRow | undefined {
+    return this.database.prepare('SELECT * FROM yp_work_folders WHERE workspace_id = ? AND folder_id = ?')
+      .get(workspaceId, id) as FolderRow | undefined;
+  }
+
+  private toFolder(row: FolderRow): WorkFolder {
+    return { id: row.folder_id, parentId: row.parent_id, name: row.name, iconId: row.icon_id,
+      relativeDirectory: row.relative_directory, sortOrder: row.sort_order,
+      createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+
+  listFolders(workspaceId: string): WorkFolder[] {
+    const folders = (this.database.prepare('SELECT * FROM yp_work_folders WHERE workspace_id = ? ORDER BY parent_id, sort_order')
+      .all(workspaceId) as unknown as FolderRow[]).map((row) => this.toFolder(row));
+    return [{ id: 'uncategorized', parentId: null, name: '未分类', iconId: 'folder',
+      relativeDirectory: '', sortOrder: -1, createdAt: '', updatedAt: '', system: true }, ...folders];
+  }
+
+  createFolder(workspaceId: string, id: string, parentId: string | null, name: string,
+    iconId: string, relativeDirectory: string, requestId?: string): WorkFolder {
+    const parent = parentId ? this.folderRow(workspaceId, parentId) : undefined;
+    if (parentId && !parent) throw new Error('Unknown Work parent folder.');
+    if (!/^folder:[0-9a-f-]{36}$/.test(id)
+      || !/^f-[0-9a-f-]{36}(\/f-[0-9a-f-]{36})*$/.test(relativeDirectory)
+      || (parent ? !relativeDirectory.startsWith(`${parent.relative_directory}/`)
+        || relativeDirectory.slice(parent.relative_directory.length + 1).includes('/') : relativeDirectory.includes('/'))) {
+      throw new Error('Invalid Work folder directory.');
+    }
+    const now = new Date().toISOString();
+    this.database.prepare(`INSERT INTO yp_work_folders
+      (folder_id,workspace_id,parent_id,name,icon_id,relative_directory,sort_order,created_at,updated_at,request_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(id, workspaceId, parentId, validName(name), validIcon(iconId),
+        relativeDirectory, this.nextOrder('yp_work_folders', 'parent_id', workspaceId, parentId), now, now,
+        validRequestId(requestId));
+    return this.toFolder(this.folderRow(workspaceId, id)!);
+  }
+  folderForRequest(workspaceId: string, requestId: string): WorkFolder | undefined {
+    const row = this.database.prepare('SELECT * FROM yp_work_folders WHERE workspace_id=? AND request_id=?')
+      .get(workspaceId, validRequestId(requestId)) as FolderRow | undefined;
+    return row ? this.toFolder(row) : undefined;
+  }
+
+  updateFolder(workspaceId: string, id: string, patch: { name?: string; iconId?: string }): WorkFolder {
+    const row = this.folderRow(workspaceId, id);
+    if (!row) throw new Error('Unknown Work folder.');
+    if (patch.name !== undefined) row.name = validName(patch.name);
+    if (patch.iconId !== undefined) row.icon_id = validIcon(patch.iconId);
+    this.database.prepare('UPDATE yp_work_folders SET name=?, icon_id=?, updated_at=? WHERE folder_id=?')
+      .run(row.name, row.icon_id, new Date().toISOString(), id);
+    return this.toFolder(this.folderRow(workspaceId, id)!);
+  }
+
+  updateConversation(workspaceId: string, id: string,
+    patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }): WorkConversation {
+    const row = this.row(workspaceId, id);
+    if (!row) throw new Error('Unknown Work conversation.');
+    const title = patch.title === undefined ? row.title : validName(patch.title);
+    const iconId = patch.iconId === undefined ? row.icon_id : validIcon(patch.iconId);
+    if (patch.archived !== undefined && typeof patch.archived !== 'boolean') throw new Error('Invalid archive state.');
+    if (patch.tagIds !== undefined && (!Array.isArray(patch.tagIds)
+      || patch.tagIds.some((tagId) => typeof tagId !== 'string') || new Set(patch.tagIds).size !== patch.tagIds.length)) {
+      throw new Error('Invalid Work tags.');
+    }
+    const tags = patch.tagIds;
+    if (tags?.some((tagId) => !this.tagRow(workspaceId, tagId))) throw new Error('Unknown Work tag.');
+    const archivedAt = patch.archived === undefined ? row.archived_at
+      : patch.archived ? row.archived_at ?? new Date().toISOString() : null;
+    const now = new Date().toISOString();
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      this.database.prepare(`UPDATE yp_work_conversations SET title=?, icon_id=?, archived_at=?, updated_at=?
+        WHERE workspace_id=? AND conversation_id=?`).run(title, iconId, archivedAt, now, workspaceId, id);
+      if (tags) {
+        this.database.prepare('DELETE FROM yp_work_conversation_tags WHERE conversation_id=?').run(id);
+        for (const tagId of tags) this.database.prepare(
+          'INSERT INTO yp_work_conversation_tags(conversation_id,tag_id) VALUES (?,?)').run(id, tagId);
+      }
+      if (archivedAt && this.selectedId(workspaceId) === id) {
+        this.database.prepare('DELETE FROM yp_runtime_metadata WHERE key=?').run(this.currentKey(workspaceId));
+      }
+      this.database.exec('COMMIT');
+    } catch (error) { this.database.exec('ROLLBACK'); throw error; }
+    return this.toConversation(this.row(workspaceId, id)!, this.selectedId(workspaceId) ?? '');
+  }
+
+  private tagRow(workspaceId: string, id: string): TagRow | undefined {
+    return this.database.prepare('SELECT * FROM yp_work_tags WHERE workspace_id=? AND tag_id=?')
+      .get(workspaceId, id) as TagRow | undefined;
+  }
+  private toTag(row: TagRow): WorkTag {
+    return { id: row.tag_id, name: row.name, color: row.color,
+      createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+  listTags(workspaceId: string): WorkTag[] {
+    return (this.database.prepare('SELECT * FROM yp_work_tags WHERE workspace_id=? ORDER BY name')
+      .all(workspaceId) as unknown as TagRow[]).map((row) => this.toTag(row));
+  }
+  createTag(workspaceId: string, name: string, color = 'gray', requestId?: string): WorkTag {
+    if (!/^(gray|red|orange|yellow|green|blue|purple)$/.test(color)) throw new Error('Invalid Work tag color.');
+    const id = `tag:${randomUUID()}`;
+    const now = new Date().toISOString();
+    this.database.prepare(`INSERT INTO yp_work_tags(tag_id,workspace_id,name,color,created_at,updated_at,request_id)
+      VALUES (?,?,?,?,?,?,?)`).run(id, workspaceId, validName(name), color, now, now, validRequestId(requestId));
+    return this.toTag(this.tagRow(workspaceId, id)!);
+  }
+  tagForRequest(workspaceId: string, requestId: string): WorkTag | undefined {
+    const row = this.database.prepare('SELECT * FROM yp_work_tags WHERE workspace_id=? AND request_id=?')
+      .get(workspaceId, validRequestId(requestId)) as TagRow | undefined;
+    return row ? this.toTag(row) : undefined;
+  }
+  updateTag(workspaceId: string, id: string, patch: { name?: string; color?: string }): WorkTag {
+    const row = this.tagRow(workspaceId, id);
+    if (!row) throw new Error('Unknown Work tag.');
+    const name = patch.name === undefined ? row.name : validName(patch.name);
+    const color = patch.color ?? row.color;
+    if (!/^(gray|red|orange|yellow|green|blue|purple)$/.test(color)) throw new Error('Invalid Work tag color.');
+    this.database.prepare('UPDATE yp_work_tags SET name=?,color=?,updated_at=? WHERE tag_id=?')
+      .run(name, color, new Date().toISOString(), id);
+    return this.toTag(this.tagRow(workspaceId, id)!);
+  }
+
+  reorder(workspaceId: string, kind: 'folder' | 'conversation', parentId: string | null, ids: string[]): void {
+    if (parentId && !this.folderRow(workspaceId, parentId)) throw new Error('Unknown Work folder.');
+    const items = kind === 'folder' ? this.listFolders(workspaceId).filter((item) => !item.system && item.parentId === parentId)
+      : this.listExisting(workspaceId).filter((item) => item.id !== 'default' && item.folderId === parentId);
+    if (!Array.isArray(ids) || ids.length !== items.length || new Set(ids).size !== ids.length
+      || ids.some((id) => !items.some((item) => item.id === id))) throw new Error('Invalid Work sibling order.');
+    const table = kind === 'folder' ? 'yp_work_folders' : 'yp_work_conversations';
+    const column = kind === 'folder' ? 'folder_id' : 'conversation_id';
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      ids.forEach((id, index) => this.database.prepare(`UPDATE ${table} SET sort_order=? WHERE workspace_id=? AND ${column}=?`)
+        .run(index, workspaceId, id));
+      this.database.exec('COMMIT');
+    } catch (error) { this.database.exec('ROLLBACK'); throw error; }
   }
 
   /** A run is eligible only after both its success and output have been committed. */
