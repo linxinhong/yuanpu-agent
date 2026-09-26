@@ -13,6 +13,10 @@ YuanpuAgent 面向桌面工作场景：用户在 Electron 中与 Pi 对话，通
 
 ## 基线与约束
 
+工作会话目录与列表管理的当前交互草图见 [提案 v001](ui/conversation-management/proposal.md)；树状会话管理方向以 [文件夹原型 v003](ui/conversation-management/prototype-v003.md) 为准。新会话默认独立工作目录，Pi 会话历史继续留在 `agent/sessions`；归档、搜索和树状管理待实施。
+
+文件夹树的实施边界与新开发卡见[工作会话文件夹树设计](../docs/work-conversation-tree.md)及任务注册表；目录移动需同时修正 Pi 会话 cwd 关联，不等同于只调整界面顺序。
+
 2026-09-21 的 Python 能力专项任务及其历史基线见注册表。2026-09-22 总体设计基于现有两个 Yuanpu 包和 Electron 管理 Runtime 的源码边界；新设计不代表功能实现或发布，不覆盖已有任务证据与用户改动。
 
 当前方向：工作对话保持独立上下文；新增 packages/yuanpu-assistant 承载独立个人助理，自动评估工作内容、整理记忆与台账并委派专业子任务。本地与企业微信连接同一助理身份但默认独立聊天上下文。所有进程跟随 App 生命周期，关闭后停止。Python 保持独立能力包；设计权威在 docs，`.tasks/architecture.md` 只作导航。原“只复用两个 Yuanpu 包”是此前阶段边界，本轮新增助理包取代该限制。
@@ -42,3 +46,11 @@ YuanpuAgent 面向桌面工作场景：用户在 Electron 中与 Pi 对话，通
 从“固定助理契约并验证 Pi 会话适配（TASK-037）”开始；“实现助理内部自动化与定时调度（TASK-051）”承接来源与记忆存储，供工作评估和主动回顾使用。最终由“独立助理完整业务验收（TASK-050）”验证闭环；状态和依赖只以[注册表](tasks.yaml)为准。三个阶段分别验证双入口与进程、工作评估/记忆/委派、真实桌面完整业务。复用[已确认的助理双面板](ui/assistant-home/proposal.md)，不以占位数据代替后端接通。
 
 当前源码取证基线为 main fbe7c05 及未提交增量：已有 subagents、内置工具、助理页面和协议修改，实施前必须保留并复核。检索：ZG 查询 assistant/work/runtime/subagents 与 packages/evals，命中 runtime/index、agent-runtime-contracts、evals README；再精确核对 subagents/runner、assistant-home、package.json。未创建或重建索引。卡片本身不是实现证据；既有历史 done 状态不改写，不自动领取、提交或推送。
+
+## 工作对话文件预览（2026-09-26）
+
+用户确认在工作对话右侧栏增加文件预览：入口为文件树浏览 + 聊天内路径可点击；第一版支持文本/Markdown/图片/PDF，Office 与音视频不做。通道整体只读，渲染层只持会话 ID 与工作区相对路径，路径校验在 sidecar 完成。开发卡见[工作对话右侧栏文件预览（TASK-052）](tasks.yaml)；状态与验收以注册表为准。参考实现为 ZCode 的 PreviewPane/code-viewer side pane（限流与二进制探测口径借鉴）。
+
+## 设置全局字体配置（2026-09-26）
+
+用户要求在设置项里增加全局字体配置：界面字体大小、正文字体大小与字型可配置。渲染端探索结论：现有 CSS 无任何字体类 token，字号硬编码 px（muse-theme/styles/management/assistant-home 共约 238 处）；主题偏好走 renderer localStorage + documentElement 注入，字体配置复用同款模式，不新增 protocol/IPC/runtime 链路。界面字号经根字号缩放实现（px→rem 机械转换 + `--yp-font-scale-ui`），正文用独立 px token `--yp-font-size-content`，字型经 `--yp-font-family` 预设 + 自定义输入。开发卡见[设置全局字体配置（TASK-053）](tasks.yaml)；状态与验收以注册表为准。主工作区未提交增量与卡内触达文件有交集，集成前需协调合并顺序。
