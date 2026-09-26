@@ -1,9 +1,17 @@
 import { useMemo, type ReactNode } from 'react';
 import { marked, type Token, type Tokens } from 'marked';
 
+import { HtmlPreviewCard } from './html-preview-card.js';
+import { MessageImage, type ImagePreview } from './message-image.js';
+import { completeHtmlPreview } from './preview-content.js';
 import { splitTextByFilePaths } from './work-file-links.js';
 
-type RenderOptions = { onOpenFilePath?: (path: string) => void };
+type RenderOptions = {
+  onOpenFilePath?: (path: string) => void;
+  onAddToConversation?: (markdown: string) => void;
+  onOpenImageInSidebar?: (image: ImagePreview) => void;
+  resolveWorkspaceImage?: (path: string) => Promise<string | null>;
+};
 
 function fileLink(path: string, options: RenderOptions, key: string): ReactNode {
   return <button key={key} type="button" className="message-file-link"
@@ -38,7 +46,11 @@ function inline(tokens: Token[], options: RenderOptions): ReactNode[] {
       }
       case 'br': return <br key={key} />;
       case 'link': return <span key={key} className="message-link">{inline((token as Tokens.Link).tokens, options)}</span>;
-      case 'image': return <span key={key}>{(token as Tokens.Image).text}</span>;
+      case 'image': {
+        const image = token as Tokens.Image;
+        return <MessageImage key={key} href={image.href} alt={image.text}
+          resolveWorkspaceImage={options.resolveWorkspaceImage} onOpenInSidebar={options.onOpenImageInSidebar} />;
+      }
       case 'text': {
         const text = token as Tokens.Text;
         if (text.tokens) return <span key={key}>{inline(text.tokens, options)}</span>;
@@ -80,6 +92,11 @@ function blocks(tokens: Token[], options: RenderOptions): ReactNode[] {
       case 'blockquote': return <blockquote key={key}>{blocks((token as Tokens.Blockquote).tokens, options)}</blockquote>;
       case 'code': {
         const code = token as Tokens.Code;
+        if (code.lang?.trim() === 'html-preview') {
+          return completeHtmlPreview(code)
+            ? <HtmlPreviewCard key={key} html={code.text} onAddToConversation={options.onAddToConversation} />
+            : <div key={key} className="html-preview-pending" role="status">正在生成图示…</div>;
+        }
         return <pre key={key}><code>{code.text}</code></pre>;
       }
       case 'hr': return <hr key={key} />;
@@ -95,7 +112,7 @@ function blocks(tokens: Token[], options: RenderOptions): ReactNode[] {
   });
 }
 
-export function MessageContent({ text, onOpenFilePath }: { text: string; onOpenFilePath?: (path: string) => void }) {
+export function MessageContent({ text, onOpenFilePath, onAddToConversation, onOpenImageInSidebar, resolveWorkspaceImage }: { text: string } & RenderOptions) {
   const tokens = useMemo(() => marked.lexer(text, { gfm: true }), [text]);
-  return <div className="message-markdown">{blocks(tokens, { onOpenFilePath })}</div>;
+  return <div className="message-markdown">{blocks(tokens, { onOpenFilePath, onAddToConversation, onOpenImageInSidebar, resolveWorkspaceImage })}</div>;
 }

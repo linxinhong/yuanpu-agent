@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 import { AppIcon } from '../../shared/app-icon.js';
+import type { ImagePreview } from '../../shared/message-image.js';
 import type { ViewerFileHost } from '../host/file-host.js';
 import { FilePreview } from '../preview/file-preview.js';
 import { FileTree, useWorkspaceTree } from './file-tree.js';
@@ -9,7 +10,19 @@ import { FileTree, useWorkspaceTree } from './file-tree.js';
 type FileTab =
   | { id: 'activity' | 'run'; kind: 'activity' | 'run' }
   | { id: 'tree'; kind: 'tree' }
+  | { id: string; kind: 'image'; image: ImagePreview }
   | { id: string; kind: 'file'; path: string };
+
+export type ImagePreviewRequest = ImagePreview & { id: string };
+
+export function ImagePreviewPanel({ image, onClose }: { image: ImagePreview; onClose?: () => void }) {
+  return <div className="image-side-preview">
+    <div className="image-side-preview-heading"><strong>{image.alt || '图片预览'}</strong>
+      {onClose && <button type="button" onClick={onClose} aria-label="关闭图片预览">×</button>}
+    </div>
+    <div className="image-side-preview-body"><img src={image.src} alt={image.alt} referrerPolicy="no-referrer" /></div>
+  </div>;
+}
 
 const TREE_TAB: FileTab = { id: 'tree', kind: 'tree' };
 
@@ -46,10 +59,11 @@ function WorkspaceTreeView({ host, scopeKey, selectedPath, onOpenFile, rootName 
 
 /** One tab strip for workspace content and the host's run views. */
 export function FileWorkspace({ host, scopeKey, requestPath, onActiveFileChange,
-  tabHost, view, onViewChange, runContent, onClose, rootName }: {
+  requestImage, tabHost, view, onViewChange, runContent, onClose, rootName }: {
   host?: ViewerFileHost;
   scopeKey: string;
   requestPath?: string;
+  requestImage?: ImagePreviewRequest;
   onActiveFileChange?: (path: string | undefined) => void;
   tabHost: HTMLElement | null;
   view: 'activity' | 'run' | 'files';
@@ -69,7 +83,7 @@ export function FileWorkspace({ host, scopeKey, requestPath, onActiveFileChange,
   function activate(tab: FileTab) {
     setTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
     setActiveTabId(tab.id);
-    onViewChange(tab.kind === 'file' || tab.kind === 'tree' ? 'files' : tab.kind);
+    onViewChange(tab.kind === 'file' || tab.kind === 'image' || tab.kind === 'tree' ? 'files' : tab.kind);
     setMenuOpen(false);
   }
 
@@ -80,6 +94,13 @@ export function FileWorkspace({ host, scopeKey, requestPath, onActiveFileChange,
       setActiveTabId(tab.id);
     }
   }, [requestPath, view]);
+
+  useEffect(() => {
+    if (!requestImage || view !== 'files') return;
+    const tab: FileTab = { id: `image:${requestImage.id}`, kind: 'image', image: requestImage };
+    setTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
+    setActiveTabId(tab.id);
+  }, [requestImage, view]);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeFilePath = activeTab?.kind === 'file' ? activeTab.path : undefined;
@@ -96,11 +117,11 @@ export function FileWorkspace({ host, scopeKey, requestPath, onActiveFileChange,
   const tabStrip = <div className="workspace-tabs">
     <div className="file-tabs" role="tablist" aria-label="右侧面板标签">
       {tabs.map((tab) => {
-        const label = tab.kind === 'file' ? fileTabLabel(tab.path) : tab.kind === 'tree' ? '文件' : tab.kind === 'activity' ? '动态' : '运行';
+        const label = tab.kind === 'file' ? fileTabLabel(tab.path) : tab.kind === 'image' ? tab.image.alt || '图片' : tab.kind === 'tree' ? '文件' : tab.kind === 'activity' ? '动态' : '运行';
         return <div key={tab.id} className={`file-tab ${tab.id === activeTabId ? 'active' : ''}`}>
           <button type="button" role="tab" aria-selected={tab.id === activeTabId} className="file-tab-title"
             title={tab.kind === 'file' ? tab.path : label} onClick={() => activate(tab)}>
-            <AppIcon name={tab.kind === 'file' ? 'file' : tab.kind === 'tree' ? 'folder' : 'schedules'} /><span>{label}</span>
+            <AppIcon name={tab.kind === 'image' ? 'image' : tab.kind === 'file' ? 'file' : tab.kind === 'tree' ? 'folder' : 'schedules'} /><span>{label}</span>
           </button>
           <button type="button" className="file-tab-close" aria-label={`关闭 ${label}`} onClick={() => closeTab(tab.id)}>×</button>
         </div>;
@@ -123,7 +144,8 @@ export function FileWorkspace({ host, scopeKey, requestPath, onActiveFileChange,
   return <div className="file-workspace">
     {tabHost && createPortal(tabStrip, tabHost)}
     {activeTab?.kind === 'activity' || activeTab?.kind === 'run' ? runContent : <div className="file-workspace-body">
-      {!host ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
+      {activeTab?.kind === 'image' ? <ImagePreviewPanel image={activeTab.image} />
+        : !host ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
         : activeTab?.kind === 'file'
           ? <div className="file-preview-layout">
               <div className="file-preview-main">

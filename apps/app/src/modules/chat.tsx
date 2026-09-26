@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import mindlinkSeal from '../../themes/assets/mindlink-seal.png';
 import { AppIcon } from '../shared/app-icon.js';
 import { bindingFromKeyEvent } from '../shared/hotkeys.js';
 import { AssistantReply } from '../shared/assistant-reply.js';
+import type { ImagePreview } from '../shared/message-image.js';
 import { DelegationApprovalDetails, isVisibleAssistantDelegationApproval } from '../shared/delegation-approval-details.js';
 import { elapsedLabel, ReplyRunDetails } from '../shared/reply-run-details.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
@@ -27,7 +29,7 @@ import { PageToolbar } from '../shared/page-toolbar.js';
 import { AssistantHome } from './assistant-home.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
 import { normalizeWorkspacePath } from '../shared/work-file-links.js';
-import { FileWorkspace } from '../viewer/files/file-tabs.js';
+import { FileWorkspace, ImagePreviewPanel, type ImagePreviewRequest } from '../viewer/files/file-tabs.js';
 import type { ViewerFileHost } from '../viewer/host/file-host.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
@@ -163,6 +165,7 @@ export function ChatPanel({
   const [workspaceTabHost, setWorkspaceTabHost] = useState<HTMLDivElement | null>(null);
   const [activityTab, setActivityTab] = useState<'activity' | 'run' | 'files'>(surface === 'work' ? 'files' : 'activity');
   const [filePreviewPath, setFilePreviewPath] = useState<string>();
+  const [imagePreviewRequest, setImagePreviewRequest] = useState<ImagePreviewRequest>();
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const activityEventsRef = useRef<ActivityEvent[]>([]);
   const [lastRun, setLastRun] = useState<AgentRunRecord>();
@@ -192,6 +195,7 @@ export function ChatPanel({
   const conversation = useRef<HTMLDivElement>(null);
   const conversationInner = useRef<HTMLDivElement>(null);
   const attachmentInput = useRef<HTMLInputElement>(null);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
   const [watermarkCount, setWatermarkCount] = useState(1);
   const desktop = window.yuanpu;
   const queryClient = useQueryClient();
@@ -523,6 +527,7 @@ export function ChatPanel({
       activityEventsRef.current = [];
       appliedTranscript.current = '';
       setFilePreviewPath(undefined);
+      setImagePreviewRequest(undefined);
       void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
     } catch (error) { setWorkListError(formatError(error)); }
   }
@@ -549,6 +554,7 @@ export function ChatPanel({
       activityEventsRef.current = [];
       appliedTranscript.current = '';
       setFilePreviewPath(undefined);
+      setImagePreviewRequest(undefined);
       void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
     } catch (error) { setWorkListError(formatError(error)); }
   }
@@ -754,6 +760,24 @@ export function ChatPanel({
     setFilePreviewPath(normalizeWorkspacePath(rawPath) ?? rawPath);
   }
 
+  const resolveWorkspaceImage = useCallback(async (path: string): Promise<string | null> => {
+    if (surface !== 'work' || !desktop || !workConversationId) return null;
+    const preview = await desktop.readWorkFile(workConversationId, path);
+    if (preview.kind !== 'image' || !/^image\/(?:png|jpeg|gif|webp|avif)$/i.test(preview.mediaType)) return null;
+    return `data:${preview.mediaType};base64,${preview.base64}`;
+  }, [desktop, surface, workConversationId]);
+
+  function openImageInSidebar(image: ImagePreview) {
+    setImagePreviewRequest({ ...image, id: crypto.randomUUID() });
+    setActivityOpen(true);
+    if (surface === 'work') setActivityTab('files');
+  }
+
+  function addPreviewToConversation(markdown: string) {
+    setInput((current) => `${current.trimEnd()}${current.trim() ? '\n\n' : ''}${markdown}`);
+    composerInput.current?.focus();
+  }
+
   // Session association lives here; the viewer only receives its host seam.
   const fileHost: ViewerFileHost | undefined = surface === 'work' && workConversationId && desktop
     ? {
@@ -929,7 +953,10 @@ export function ChatPanel({
                 </div>
                 <div className="message-body">
                   {message.role === 'assistant' ? <AssistantReply text={message.text} surface={surface} run={message.run}
-                    onOpenFilePath={surface === 'work' ? openWorkspaceFile : undefined} /> : <p>{message.text}</p>}
+                    onOpenFilePath={surface === 'work' ? openWorkspaceFile : undefined}
+                    resolveWorkspaceImage={surface === 'work' ? resolveWorkspaceImage : undefined}
+                    onOpenImageInSidebar={openImageInSidebar}
+                    onAddToConversation={archiveOpen || workArchived ? undefined : addPreviewToConversation} /> : <p>{message.text}</p>}
                   {message.role !== 'assistant' && message.tools?.map((tool) => (
                     <div className={`tool-event ${tool.status}`} key={`${message.id}-${tool.name}`}>
                       <span className="tool-check">{tool.status === 'completed' ? '✓' : '!'}</span>
@@ -1000,6 +1027,7 @@ export function ChatPanel({
               accept=".txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.yaml,.yml,.xml,.html,.css"
               onChange={(event) => void addAttachments(event.currentTarget.files)} />
             <textarea
+              ref={composerInput}
               aria-label="消息"
               value={input}
               onChange={(event) => setInput(event.target.value)}
@@ -1071,7 +1099,9 @@ export function ChatPanel({
               rightPanelGesture.current = { startedAtLimit: rightPanelWidth >= maxRightPanelWidth(bounds.width, listOpen) - 1, stopped: false };
               resizeRightPanel(bounds.right - rightPanelWidth + (event.key === 'ArrowLeft' ? -24 : 24), panel);
             }} />
-          {surface === 'assistant' ? <AssistantHome active={active && activityOpen} link={assistantLinkQuery.data}
+          {surface === 'assistant' ? imagePreviewRequest
+            ? <ImagePreviewPanel image={imagePreviewRequest} onClose={() => setImagePreviewRequest(undefined)} />
+            : <AssistantHome active={active && activityOpen} link={assistantLinkQuery.data}
             linkLoading={assistantLinkQuery.isLoading} linkError={assistantLinkQuery.error} retryLink={() => void assistantLinkQuery.refetch()}
             activity={{
               runId: visibleRun?.runId ?? (navigationTarget?.runId ? undefined : activeRunId),
@@ -1083,8 +1113,8 @@ export function ChatPanel({
             run={visibleRun} archiveOpen={archiveOpen} onToggleArchive={() => setArchiveOpen((value) => !value)} /> : <>
           <FileWorkspace key={workConversationId ?? 'empty'} host={fileHost} scopeKey={workConversationId ?? 'empty'}
             rootName={workConversationsQuery.data?.find((item) => item.id === workConversationId)?.workingDirectory.split(/[\\/]/).filter(Boolean).pop()}
-            requestPath={filePreviewPath} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
-            view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); }}
+            requestPath={filePreviewPath} requestImage={imagePreviewRequest} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
+            view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); setImagePreviewRequest(undefined); }}
             runContent={activityTab === 'activity' ? (
             <div className="activity-content">
               <div className="activity-section-heading">

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { AppIcon } from './app-icon.js';
 import { MessageContent } from './message-content.js';
+import type { ImagePreview } from './message-image.js';
 import type { ReplyRunInfo } from './reply-run-cache.js';
 import { ReplyRunDetails } from './reply-run-details.js';
 import { isSavedContent, readSavedContent, removeSavedContent, saveContent, savedContentEvent, type SavedContentKind } from './saved-content.js';
@@ -11,11 +12,17 @@ export function AssistantReply({
   surface,
   run,
   onOpenFilePath,
+  onAddToConversation,
+  onOpenImageInSidebar,
+  resolveWorkspaceImage,
 }: {
   text: string;
   surface: 'work' | 'assistant';
   run?: ReplyRunInfo;
   onOpenFilePath?: (path: string) => void;
+  onAddToConversation?: (markdown: string) => void;
+  onOpenImageInSidebar?: (image: ImagePreview) => void;
+  resolveWorkspaceImage?: (path: string) => Promise<string | null>;
 }) {
   const [copied, setCopied] = useState(false);
   const [errorNotice, setErrorNotice] = useState('');
@@ -47,7 +54,8 @@ export function AssistantReply({
 
   return <div className="assistant-reply">
     {run && <ReplyRunDetails run={run} />}
-    <MessageContent text={text} onOpenFilePath={onOpenFilePath} />
+    <MessageContent text={text} onOpenFilePath={onOpenFilePath} onAddToConversation={onAddToConversation}
+      onOpenImageInSidebar={onOpenImageInSidebar} resolveWorkspaceImage={resolveWorkspaceImage} />
     <div className="reply-toolbar" role="toolbar" aria-label="回复操作">
       <button type="button" className={copied ? 'copied' : ''} aria-label={copied ? '已复制' : '复制'} data-tooltip={copied ? '已复制' : '复制'} onClick={() => void copy()}><AppIcon name={copied ? 'check' : 'copy'} /></button>
       <button type="button" className={savedMemory ? 'saved' : ''} aria-label={savedMemory ? '取消保存到记忆' : '保存到记忆'} aria-pressed={savedMemory}
