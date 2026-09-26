@@ -120,7 +120,8 @@ export class AssistantDelegationCoordinator {
     }
     const allowed = new Set(current.result.evidenceRefs ?? []);
     const expected = new Set(archive.brief.completionCriteria);
-    if (checks.length !== expected.size || checks.some((check) => !expected.has(check.criterion)
+    if (checks.length !== expected.size || new Set(checks.map((check) => check.criterion)).size !== expected.size
+      || checks.some((check) => !expected.has(check.criterion)
       || check.evidenceRefs.length === 0 || check.evidenceRefs.some((ref) => !allowed.has(ref)))) {
       throw new Error('Each completion criterion needs an actual returned evidence reference.');
     }

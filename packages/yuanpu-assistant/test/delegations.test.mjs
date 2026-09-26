@@ -36,7 +36,7 @@ test('delegation tool keeps one durable task ID and links only returned evidence
   const coordinator = new AssistantDelegationCoordinator(home, host);
   const tool = createAssistantDelegationTool(coordinator, 'session_one');
   const input = { action: 'start', skillName: 'reviewer', goal: 'Inspect source one.',
-    completionCriteria: ['Cited finding'], contextRefs: ['source:one'], readOnly: true };
+    completionCriteria: ['Cited finding', 'Scope checked'], contextRefs: ['source:one'], readOnly: true };
   const first = JSON.parse((await tool.execute('stable_tool_call', input)).content[0].text);
   const expectedId = createHash('sha256').update('session_one:stable_tool_call').digest('hex');
   assert.equal(first.taskId, expectedId);
@@ -45,8 +45,14 @@ test('delegation tool keeps one durable task ID and links only returned evidence
   assert.equal(starts, 2);
   await assert.rejects(tool.execute('check', { action: 'link_evidence', taskId: expectedId,
     checks: [{ criterion: 'Cited finding', evidenceRefs: ['invented'] }] }), /actual returned evidence/);
+  await assert.rejects(tool.execute('check', { action: 'link_evidence', taskId: expectedId,
+    checks: [{ criterion: 'Cited finding', evidenceRefs: ['source:one'] },
+      { criterion: 'Cited finding', evidenceRefs: ['source:one'] }] }), /actual returned evidence/);
+  await assert.rejects(tool.execute('check', { action: 'link_evidence', taskId: expectedId,
+    checks: [{ criterion: 'Cited finding', evidenceRefs: ['source:one'] }] }), /actual returned evidence/);
   const linked = JSON.parse((await tool.execute('check', { action: 'link_evidence', taskId: expectedId,
-    checks: [{ criterion: 'Cited finding', evidenceRefs: ['source:one'] }] })).content[0].text);
+    checks: [{ criterion: 'Cited finding', evidenceRefs: ['source:one'] },
+      { criterion: 'Scope checked', evidenceRefs: ['source:one'] }] })).content[0].text);
   assert.equal(linked.status, 'evidence_linked');
   await tool.execute('follow', { action: 'follow_up', taskId: expectedId, text: 'Check the citation again.' });
   assert.deepEqual(records.get(expectedId).followUps, ['Check the citation again.']);

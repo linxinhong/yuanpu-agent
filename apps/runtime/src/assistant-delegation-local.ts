@@ -18,8 +18,11 @@ export interface ProfessionalTaskScope {
 }
 
 export interface ProfessionalTaskHost {
-  /** Revalidate the whole model-proposed scope against trusted user grants. */
-  authorizeTask(brief: DelegationBrief): Promise<void>;
+  /** Return a task-bound grant only after checking trusted user authorization. */
+  authorizeTask(brief: DelegationBrief): Promise<ProfessionalTaskAccess>;
+}
+
+export interface ProfessionalTaskAccess {
   readSource(ref: string): Promise<string>;
   executeCapability(input: { name: string; arguments: Record<string, unknown>; approvalRequestId?: string },
     signal?: AbortSignal): Promise<{ status: 'completed' | 'needs_approval' | 'unknown' | 'failed';
@@ -31,12 +34,12 @@ export interface ProfessionalSessionOptions {
   assistantHome: string;
   skillsRoot: string;
   scope: ProfessionalTaskScope;
-  host: ProfessionalTaskHost;
+  access: ProfessionalTaskAccess;
   model: Model<Api>;
   modelRuntime: ModelRuntime;
 }
 
-export function createProfessionalTools(scope: ProfessionalTaskScope, host: ProfessionalTaskHost) {
+export function createProfessionalTools(scope: ProfessionalTaskScope, access: ProfessionalTaskAccess) {
   const allowedRefs = new Set(scope.contextRefs);
   const allowedCapabilities = new Set(scope.authorizedCapabilities);
   const readSource = defineTool({
@@ -45,7 +48,10 @@ export function createProfessionalTools(scope: ProfessionalTaskScope, host: Prof
     parameters: Type.Object({ ref: Type.String() }, { additionalProperties: false }),
     execute: async (_id, { ref }) => {
       if (!allowedRefs.has(ref)) throw new Error('Source reference is outside the delegated scope.');
-      return { content: [{ type: 'text' as const, text: await host.readSource(ref) }], details: undefined };
+      const content = await access.readSource(ref);
+      if (content.length > 32_000) throw new Error('Delegated source exceeds the per-read budget.');
+      return { content: [{ type: 'text' as const, text: content }],
+        details: { status: 'completed', resultRef: ref } };
     },
   });
   const executeCapability = defineTool({
@@ -55,8 +61,9 @@ export function createProfessionalTools(scope: ProfessionalTaskScope, host: Prof
       approvalRequestId: Type.Optional(Type.String()) }, { additionalProperties: false }),
     execute: async (_id, { name, arguments: args, approvalRequestId }, signal) => {
       if (!allowedCapabilities.has(name)) throw new Error('Capability is outside the delegated scope.');
-      const result = await host.executeCapability({ name, arguments: args ?? {}, approvalRequestId }, signal);
-      return { content: [{ type: 'text' as const, text: result.text ?? result.status }], details: result };
+      const result = await access.executeCapability({ name, arguments: args ?? {}, approvalRequestId }, signal);
+      return { content: [{ type: 'text' as const, text: (result.text ?? result.status).slice(0, 16_000) }],
+        details: result };
     },
   });
   return [readSource, executeCapability];
@@ -108,11 +115,16 @@ export async function createProfessionalSession(options: ProfessionalSessionOpti
   const cwd = join(taskRoot, 'workspace');
   const agentDir = join(taskRoot, 'agent');
   const sessions = join(taskRoot, 'sessions');
-  await Promise.all([mkdir(cwd, { recursive: true, mode: 0o700 }),
-    mkdir(agentDir, { recursive: true, mode: 0o700 }),
-    mkdir(sessions, { recursive: true, mode: 0o700 })]);
+  await mkdir(taskRoot, { recursive: true, mode: 0o700 });
   if (!inside(canonicalRoot, await canonicalRealDirectory(taskRoot))) {
     throw new Error('Professional task directory escaped its isolated root.');
+  }
+  for (const directory of [cwd, agentDir, sessions]) {
+    await assertNoSymlinkAncestors(directory);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (!inside(canonicalRoot, await canonicalRealDirectory(directory))) {
+      throw new Error('Professional session directory escaped its isolated root.');
+    }
   }
   const settingsManager = SettingsManager.inMemory({ retry: { enabled: false } });
   const resourceLoader = new DefaultResourceLoader({
@@ -140,7 +152,7 @@ export async function createProfessionalSession(options: ProfessionalSessionOpti
   const { session } = await createAgentSession({
     cwd, agentDir, settingsManager, resourceLoader, sessionManager,
     model: options.model, modelRuntime: options.modelRuntime,
-    tools: activeToolNames, customTools: createProfessionalTools(scope, options.host),
+    tools: activeToolNames, customTools: createProfessionalTools(scope, options.access),
   });
   const actualTools = session.getActiveToolNames();
   if (actualTools.length !== activeToolNames.length
@@ -198,12 +210,12 @@ export class LocalProfessionalAdapter implements DelegationExecutionAdapter {
   async run(brief: DelegationBrief, followUp: string | undefined, signal: AbortSignal): Promise<DelegationResult> {
     if (this.active.has(brief.taskId)) throw new Error('Professional task is already running.');
     signal.throwIfAborted();
-    await this.options.host.authorizeTask(brief);
+    const access = await this.options.host.authorizeTask(brief);
     const scope: ProfessionalTaskScope = {
       taskId: brief.taskId, skillName: brief.skillName,
       contextRefs: brief.contextRefs, authorizedCapabilities: brief.authorizedCapabilities,
     };
-    const opened = await createProfessionalSession({ ...this.options, scope });
+    const opened = await createProfessionalSession({ ...this.options, scope, access });
     const { session } = opened;
     const stop = () => { void session.abort(); };
     signal.addEventListener('abort', stop, { once: true });
