@@ -1,4 +1,6 @@
+import { WorkDirectoryMoveCoordinator, WorkMoveConflict } from './work-directory-move.js';
 import {
+  verifyYuanpuSessionLocation,
   createDemoCapabilitySource,
   createBuiltinBrowserSource,
   BrowserControlClient,
@@ -26,6 +28,8 @@ import {
   capabilityManifestDigest,
   openYuanpuMetadataDatabase,
   readYuanpuChatTranscript,
+  readSavedWorkMessageWindow,
+  searchWorkConversations,
   readYuanpuSavedToolResults,
   PersistentAgentService,
   HostNotificationRouter,
@@ -551,6 +555,19 @@ async function serve(): Promise<void> {
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
   const workConversations = metadata.workConversations;
+  const workMoves = new WorkDirectoryMoveCoordinator({
+    store: workConversations, workspaceId: home.config.workingDirectory,
+    workspaceRoot: home.workspacePath, sessionsRoot: home.sessionsPath,
+    toolStateRoot: join(home.root, 'workflows', 'agent-tools'),
+    assertIdle: async (_ids, sessionIds) => {
+      if ((await approvals.listPending()).some((approval) => sessionIds.includes(approval.sessionId))) {
+        throw new WorkMoveConflict('Work session has a pending capability approval.');
+      }
+    },
+    drainSessions: (ids) => agentExecutor.drainSessions(ids),
+    verifySession: (cwd, id, file) => verifyYuanpuSessionLocation(cwd, id, home.sessionsPath, file),
+  });
+  await workMoves.recover();
   for (const intent of workConversations.pendingCreateIntents(home.config.workingDirectory)) {
     if (!intent.committed) await removeUncommittedWorkspaceDirectory(home.workspacePath, intent.relativeDirectory);
     workConversations.finishCreateIntent(intent.id);
@@ -606,6 +623,7 @@ async function serve(): Promise<void> {
     return currentWorkPromise;
   };
   const scanSavedWorkTurns = (conversationId?: string) => {
+    if (workMoves.busy) return;
     for (const item of workConversations.listExisting(workScope)) {
       if (conversationId && item.id !== conversationId) continue;
       const piSessionId = workConversations.sessionId(home.config.workingDirectory, item.id);
@@ -920,7 +938,18 @@ async function serve(): Promise<void> {
       return;
     }
 
+    let releaseWorkRead: (() => void) | undefined;
     try {
+      if (url.pathname === RUNTIME_ROUTES.workMove && request.method === 'POST') {
+        const body = await readJsonBody(request);
+        if (!isRecord(body)) throw new WorkMoveConflict('Invalid Work move request.');
+        const result = await workMoves.move({ requestId: body.requestId, kind: body.kind,
+          id: body.id, targetFolderId: body.targetFolderId } as import('@yuanpu-agent/protocol').WorkMoveRequest);
+        response.end(JSON.stringify(result));
+        return;
+      }
+      // Covers creation, previews, transcripts, both submission paths, approvals and search.
+      releaseWorkRead = workMoves.acquireRead();
       if (url.pathname === RUNTIME_ROUTES.health && request.method === 'GET') {
         response.end(
           JSON.stringify({
@@ -1427,6 +1456,52 @@ async function serve(): Promise<void> {
           ? readYuanpuChatTranscript(workConversation?.working_directory ?? home.config.workingDirectory,
             piSessionId, home.sessionsPath)
           : []));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workSearch && request.method === 'GET') {
+        try {
+          const limit = url.searchParams.get('limit');
+          response.end(JSON.stringify(searchWorkConversations(workConversations, {
+            workspaceId: workScope, sessionsDirectory: home.sessionsPath,
+            query: url.searchParams.get('query') ?? '',
+            archive: (url.searchParams.get('archive') ?? undefined) as import('@yuanpu-agent/protocol').WorkSearchQuery['archive'],
+            limit: limit === null ? undefined : Number(limit),
+            cursor: url.searchParams.get('cursor') ?? undefined,
+          })));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workMessageWindow && request.method === 'GET') {
+        const conversationId = url.searchParams.get('conversationId');
+        const entryId = url.searchParams.get('entryId');
+        const radius = url.searchParams.get('radius');
+        if (!conversationId || !entryId) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Work conversation and message IDs are required.' }));
+          return;
+        }
+        const piSessionId = workConversations.sessionId(workScope, conversationId);
+        if (!piSessionId) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
+        try {
+          const cwd = workConversations.row(workScope, conversationId)?.working_directory ?? workScope;
+          const window = readSavedWorkMessageWindow(cwd, piSessionId, home.sessionsPath,
+            entryId, radius === null ? undefined : Number(radius));
+          response.end(JSON.stringify(window.status === 'ok' ? { ...window, messages: window.messages.map((item) => ({
+            id: item.entryId, role: item.role, text: item.text, at: item.at,
+          })) } : window));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
         return;
       }
 
@@ -2090,7 +2165,7 @@ async function serve(): Promise<void> {
       response.statusCode = 404;
       response.end(JSON.stringify({ error: 'Not found' }));
     } catch (error) {
-      response.statusCode = 500;
+      response.statusCode = error instanceof WorkMoveConflict ? 409 : 500;
       const message = error instanceof Error ? error.message : String(error);
       const missingApiKey = message.includes('No API key found');
       const safeMessage = missingApiKey
@@ -2102,7 +2177,7 @@ async function serve(): Promise<void> {
           ? { hint: `Check ${join(home.appPath, 'auth.json')} or the provider environment variable.` }
           : {}),
       }));
-    }
+    } finally { releaseWorkRead?.(); }
   });
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {

@@ -62,9 +62,81 @@ export interface WorkTurnSource {
   assistantText: string;
 }
 
+export interface WorkDirectoryMovePlan {
+  requestId: string;
+  workspaceId: string;
+  kind: 'folder' | 'conversation';
+  id: string;
+  targetFolderId: string | null;
+  conversations: Array<{ id: string; piSessionId: string; from: string; to: string }>;
+  folders: Array<{ id: string; from: string; to: string }>;
+}
+
 /** Owns the selected Work conversation and an idempotent source ledger. */
 export class WorkConversationStore {
   constructor(private readonly database: DatabaseSync) {}
+
+  moveRecords(): Array<{ requestId: string; value: string }> {
+    return (this.database.prepare("SELECT key, value FROM yp_runtime_metadata WHERE key LIKE 'work.move.%'")
+      .all() as Array<{ key: string; value: string }>).map((row) => ({ requestId: row.key.slice(10), value: row.value }));
+  }
+
+  saveMove(requestId: string, value: string): void {
+    this.database.prepare(`INSERT INTO yp_runtime_metadata(key,value,updated_at) VALUES(?,?,?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`)
+      .run(`work.move.${requestId}`, value, new Date().toISOString());
+  }
+
+  assertMoveIdle(ids: string[]): void {
+    for (const id of ids) {
+      const work = this.database.prepare('SELECT pi_session_id,working_directory FROM yp_work_conversations WHERE conversation_id=?')
+        .get(id) as { pi_session_id: string; working_directory: string } | undefined;
+      if (!work) throw new Error('Unknown Work conversation.');
+      const bindings = this.database.prepare(`SELECT pi_session_id,workspace_id,conversation_id,thread_id
+        FROM yp_conversation_bindings WHERE (namespace='desktop' AND conversation_id=?) OR workspace_id=?`)
+        .all(id, work.working_directory) as Array<{ pi_session_id: string; workspace_id: string; conversation_id: string; thread_id: string }>;
+      if (bindings.length !== 1 || bindings[0]!.pi_session_id !== work.pi_session_id
+        || bindings[0]!.workspace_id !== work.working_directory || bindings[0]!.thread_id !== '') {
+        throw new Error('Work directory has inconsistent or additional session bindings; resolve them before moving.');
+      }
+      const active = this.database.prepare(`SELECT r.run_id FROM yp_agent_runs r
+        JOIN yp_conversation_bindings b ON b.binding_id=r.binding_id
+        WHERE b.namespace='desktop' AND b.conversation_id=? AND r.status IN ('queued','running','waiting_approval') LIMIT 1`).get(id);
+      if (active) throw new Error('Work conversation has a queued, running or approval-waiting run.');
+    }
+  }
+
+  /** The commit marker and all live paths become authoritative in one transaction. */
+  commitMove(plan: WorkDirectoryMovePlan, committedJournal: string): void {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      this.assertMoveIdle(plan.conversations.map((item) => item.id));
+      const now = new Date().toISOString();
+      for (const item of plan.conversations) {
+        const result = this.database.prepare(`UPDATE yp_work_conversations SET working_directory=?,updated_at=?
+          WHERE workspace_id=? AND conversation_id=? AND working_directory=?`)
+          .run(item.to, now, plan.workspaceId, item.id, item.from);
+        if (result.changes !== 1) throw new Error('Work directory changed while moving.');
+        this.database.prepare(`UPDATE yp_conversation_bindings SET workspace_id=?,updated_at=?
+          WHERE namespace='desktop' AND conversation_id=? AND workspace_id=?`).run(item.to, now, item.id, item.from);
+      }
+      for (const item of plan.folders) {
+        const result = this.database.prepare(`UPDATE yp_work_folders SET relative_directory=?,updated_at=?
+          WHERE workspace_id=? AND folder_id=? AND relative_directory=?`)
+          .run(item.to, now, plan.workspaceId, item.id, item.from);
+        if (result.changes !== 1) throw new Error('Work folder changed while moving.');
+      }
+      if (plan.kind === 'conversation') {
+        this.database.prepare('UPDATE yp_work_conversations SET folder_id=?,sort_order=? WHERE conversation_id=?')
+          .run(plan.targetFolderId, this.nextOrder('yp_work_conversations','folder_id',plan.workspaceId,plan.targetFolderId),plan.id);
+      } else {
+        this.database.prepare('UPDATE yp_work_folders SET parent_id=?,sort_order=? WHERE folder_id=?')
+          .run(plan.targetFolderId, this.nextOrder('yp_work_folders','parent_id',plan.workspaceId,plan.targetFolderId),plan.id);
+      }
+      this.saveMove(plan.requestId, committedJournal);
+      this.database.exec('COMMIT');
+    } catch (error) { this.database.exec('ROLLBACK'); throw error; }
+  }
 
   private currentKey(workspaceId: string): string {
     return `work.current.${createHash('sha256').update(workspaceId).digest('hex')}`;
@@ -78,7 +150,12 @@ export class WorkConversationStore {
 
   private toConversation(row: WorkRow, currentId: string): WorkConversation {
     return { id: row.conversation_id, createdAt: row.created_at, updatedAt: row.updated_at,
-      workingDirectory: row.working_directory, title: row.title, iconId: row.icon_id,
+      workingDirectory: row.working_directory,
+      previousWorkingDirectories: this.moveRecords().flatMap(({ value }) => {
+        const move = JSON.parse(value) as { state: string; result: { previousDirectories: Array<{ conversationId: string; path: string }> } };
+        return move.state === 'done' || move.state === 'committed'
+          ? move.result.previousDirectories.filter((item) => item.conversationId === row.conversation_id).map((item) => item.path) : [];
+      }), title: row.title, iconId: row.icon_id,
       folderId: row.folder_id, sortOrder: row.sort_order, archivedAt: row.archived_at,
       tagIds: (this.database.prepare('SELECT tag_id FROM yp_work_conversation_tags WHERE conversation_id = ? ORDER BY tag_id')
         .all(row.conversation_id) as Array<{ tag_id: string }>).map((item) => item.tag_id),

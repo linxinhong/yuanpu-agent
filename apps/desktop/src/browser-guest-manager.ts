@@ -45,13 +45,13 @@ export class BrowserGuestManager {
   constructor(private readonly options: BrowserGuestManagerOptions) {}
 
   attachGuest(payload: { key: string; webContentsId: number; conversationId: string; windowId: number; hostWebContentsId: number }): { ok: boolean; error?: string } {
-    if (this.guests.has(payload.key)) this.detachGuest(payload.key);
     const webContents = electronWebContents.fromId(payload.webContentsId);
     if (!webContents || webContents.isDestroyed()) return { ok: false, error: 'Guest webContents not found.' };
     if (webContents.getType() !== 'webview') return { ok: false, error: 'Only webview guests can be attached.' };
     if (webContents.hostWebContents?.id !== payload.hostWebContentsId) {
       return { ok: false, error: 'Browser guest does not belong to the requesting window.' };
     }
+    if (this.guests.has(payload.key)) this.detachGuest(payload.key);
     const guest: ManagedGuest = {
       key: payload.key,
       conversationId: payload.conversationId,

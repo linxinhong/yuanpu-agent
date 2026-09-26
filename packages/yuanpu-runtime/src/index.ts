@@ -7,6 +7,8 @@ export * from './packages/index.js';
 export * from './persistence/index.js';
 export * from './scheduler/index.js';
 export * from './pi/index.js';
+export * from './pi/work-message-search.js';
+export * from './persistence/work-search.js';
 
 export * from './builtin/web/source.js';
 export * from './builtin/browser/source.js';

@@ -27,7 +27,7 @@ const server = createServer((request, response) => {
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({
       version: '0.1.0',
-      protocolVersion: mode === 'health-protocol-mismatch' ? 999 : 5,
+      protocolVersion: mode === 'health-protocol-mismatch' ? 999 : 7,
       piVersion: 'fixture',
       mcpTools: [],
       configRoot: '/fixture',
@@ -64,6 +64,15 @@ const server = createServer((request, response) => {
       response.writeHead(status, { 'content-type': 'application/json' });
       response.end(JSON.stringify(body));
     };
+    if (request.url === '/v1/work/search?query=needle&archive=all&limit=5' && request.method === 'GET') {
+      reply(200, { items: [{ kind: 'message', conversationId: 'work:fixture', messageEntryId: 'entry-1' }], contentFailures: [] });
+      return;
+    }
+    if (request.url === '/v1/work/messages/window?conversationId=work%3Afixture&entryId=entry-1&radius=3' && request.method === 'GET') {
+      reply(200, { status: 'ok', messages: [{ id: 'entry-1', role: 'user', text: 'needle', at: '2026-09-27T00:00:00Z' }],
+        targetIndex: 0, hasBefore: false, hasAfter: false });
+      return;
+    }
     if (request.url === '/v1/schedules' && request.method === 'GET') {
       reply(200, [{ scheduleId: 'schedule-fixture', enabled: true }]);
       return;
@@ -114,7 +123,7 @@ const server = createServer((request, response) => {
 
 server.listen(0, '127.0.0.1', () => {
   const address = server.address();
-  const protocolVersion = mode === 'ready-protocol-mismatch' ? 999 : 5;
+  const protocolVersion = mode === 'ready-protocol-mismatch' ? 999 : 7;
   process.stdout.write(`${JSON.stringify({
     event: 'ready',
     host: '127.0.0.1',

@@ -81,6 +81,13 @@ function savedSessionBranch(cwd: string, piSessionId: string, directory: string)
   return [];
 }
 
+/** Verify discovery without opening or migrating the source transcript. */
+export function verifyYuanpuSessionLocation(cwd: string, piSessionId: string, directory: string, expectedFile: string): void {
+  if (SessionManager.findById(cwd, piSessionId, directory) !== expectedFile) {
+    throw new Error('Pi session could not be discovered at its relocated cwd.');
+  }
+}
+
 /** Read only the visible text branch; never expose tool arguments or model diagnostics. */
 export function readYuanpuChatTranscript(
   cwd: string,
@@ -351,7 +358,8 @@ export interface YuanpuChatSession {
   readonly sessionId: string;
   prompt(message: string, options?: { runId?: string; signal?: AbortSignal; context?: Pick<CapabilityContext, 'conversationId' | 'workspaceId' | 'userId'> }): Promise<YuanpuChatResult>;
   abort(): Promise<void>;
-  dispose(): void;
+  assertMovable(): Promise<void>;
+  dispose(): Promise<void>;
 }
 
 async function readMemory(agentDir: string): Promise<string> {
@@ -540,10 +548,17 @@ export async function createYuanpuChatSession(
     abort() {
       return Promise.all([session.abort(), subagents.abortAll(), workflows.abortAll(), goals.pause('User stopped the run.')]).then(() => undefined);
     },
-    dispose() {
-      void subagents.dispose();
-      void workflows.dispose();
-      void goals.pause('Session closed.');
+    async assertMovable() {
+      if (subagents.listRuns().some((run) => ['queued', 'running', 'needs_approval'].includes(run.status))
+        || (await workflows.list()).some((run) => run.status === 'running' || run.status === 'needs_approval'
+          || (run.status === 'paused' && run.checkpoint))
+        || goals.focused()?.status === 'active') {
+        throw new Error('Work session has an active subagent, workflow, goal or checkpoint approval.');
+      }
+    },
+    async dispose() {
+      await Promise.all([subagents.dispose(), workflows.dispose(), goals.pause('Session closed.')]);
+      await queue;
       session.dispose();
     },
   };

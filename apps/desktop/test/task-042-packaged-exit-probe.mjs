@@ -113,7 +113,7 @@ try {
         expression: 'window.yuanpu.runtimeInfo().then((info) => ({ protocolVersion: info.protocolVersion, configRoot: info.configRoot }))',
         awaitPromise: true, returnByValue: true,
       });
-      return reply.result.value?.protocolVersion === 5 && reply.result.value?.configRoot === home;
+      return reply.result.value?.protocolVersion === 7 && reply.result.value?.configRoot === home;
     } catch { return false; }
   }, 'Packaged App preload and Runtime did not become ready');
   const exited = new Promise((resolveExit, rejectExit) => {

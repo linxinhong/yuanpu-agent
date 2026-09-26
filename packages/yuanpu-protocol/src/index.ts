@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 7;
 
 import type { NotificationNavigationTarget } from './host-events.js';
 import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
@@ -47,6 +47,9 @@ export const RUNTIME_ROUTES = {
   desktopTranscript: '/v1/desktop/transcript',
   workConversations: '/v1/work/conversations',
   workFolders: '/v1/work/folders',
+  workMove: '/v1/work/move',
+  workSearch: '/v1/work/search',
+  workMessageWindow: '/v1/work/messages/window',
   workTags: '/v1/work/tags',
   workOrder: '/v1/work/order',
   workFiles: '/v1/work/files',
@@ -130,6 +133,8 @@ export interface WorkConversation {
   createdAt: string;
   updatedAt: string;
   workingDirectory: string;
+  /** Historical absolute paths may still appear verbatim in old messages. */
+  previousWorkingDirectories?: string[];
   current: boolean;
   archived: boolean;
   archivedAt: string | null;
@@ -139,6 +144,50 @@ export interface WorkConversation {
   sortOrder: number;
   tagIds: string[];
 }
+
+export interface WorkMoveRequest {
+  requestId: string;
+  kind: 'folder' | 'conversation';
+  id: string;
+  targetFolderId: string | null;
+}
+export interface WorkMoveResult {
+  requestId: string;
+  conversationIds: string[];
+  previousDirectories: Array<{ conversationId: string; path: string }>;
+  warning: string;
+}
+
+export interface WorkSearchQuery {
+  query: string;
+  archive?: 'active' | 'archived' | 'all';
+  limit?: number;
+  cursor?: string;
+}
+
+export interface WorkSearchItem {
+  kind: 'conversation' | 'message';
+  conversationId: string;
+  title: string;
+  archived: boolean;
+  folderPath: Array<{ id: string; name: string }>;
+  matchedField: 'title' | 'folder' | 'tag' | 'message';
+  snippet: string;
+  messageEntryId?: string;
+  messagePosition?: number;
+  role?: 'user' | 'assistant';
+  at?: string;
+}
+
+export interface WorkSearchResult {
+  items: WorkSearchItem[];
+  nextCursor?: string;
+  contentFailures: Array<{ conversationId: string; reason: 'missing' | 'unreadable' | 'corrupt' | 'too_large' | 'budget_exceeded' }>;
+}
+
+export type WorkMessageWindowResult =
+  | { status: 'ok'; messages: DesktopTranscriptMessage[]; targetIndex: number; hasBefore: boolean; hasAfter: boolean }
+  | { status: 'missing' | 'unreadable' | 'corrupt' | 'too_large' | 'not_found'; messages: [] };
 
 export interface WorkFolder {
   id: string;
@@ -488,6 +537,9 @@ export interface DesktopBridge {
   createWorkConversation(folderId?: string, requestId?: string): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string): Promise<WorkConversation>;
   updateWorkConversation(conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }): Promise<WorkConversation>;
+  moveWorkNode(request: WorkMoveRequest): Promise<WorkMoveResult>;
+  searchWorkConversations(input: WorkSearchQuery): Promise<WorkSearchResult>;
+  getWorkMessageWindow(conversationId: string, entryId: string, radius?: number): Promise<WorkMessageWindowResult>;
   listWorkFolders(): Promise<WorkFolder[]>;
   createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<WorkFolder>;
   updateWorkFolder(folderId: string, patch: { name?: string; iconId?: string }): Promise<WorkFolder>;

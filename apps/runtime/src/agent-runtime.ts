@@ -131,6 +131,22 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
     }
   }
 
+  async drainSessions(sessionIds: string[]): Promise<void> {
+    const selected = sessionIds.flatMap((id) => {
+      const pooled = this.#sessions.get(id);
+      return pooled ? [{ id, pooled }] : [];
+    });
+    for (const { pooled } of selected) {
+      if (pooled.active) throw new Error('Work session is executing.');
+      await (await pooled.promise).assertMovable();
+    }
+    for (const { id, pooled } of selected) {
+      this.#sessions.delete(id);
+      await (await pooled.promise).dispose();
+    }
+    await Promise.all([...this.#disposals]);
+  }
+
   reset(): void {
     for (const pooled of this.#sessions.values()) {
       pooled.retired = true;

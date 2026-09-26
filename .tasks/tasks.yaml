@@ -1557,7 +1557,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-044
     title: "实现助理对工作过程的评估"
-    status: in_progress
+    status: done
     goal: "助理自动审阅工作目标、过程、结论及产物，发现遗漏并生成有证据的后续动作。"
     scope:
       in: ["工作审阅服务与 skills/review-work/SKILL.md，消费助理自动化触发", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
@@ -1586,14 +1586,21 @@ tasks:
       owner: "root-assistant-review-044"
       attempts: 0
       claimed_at: "2026-09-26T18:57:54.778Z"
-      completed_at: null
+      completed_at: "2026-09-26T19:48:46.097Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-work-review"
       branch: "task/task-044-assistant-work-review"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated main", status: "passed", summary: "TASK-044 product commits efb609d and 94735b3 plus memory 80afbab are ancestors of main merge 84ec395; latest tested main 88d76b4 retains them. Other owners' staged changes were not included."}
+        - {type: "command", check: "pnpm check on latest clean main", status: "passed", summary: "Node 24.15.0 and pnpm 11.22.0 on macOS arm64; clean detached main 88d76b4, runner .git/worktrees/assistant-final-check/coding-owner/1790452042434433000.log exited 0 with changed_during_run=false."}
+        - {type: "command", check: "native build and smoke", status: "passed", summary: "TASK-044 final product revision 94735b3 passed pnpm build:native and pnpm smoke:native, runner .git/worktrees/assistant-work-review/coding-owner/1790451632518215000.log, changed_during_run=false."}
+        - {type: "test", check: "review source and Worker behavior", status: "passed", summary: "Bounded Work turns, tool results and verified write snapshots trigger the assistant-only review skill in a real Worker with loopback model. Tests cover exact-content completion, irrelevant write partial, model response loss, temporary unavailability, deletion after human edit and credential samples."}
+        - {type: "review", check: "independent read-only blockers", status: "passed", summary: "Independent reviewer confirmed prior completion-claim, model interruption, unavailable/withdrawn Markdown, review-only tool isolation and common credential-leak blockers closed. Regex redaction remains a defense in depth, not a guarantee for unknown credential formats."}
+        - {type: "document", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-044.md records implementation, bounded proof semantics, sources, recovery, security and platform limits."}
+        - {type: "boundary", check: "external validation", status: "unverified", summary: "No real external review model or arbitrary user business task was exercised; Windows/Linux native builds and cloud deployment remain unverified."}
       follow_up_candidates: []
   - id: TASK-045
     title: "实现用户理解与自动工作整理技能"
-    status: pending
+    status: in_progress
     goal: "助理从有证据的工作评估和直接交流持续理解用户并维护工作台账。"
     scope:
       in: ["skills/understand-user、maintain-memory、organize-work、follow-up 四项专属技能", "USER/MEMORY 有预算摘要与按需专题生长", "work context/focus/commitments/projects 更新及协作反馈", "将评估待核验事项接到宿主委派接口，回收结果后重新审阅并提交修订"]
@@ -1619,15 +1626,14 @@ tasks:
     investigation_hints: ["入口 yuanpu-assistant skills 模板、整理由来源/评估队列消费；遵循 docs/assistant-skills-and-automation.md 和 Hermes 短摘要冻结策略", "为技能写清输入、触发、允许操作、完成条件；只用自身记忆/审阅/委派接口，不暗载系统技能", "先 assistant test：时间变化、矛盾、预算和索引引用，再 pnpm check；不以生成文本代替实际落盘"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-assistant-organize-045-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T19:48:59.387Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-045-assistant-organize"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
     status: done
@@ -1981,7 +1987,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-056
     title: "安全搬迁工作会话及文件夹的磁盘目录"
-    status: in_progress
+    status: done
     goal: "用户把会话或文件夹移到树中其他位置时，实际工作目录随之搬迁，Pi 历史、下一轮运行和文件预览继续指向正确目录。"
     scope:
       in: ["单会话与文件夹子树移动的受控磁盘迁移", "受影响会话的 cwd、绑定、Pi JSONL header 关联更新与迁移恢复", "运行中冲突、目标占用、根外目录、符号链接与中途失败处理"]
@@ -2008,14 +2014,22 @@ tasks:
       owner: "conversation-move-astra-10677"
       attempts: 0
       claimed_at: "2026-09-26T18:50:23.054Z"
-      completed_at: null
+      completed_at: "2026-09-26T19:51:25.185Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-move-astra"
       branch: "task/task-056-work-directory-move"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "implementation and tested tree", status: "passed", summary: "TASK-056 implementation 85aebbb; merged main 3930afb into tested HEAD 4a5ab7e, only task ledger changed. Main integration remains for orchestrator."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0 full build, Yuanpu type checks and tests passed for implementation tree retained by 85aebbb/4a5ab7e. Runner 1790450371414911000; 73.41s. Prior failure limited to stale v5 Desktop fixtures, fixed and separately verified."}
+        - {type: "assertion", check: "real disk, SQLite, Pi and recovery", status: "passed", summary: "24 focused tests passed at clean 4a5ab7e (runner 1790450478757655000): model tool writes at new cwd after cache drain; transcript append/source IDs stable; subtree archive/empty leaves; preview/read leases; 5 SIGKILL recovery boundaries; partial JSONL and SQLite failure rollback; approvals, queued/running, malformed state, paths, links, Git worktrees and permissions."}
+        - {type: "assertion", check: "Runtime route and preview", status: "passed", summary: "Authenticated HTTP move, Work list current cwd, file preview and requestId replay passed; protocol v6 with Desktop IPC/bridge. Runner 1790450098413913000 plus final full suite."}
+        - {type: "review", check: "independent move failure and concurrency review", status: "passed", summary: "review_move independently reviewed migration order/path containment/source ledger/preview/permissions. Fixed 3 P2 findings (uncached checkpoint, Git worktree registration, umask mode). Incremental review found no new blocking P1/P2; unknown state hardening also applied."}
+        - {type: "memory", check: ".tasks/memory/TASK-056.md", status: "passed", summary: "Task memory records implementation/tested revisions, environment, test logs, reviewer findings, integration handoff and limitations."}
+        - {type: "manual", check: "platform and malicious external process limits", status: "unverified", summary: "Windows/Linux/native/real user Home not exercised. Node rename has residual same-user external path-swap TOCTOU; linked Git worktrees are rejected pending a Git-aware migration flow. No Pi upstream edits or real user data touched."}
+        - {type: "test", check: "integrated main pnpm check", status: "passed", summary: "Integrated main 88d76b4 on Node 24.15.0/pnpm 11.22.0; pnpm check completed with exit 0, including 114 Runtime tests. Only unrelated .zcode plan remained unstaged; no source changes during run."}
       follow_up_candidates: []
   - id: TASK-057
     title: "实现工作文件夹与会话内容搜索"
-    status: in_progress
+    status: done
     goal: "用户按文件夹名、会话名、标签或已保存的消息正文找到会话，结果带可定位的树路径与消息位置。"
     scope:
       in: ["Work 管理搜索契约、Runtime 查询和分页/边界限制", "Pi JSONL 可见用户/助理消息的检索或可重建本地索引", "归档筛选、祖先路径、摘要和结果定位标识"]
@@ -2040,14 +2054,19 @@ tasks:
       owner: "conversation-search-sol-10677"
       attempts: 0
       claimed_at: "2026-09-26T18:53:11.475Z"
-      completed_at: null
+      completed_at: "2026-09-26T19:56:12.408Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-search-sol"
       branch: "task/task-057-work-search"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-057 search implementation, tests and memory merged into main at 566605d after TASK-056 v6; protocol v7."}
+        - {type: "test", check: "integrated pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0; pnpm check passed on main 566605d, including 114 Runtime tests. Only unrelated .zcode plan remained unstaged."}
+        - {type: "review", check: "independent search wiring review", status: "passed", summary: "Independent reviewer found no P1/P2 in scope, read leases, Desktop IPC and protocol v7; earlier cursor and missing-file findings fixed."}
+        - {type: "document", check: "task memory", status: "passed", summary: ".tasks/memory/TASK-057.md records source revision, entry points, verification and limits."}
+        - {type: "boundary", check: "renderer and platform", status: "unverified", summary: "Renderer search and scrolling belong to TASK-059; Windows/Linux, native, real user DB and large interactive search latency not tested."}
       follow_up_candidates: []
   - id: TASK-058
     title: "工作会话文件树后端阶段验证"
-    status: pending
+    status: done
     goal: "独立验证文件夹管理、真实磁盘移动、Pi 会话恢复与内容搜索在失败和重启后仍保持同一工作事实。"
     scope:
       in: ["独立验证者使用临时 Home 的真实 Runtime/SQLite/Pi JSONL 走新建、移动、重启、搜索和归档恢复", "注入目录冲突、迁移中断、无权路径与索引失效，核对权威状态", "记录 revision、环境、fixture/真实模式及 pass/fail/unverified"]
@@ -2069,18 +2088,23 @@ tasks:
     investigation_hints: ["复用隔离工作会话并保留历史（TASK-039）的 work-conversation.test.mjs 与 apps/runtime/test/runtime.test.mjs；重点核对工作对话右侧栏文件预览（TASK-052）在 cwd 迁移后指向新目录", "沿用 docs/work-conversation-tree.md 不变量；必要时做额外 native smoke，但单纯网页 fixture 不替代 Pi JSONL/SQLite 证据"]
     escalation_conditions: ["如目录迁移无法在故障窗口保持单一可读状态，退回安全搬迁工作会话及文件夹的磁盘目录（TASK-056）而不是放宽验收", "如果当前平台不能运行打包 Runtime，标记平台项 unverified 并保留可运行的临时 Home 证据"]
     result:
-      owner: null
+      owner: "conversation-verifier-sol-10677-10677"
       attempts: 0
-      claimed_at: null
-      completed_at: null
-      worktree: null
-      branch: null
-      evidence: []
+      claimed_at: "2026-09-26T19:59:17.440Z"
+      completed_at: "2026-09-26T20:20:18.513Z"
+      worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
+      branch: "task/task-058-work-tree-verification"
+      evidence:
+        - {type: "commit", check: "independent verification integrated", status: "passed", summary: "TASK-058 verifier branch 7fe33c1 merged to main f488fc8; independent Runtime test implementation 396723a."}
+        - {type: "test", check: "real Runtime HTTP and durable state", status: "passed", summary: "V58-01..03 independently exercised nested folders, two Work conversations, actual disk move, SQLite bindings, Pi JSONL history, restart, preview, search, archive, ID retention and rejected moves under temporary YUANPU_HOME; 2/2 new tests passed."}
+        - {type: "test", check: "fault and search regressions", status: "passed", summary: "V58-04..06 reused 24/24 move fault tests and 2/2 JSONL search tests with real temporary SQLite/Pi data and local SSE fixture model. No persistent search index exists; missing/corrupt JSONL yields contentFailures."}
+        - {type: "test", check: "integrated main pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 pnpm check on main f488fc8 exited 0; Runtime 116/116 tests passed. Only unrelated .zcode plan remained unstaged."}
+        - {type: "document", check: "scenario report and memory", status: "passed", summary: ".tasks/verification/TASK-058/results.md records V58-01..07, revision, commands, pass/unverified and limits; .tasks/memory/TASK-058.md provides handoff."}
+        - {type: "boundary", check: "platform and real user data", status: "unverified", summary: "Windows/Linux, packaged SEA/native and real user database not exercised; no external model invoked."}
       follow_up_candidates: []
-
   - id: TASK-059
     title: "接入工作会话文件夹树管理界面"
-    status: pending
+    status: in_progress
     goal: "用户在现有工作对话左栏像管理文件一样管理会话，且能看清文件夹层级、拖动结果、标签、归档与搜索定位。"
     scope:
       in: ["左侧工作树、紧凑工具栏、面包屑、折叠/缩进、选中态及三主题样式", "新建会话/文件夹、行内重命名、更换图标、添加标签、归档/恢复、排序与拖放/移动到菜单", "树搜索、消息结果定位、空态/失败恢复和键盘操作"]
@@ -2104,15 +2128,14 @@ tasks:
     investigation_hints: ["入口 apps/app/src/modules/chat.tsx 的 work-conversation-list、PageToolbar、muse-theme.css；复用 shared/app-icon.tsx、apps/app/themes token 与既有右栏响应式规则", "预检工作对话右侧栏文件预览（TASK-052）合入后的 activity-panel 文件 tab、设置全局字体配置（TASK-053）的字体 token 与当前未提交 shell-layout；先组件/状态测试，再按 UI Delivery 在浏览器完成新建→移动→搜索→归档任务旅程", "可评估 @pierre/trees 的 React 适配与 keyboard/DnD，但 stable ID/路径与迁移授权由 Yuanpu 服务端掌握；不用该库也须满足同等交互"]
     escalation_conditions: ["若现有窄侧栏无法承载深层树，先用可调整宽度、截断提示和面包屑解决，勿引入全屏浮框替换已确认布局", "如果 v003 图与真实组件有冲突，以已确认的 Yuanpu 顶栏/主题与文字行为为准并记录可见差异"]
     result:
-      owner: null
+      owner: "conversation-tree-ui-sol-10677-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T20:21:11.427Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
+      branch: "task/task-059-work-tree-ui"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-060
     title: "工作会话文件夹树完整业务验收"
     status: pending
