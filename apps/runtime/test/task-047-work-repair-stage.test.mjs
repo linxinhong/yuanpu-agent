@@ -235,7 +235,7 @@ test('TASK-047 real Runtime Work repair changes a partial review only after new 
     AND availability='available'`).length, 1);
   assert.deepEqual((await readdir(join(root, 'assistant', 'skills'))).sort(),
     ['delegate-and-verify', 'follow-up', 'maintain-memory', 'organize-work',
-      'review-work', 'understand-user']);
+      'reflect-and-suggest', 'review-work', 'understand-user']);
   assert.equal((await readFile(join(root, 'assistant', 'skills', 'review-work', 'SKILL.md'),
     'utf8')).includes('reviewer'), false, 'professional skill must stay outside Assistant Home');
   const assistantRun = await api('/v1/chat/submit', 'POST', { surface: 'assistant',

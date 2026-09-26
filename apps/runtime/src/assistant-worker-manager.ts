@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { isSea } from 'node:sea';
 import { resolveAssistantModelConfig, type AssistantModelSelection } from './assistant-model.js';
 import type { AssistantSourceHost } from '@yuanpu-agent/assistant';
-import type { AssistantDelegationBrief, AssistantDelegationRecord } from '@yuanpu-agent/protocol';
+import type { AssistantSuggestion } from '@yuanpu-agent/assistant';
+import type { AssistantDelegationBrief, AssistantDelegationRecord,
+  AssistantEvidenceRef } from '@yuanpu-agent/protocol';
 import type { AssistantDelegationService } from './assistant-delegation-service.js';
 
 export interface AssistantTaskRecord {
@@ -22,6 +24,8 @@ export interface AssistantWorkerManagerOptions {
   model: AssistantModelSelection;
   sources?: AssistantSourceHost;
   delegations?: AssistantDelegationService;
+  deliverSuggestion?: (id: string, content: string) => Promise<{
+    status: 'accepted' | 'failed' | 'unknown' | 'deferred'; ref?: string }>;
   command?: WorkerCommand;
   startupTimeoutMs?: number;
   shutdownGraceMs?: number;
@@ -43,6 +47,7 @@ export class AssistantWorkerManager {
   private restartTimer?: NodeJS.Timeout;
   private restartCount = 0;
   private pending = new Map<string, { resolve(value: AssistantTaskRecord | undefined): void; reject(error: Error): void }>();
+  private suggestionPending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
 
   constructor(private readonly options: AssistantWorkerManagerOptions) {}
 
@@ -55,6 +60,8 @@ export class AssistantWorkerManager {
   private rejectPending(error: Error): void {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
+    for (const pending of this.suggestionPending.values()) pending.reject(error);
+    this.suggestionPending.clear();
   }
 
   private async launch(): Promise<void> {
@@ -139,6 +146,37 @@ export class AssistantWorkerManager {
               error: error instanceof Error ? error.message : String(error) }));
         } else if (message.kind === 'delegation-error' && typeof message.error === 'string') {
           this.report(new Error(`Assistant delegation wake: ${message.error}`));
+        } else if (message.kind === 'suggestion-delivery-request' && typeof message.id === 'string') {
+          const id = message.id;
+          const suggestionId = message.suggestionId;
+          const content = message.content;
+          const evidence = message.evidence;
+          const delivery = typeof suggestionId === 'string' && typeof content === 'string'
+            && Array.isArray(evidence) && evidence.length > 0 && evidence.length <= 100
+            && evidence.every((ref: unknown) => Boolean(ref && typeof ref === 'object'
+              && typeof (ref as AssistantEvidenceRef).sourceId === 'string'
+              && typeof (ref as AssistantEvidenceRef).sourceVersion === 'string'))
+            && this.options.deliverSuggestion && this.options.sources
+            ? (async () => {
+              for (const ref of evidence as AssistantEvidenceRef[]) {
+                const current = await this.options.sources!.currentSource(ref.sourceId,
+                  { kind: 'personal', id: 'local-user' });
+                if (current.status !== 'available' || current.sourceVersion !== ref.sourceVersion) {
+                  return { status: 'deferred' as const };
+                }
+              }
+              return this.options.deliverSuggestion!(suggestionId, content);
+            })()
+            : Promise.reject(new Error('Assistant suggestion delivery is unavailable.'));
+          void delivery.then((value) => child.send?.({ kind: 'suggestion-delivery-result', id, value }),
+            (error) => child.send?.({ kind: 'suggestion-delivery-result', id,
+              error: error instanceof Error ? error.message : String(error) }));
+        } else if (message.kind === 'suggestion-result' && typeof message.correlationId === 'string') {
+          const pending = this.suggestionPending.get(message.correlationId);
+          if (!pending) return;
+          this.suggestionPending.delete(message.correlationId);
+          if (typeof message.error === 'string') pending.reject(new Error(message.error));
+          else pending.resolve(message.value);
         } else if ((message.kind === 'result' || message.kind === 'task') && typeof message.correlationId === 'string') {
           const pending = this.pending.get(message.correlationId);
           if (!pending) return;
@@ -210,6 +248,32 @@ export class AssistantWorkerManager {
   }
 
   task(id: string): Promise<AssistantTaskRecord | undefined> { return this.request({ kind: 'task', id }); }
+  private suggestionOperation(message: Record<string, unknown>): Promise<unknown> {
+    if (!this.ready || !this.child?.connected) return Promise.reject(new Error('Assistant Worker is unavailable.'));
+    const correlationId = randomUUID();
+    return new Promise((resolve, reject) => {
+      this.suggestionPending.set(correlationId, { resolve, reject });
+      this.child!.send({ ...message, correlationId }, (error) => {
+        if (error) { this.suggestionPending.delete(correlationId); reject(error); }
+      });
+    });
+  }
+  suggestions(): Promise<{ items: AssistantSuggestion[]; pausedUntil?: string }> {
+    return this.suggestionOperation({ kind: 'suggestion-list' }) as
+      Promise<{ items: AssistantSuggestion[]; pausedUntil?: string }>;
+  }
+  suggestionFeedback(id: string, action: 'ignored' | 'snoozed' | 'accepted',
+    snoozedUntil?: string): Promise<AssistantSuggestion> {
+    return this.suggestionOperation({ kind: 'suggestion-feedback', id, action, snoozedUntil }) as
+      Promise<AssistantSuggestion>;
+  }
+  suggestionPause(until?: string): Promise<{ pausedUntil?: string }> {
+    return this.suggestionOperation({ kind: 'suggestion-pause', until }) as
+      Promise<{ pausedUntil?: string }>;
+  }
+  suggestionRead(id: string): Promise<AssistantSuggestion> {
+    return this.suggestionOperation({ kind: 'suggestion-read', id }) as Promise<AssistantSuggestion>;
+  }
   cancel(id: string): void { if (this.ready) this.child?.send({ kind: 'cancel', id }); }
   notifyDelegation(record: AssistantDelegationRecord): void {
     if (this.ready) this.child?.send({ kind: 'delegation-event', record });

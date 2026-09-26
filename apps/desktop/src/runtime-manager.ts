@@ -776,6 +776,27 @@ export class RuntimeManager {
     return this.request(`${RUNTIME_ROUTES.assistantMirrors}/${encodeURIComponent(mirrorId)}/retry`, { method: 'POST' });
   }
 
+  listAssistantSuggestions(): Promise<import('@yuanpu-agent/protocol').AssistantSuggestionInbox> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions);
+  }
+
+  feedbackAssistantSuggestion(id: string, action: 'ignored' | 'snoozed' | 'accepted',
+    snoozedUntil?: string): Promise<import('@yuanpu-agent/protocol').AssistantSuggestion> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'feedback', id, feedback: action, snoozedUntil }) });
+  }
+
+  setAssistantSuggestionsPaused(until?: string): Promise<{ pausedUntil?: string }> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'pause', until }) });
+  }
+
+  markAssistantSuggestionRead(id: string): Promise<import('@yuanpu-agent/protocol').AssistantSuggestion> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'read', id }) });
+  }
+
   searchPlugins(query: string): Promise<PluginSearchResult[]> {
     return this.request(`${RUNTIME_ROUTES.pluginSearch}?q=${encodeURIComponent(query)}`);
   }

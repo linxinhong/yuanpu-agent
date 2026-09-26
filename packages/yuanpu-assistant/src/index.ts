@@ -8,3 +8,4 @@ export * from './automation.js';
 export * from './work-review.js';
 export * from './user-understanding.js';
 export * from './work-organization.js';
+export * from './suggestions.js';

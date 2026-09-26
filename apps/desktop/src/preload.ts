@@ -36,6 +36,11 @@ const bridge: DesktopBridge = {
   unbindAssistantContact: () => ipcRenderer.invoke('assistant:link:unbind'),
   listAssistantMirrors: (runId) => ipcRenderer.invoke('assistant:mirrors:list', runId),
   retryAssistantMirror: (mirrorId) => ipcRenderer.invoke('assistant:mirrors:retry', mirrorId),
+  listAssistantSuggestions: () => ipcRenderer.invoke('assistant:suggestions:list'),
+  feedbackAssistantSuggestion: (id, action, snoozedUntil) =>
+    ipcRenderer.invoke('assistant:suggestions:feedback', id, action, snoozedUntil),
+  setAssistantSuggestionsPaused: (until) => ipcRenderer.invoke('assistant:suggestions:pause', until),
+  markAssistantSuggestionRead: (id) => ipcRenderer.invoke('assistant:suggestions:read', id),
   getAgentRun: (runId) => ipcRenderer.invoke('agent:runs:get', runId),
   getPrivateImRunSummary: (runId) => ipcRenderer.invoke('im:private-runs:summary', runId),
   cancelAgentRun: (runId) => ipcRenderer.invoke('agent:runs:cancel', runId),

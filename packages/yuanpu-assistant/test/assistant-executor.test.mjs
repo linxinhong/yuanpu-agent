@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -61,14 +61,14 @@ test('skills cannot enter through Work, project instructions, external links or 
   await writeFile(join(root, 'agent', 'settings.json'), JSON.stringify({ packages: [workSkill] }));
   assert.deepEqual((await loadAssistantSkills(paths)).map((skill) => skill.name),
     ['delegate-and-verify', 'follow-up', 'maintain-memory', 'organize-work',
-      'review-work', 'understand-user']);
+      'reflect-and-suggest', 'review-work', 'understand-user']);
 
   const localSkill = join(paths.skills, 'assistant-only');
   await mkdir(localSkill);
   await writeFile(join(localSkill, 'SKILL.md'), '---\nname: assistant-only\ndescription: >\n  Assistant-only review\n  guidance.\n---\n\n# Assistant only\n');
   assert.deepEqual((await loadAssistantSkills(paths)).map((skill) => skill.name),
     ['assistant-only', 'delegate-and-verify', 'follow-up', 'maintain-memory',
-      'organize-work', 'review-work', 'understand-user']);
+      'organize-work', 'reflect-and-suggest', 'review-work', 'understand-user']);
   assert.equal((await loadAssistantSkills(paths))[0].description, 'Assistant-only review guidance.');
 
   const linkedSkill = join(paths.skills, 'work-only');
@@ -148,7 +148,7 @@ test('independent Pi executor makes real loopback rounds and freezes core memory
   t.after(() => executor.close());
   const first = await executor.openSession();
   assert.deepEqual(first.skillNames, ['delegate-and-verify', 'follow-up', 'maintain-memory',
-    'organize-work', 'review-work', 'understand-user']);
+    'organize-work', 'reflect-and-suggest', 'review-work', 'understand-user']);
   assert.equal((await first.prompt('Hello')).message, 'Verified reply.');
   const originalPrompt = JSON.stringify(requests[0].messages[0]);
   assert.match(originalPrompt, /You are the user’s personal assistant/);
@@ -196,4 +196,20 @@ test('an assistant-only skill can run through the independent Pi lane', async (t
   assert.equal(requests[0].tools?.length ?? 0, 0,
     'background review cannot invoke a professional task even when the assistant has delegation');
   await assert.rejects(session.invokeSkill('work-only'), /Unknown assistant skill/);
+});
+
+test('private reflection uses an isolated ephemeral Pi Session without retaining candidate prompts', async (t) => {
+  const root = await workspace(t);
+  const home = join(root, 'assistant');
+  const { host } = await loopbackModel(t);
+  const executor = await createAssistantExecutor({ assistantHome: home, host });
+  t.after(() => executor.close());
+  const before = await readdir(join(home, 'sessions', 'pi'));
+  const reflection = await executor.openSession(undefined, { backgroundSkill: 'reflect-and-suggest' });
+  assert.deepEqual(reflection.skillNames, ['reflect-and-suggest']);
+  assert.equal((await reflection.invokeSkill('reflect-and-suggest', 'Private candidate marker.')).message,
+    'Verified reply.');
+  await reflection.close();
+  assert.deepEqual(await readdir(join(home, 'sessions', 'pi')), before);
+  assert.deepEqual(await readdir(join(home, 'sessions', 'snapshots')), []);
 });

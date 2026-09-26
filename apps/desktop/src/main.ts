@@ -142,6 +142,14 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('assistant:link:get', trustedHandler(() => runtime.getAssistantLink()));
   ipcMain.handle('assistant:link:bind', trustedHandler((contactId: string) => runtime.bindAssistantContact(contactId)));
   ipcMain.handle('assistant:link:unbind', trustedHandler(() => runtime.unbindAssistantContact()));
+  ipcMain.handle('assistant:suggestions:list', trustedHandler(() => runtime.listAssistantSuggestions()));
+  ipcMain.handle('assistant:suggestions:feedback', trustedHandler((id: string,
+    action: 'ignored' | 'snoozed' | 'accepted', snoozedUntil?: string) =>
+    runtime.feedbackAssistantSuggestion(id, action, snoozedUntil)));
+  ipcMain.handle('assistant:suggestions:pause', trustedHandler((until?: string) =>
+    runtime.setAssistantSuggestionsPaused(until)));
+  ipcMain.handle('assistant:suggestions:read', trustedHandler((id: string) =>
+    runtime.markAssistantSuggestionRead(id)));
   ipcMain.handle('assistant:mirrors:list', trustedHandler((runId: string) => runtime.listAssistantMirrors(runId)));
   ipcMain.handle('assistant:mirrors:retry', trustedHandler((mirrorId: string) => runtime.retryAssistantMirror(mirrorId)));
   ipcMain.handle('agent:runs:get', trustedHandler((runId: string) => runtime.getAgentRun(runId)));

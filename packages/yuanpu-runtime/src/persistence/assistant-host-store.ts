@@ -43,6 +43,12 @@ export interface AssistantHostDelivery {
   failureCode?: string;
 }
 
+export interface AssistantProactiveDelivery {
+  suggestionId: string;
+  status: 'delivering' | 'accepted' | 'failed' | 'unknown';
+  failureCode?: string;
+}
+
 interface BindingRow {
   channel: AssistantHostBinding['channel'];
   account_id: string;
@@ -109,6 +115,54 @@ function requestFromRow(row: RequestRow): AssistantHostRequest {
 /** Host-only identity, request and delivery ledger. Assistant Home never owns platform credentials. */
 export class AssistantHostStore {
   constructor(private readonly database: DatabaseSync) {}
+
+  markUncertainProactiveDeliveries(): void {
+    this.database.prepare(`UPDATE yp_assistant_proactive_deliveries
+      SET status='unknown',failure_code='interrupted',updated_at=?
+      WHERE status='delivering'`).run(new Date().toISOString());
+  }
+
+  proactiveDelivery(suggestionId: string): AssistantProactiveDelivery | undefined {
+    const row = this.database.prepare(`SELECT suggestion_id,status,failure_code
+      FROM yp_assistant_proactive_deliveries WHERE suggestion_id=?`).get(suggestionId) as
+      { suggestion_id: string; status: AssistantProactiveDelivery['status'];
+        failure_code: string | null } | undefined;
+    return row && { suggestionId: row.suggestion_id, status: row.status,
+      ...(row.failure_code ? { failureCode: row.failure_code } : {}) };
+  }
+
+  beginProactiveDelivery(suggestionId: string, content: string,
+    binding: AssistantHostBinding): { started: boolean; record: AssistantProactiveDelivery } {
+    if (!/^suggestion-[a-f0-9]{24}(?:-r[1-9][0-9]*)?$/u.test(suggestionId) || !content.trim()
+      || content.length > 4_000 || binding.channel !== 'wecom') {
+      throw new Error('Invalid Assistant proactive delivery.');
+    }
+    const digest = createHash('sha256').update(content).digest('hex');
+    const now = new Date().toISOString();
+    const changed = this.database.prepare(`INSERT OR IGNORE INTO yp_assistant_proactive_deliveries
+      (suggestion_id,content_digest,account_id,external_user_id,binding_generation,
+       status,created_at,updated_at) VALUES (?,?,?,?,?,'delivering',?,?)`)
+      .run(suggestionId, digest, binding.accountId, binding.externalUserId,
+        binding.generation, now, now);
+    const row = this.database.prepare(`SELECT content_digest,account_id,external_user_id,
+      binding_generation FROM yp_assistant_proactive_deliveries WHERE suggestion_id=?`)
+      .get(suggestionId) as { content_digest: string; account_id: string;
+        external_user_id: string; binding_generation: number };
+    if (row.content_digest !== digest || row.account_id !== binding.accountId
+      || row.external_user_id !== binding.externalUserId
+      || row.binding_generation !== binding.generation) {
+      throw new Error('Assistant proactive delivery key has different content or target.');
+    }
+    return { started: changed.changes === 1, record: this.proactiveDelivery(suggestionId)! };
+  }
+
+  finishProactiveDelivery(suggestionId: string,
+    status: Extract<AssistantProactiveDelivery['status'], 'accepted' | 'failed' | 'unknown'>,
+    failureCode?: string): void {
+    this.database.prepare(`UPDATE yp_assistant_proactive_deliveries
+      SET status=?,failure_code=?,updated_at=? WHERE suggestion_id=? AND status='delivering'`)
+      .run(status, failureCode ?? null, new Date().toISOString(), suggestionId);
+  }
 
   desktop(): AssistantHostBinding {
     const row = this.database.prepare(`SELECT * FROM yp_assistant_bindings WHERE channel = 'desktop'

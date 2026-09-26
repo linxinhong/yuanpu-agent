@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
-import { parseWorkReviewProposal, parseUnderstandingProposal, isDirectUserStatement,
+import { parseWorkReviewProposal, parseUnderstandingProposal, parseSuggestionProposal,
+  suggestionCandidateKeys, isDirectUserStatement,
   type WorkReviewProposal, type AssistantUserUnderstanding,
-  type UnderstandingSnapshot, type UnderstandingProposal } from '@yuanpu-agent/assistant';
+  type UnderstandingSnapshot, type UnderstandingProposal, type SuggestionCandidate,
+  type SuggestionProposal, type AssistantSuggestionStore } from '@yuanpu-agent/assistant';
 import type { AssistantMemoryRepository, AssistantAutomationStore, AutomationHandler,
   AutomationJob, AutomationProposal, AssistantWorkReviewStore, WorkReviewSnapshot,
   AssistantWorkOrganization } from '@yuanpu-agent/assistant';
@@ -25,6 +27,12 @@ export interface WorkReviewAutomationHost {
 export interface UnderstandingAutomationHost {
   store: AssistantUserUnderstanding;
   understand(snapshot: UnderstandingSnapshot, signal: AbortSignal,
+    beforeModel: () => boolean): Promise<{ costUsd: number; message: string }>;
+}
+
+export interface SuggestionAutomationHost {
+  store: AssistantSuggestionStore;
+  reflect(candidates: SuggestionCandidate[], signal: AbortSignal,
     beforeModel: () => boolean): Promise<{ costUsd: number; message: string }>;
 }
 
@@ -57,7 +65,8 @@ function parseEvidenceProposal(message: string): Array<{ criterion: string; evid
 export function assistantAutomationHandler(memory: AssistantMemoryRepository,
   store: AssistantAutomationStore, delegations?: DelegationAutomationHost,
   reviews?: WorkReviewAutomationHost,
-  understanding?: UnderstandingAutomationHost): AutomationHandler {
+  understanding?: UnderstandingAutomationHost,
+  suggestions?: SuggestionAutomationHost): AutomationHandler {
   return {
     async lookup(job) {
       if (job.kind === 'review-work') {
@@ -167,6 +176,42 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
         store.savePreparedProposal(job, proposal);
         return proposal;
       }
+      if (job.kind === 'daily-check' || job.kind === 'weekly-check') {
+        const candidates = await suggestions?.store.candidates() ?? [];
+        if (!candidates.length) return { costUsd: 0, value: { candidates, parsed: [] } };
+        const prepared = store.preparedProposal(job);
+        if (prepared) {
+          const previous = (prepared.value as { candidateKeys?: unknown;
+            parsed?: SuggestionProposal[] }).candidateKeys;
+          return JSON.stringify(previous) === JSON.stringify(suggestionCandidateKeys(candidates))
+            ? { costUsd: prepared.costUsd, value: { candidates,
+              parsed: (prepared.value as { parsed: SuggestionProposal[] }).parsed } }
+            : { costUsd: 0, value: { candidates: [], parsed: [], skipped: 'source_changed' } };
+        }
+        if (store.hasEffectAttempt(job.effectId)) {
+          const attempted = suggestions!.store.reflectionAttempt(job.effectId);
+          return JSON.stringify(attempted) === JSON.stringify(suggestionCandidateKeys(candidates))
+            ? { costUsd: 0, value: { candidates, parsed: [] } }
+            : { costUsd: 0, value: { candidates: [], parsed: [], skipped: 'source_changed' } };
+        }
+        const billed = await suggestions!.reflect(candidates, signal, () => {
+          store.database.exec('BEGIN IMMEDIATE');
+          try {
+            const started = store.beginEffectAttempt(job);
+            if (started) suggestions!.store.recordReflectionAttempt(job.effectId, candidates);
+            store.database.exec('COMMIT');
+            return started;
+          } catch (error) { store.database.exec('ROLLBACK'); throw error; }
+        });
+        signal.throwIfAborted();
+        let parsed: SuggestionProposal[];
+        try { parsed = parseSuggestionProposal(billed.message, candidates); }
+        catch { parsed = []; }
+        const proposal = { costUsd: billed.costUsd, value: { candidates, parsed } };
+        store.savePreparedProposal(job, { costUsd: billed.costUsd,
+          value: { candidateKeys: suggestionCandidateKeys(candidates), parsed } });
+        return proposal;
+      }
       const database = memory.sources.database;
       const sources = database.prepare(`SELECT COUNT(*) AS total,
         SUM(CASE WHEN availability='available' THEN 1 ELSE 0 END) AS available
@@ -236,6 +281,24 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
       if (job.kind === 'daily-check' || job.kind === 'weekly-check') {
         await understanding?.store.reconcile(job.audience);
         await reviews?.organization?.reconcile();
+        if (suggestions) {
+          const value = proposal.value as { candidates?: SuggestionCandidate[];
+            parsed?: SuggestionProposal[]; skipped?: string };
+          if (value.skipped) {
+            commit(() => store.recordCheckpoint(job, { skipped: value.skipped }));
+            return;
+          }
+          const current = await suggestions.store.candidates();
+          const expected = value.candidates ?? [];
+          if (JSON.stringify(current) !== JSON.stringify(expected)) {
+            throw new Error('Suggestion evidence changed before commit.');
+          }
+          commit(() => {
+            suggestions.store.record(expected, value.parsed ?? []);
+            store.recordCheckpoint(job, { considered: expected.map((item) => item.candidateId) });
+          });
+          return;
+        }
       }
       commit(() => store.recordCheckpoint(job, proposal.value));
     },
