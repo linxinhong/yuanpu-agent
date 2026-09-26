@@ -44,3 +44,28 @@
   :root .app-shell > .page-host { grid-column: 1; grid-row: 2; }
   :root .app-shell .chat-panel.list-open .conversation-list-preview { top: 0; }
 }
+
+/* Workspace tabs share the title bar and track the right pane width. */
+.has-workspace-tabs .chat-heading { flex: 1 1 0; overflow: hidden; }
+.has-workspace-tabs .chat-breadcrumb { overflow: hidden; white-space: nowrap; }
+.workspace-tab-host { position: relative; box-sizing: border-box; flex: 0 1 calc(var(--workspace-toolbar-width) - 90px); min-width: 100px; height: 100%; padding-left: 8px; }
+.workspace-tab-host::before { position: absolute; top: 50%; left: 0; width: 1px; height: 22px; background: var(--yp-border-control); content: ''; transform: translateY(-50%); }
+.workspace-tabs { display: flex; align-items: center; gap: 6px; height: 100%; min-width: 0; -webkit-app-region: no-drag; }
+.workspace-tabs .file-tabs { flex-wrap: nowrap; min-width: 0; overflow-x: auto; padding: 0; gap: 5px; scrollbar-width: none; }
+.workspace-tabs .file-tab { flex: 0 0 auto; height: 32px; max-width: 230px; box-sizing: border-box; gap: 14px; padding: 0 9px 0 12px; border: 1px solid transparent; border-radius: 10px; background: transparent; }
+.workspace-tabs .file-tab.active { background: var(--yp-surface); border-color: var(--yp-border-subtle); box-shadow: 0 1px 3px rgb(0 0 0 / 3%); }
+.workspace-tabs .file-tab-title { display: flex; align-items: center; gap: 8px; max-width: 185px; color: var(--yp-text-muted); font-size: 0.8125rem; }
+.workspace-tabs .file-tab-title span { overflow: hidden; text-overflow: ellipsis; }
+.workspace-tabs .file-tab.active .file-tab-title { color: var(--yp-text); font-weight: 550; }
+.workspace-tabs svg { width: 17px; height: 17px; flex-shrink: 0; }
+.workspace-tabs .file-tab-close { width: 20px; height: 24px; font-size: 1.125rem; }
+.workspace-tabs .file-tab-add { width: 30px; height: 32px; border: 0; border-radius: 7px; }
+.workspace-tabs .file-tab-add:hover { background: var(--yp-surface); }
+.workspace-tab-add { position: relative; flex-shrink: 0; }
+.workspace-menu-dismiss { position: fixed; inset: 0; border: 0; background: transparent; cursor: default; z-index: 10; }
+.workspace-tab-menu { position: absolute; z-index: 11; top: 38px; right: 0; width: 150px; padding: 5px; border: 1px solid var(--yp-border-subtle); border-radius: 10px; background: var(--yp-surface); box-shadow: 0 8px 24px rgb(0 0 0 / 12%); }
+.workspace-tab-menu button { display: flex; width: 100%; align-items: center; gap: 10px; text-align: left; border: 0; border-radius: 6px; padding: 8px 10px; color: var(--yp-text); background: transparent; cursor: pointer; font-family: inherit; font-size: 0.875rem; }
+.workspace-tab-menu button:hover { background: var(--yp-surface-subtle); }
+.activity-panel > .file-workspace { flex: 1; min-height: 0; overflow: auto; }
+.activity-panel > .file-workspace > .file-workspace-body { padding: 12px 20px 20px; }
+.has-workspace-tabs .chat-heading { min-width: min(260px, 30vw); }

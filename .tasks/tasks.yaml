@@ -2208,3 +2208,40 @@ tasks:
       branch: null
       evidence: []
       follow_up_candidates: []
+
+  - id: TASK-063
+    title: "内置浏览器标签与 agent 共享会话"
+    status: in_progress
+    goal: "用户在工作对话右侧栏打开受控浏览器标签（地址栏/导航/刷新/系统浏览器），agent 经审批链的浏览器能力驱动同一 webview 会话，人机操作同一页面。"
+    scope:
+      in: ["Electron webview guest 挂载与 will-attach-webview 安全加固", "main BrowserGuestManager（CDP attach/命令执行/崩溃自愈/空闲释放）", "127.0.0.1 回环控制服务（Bearer + 体积上限）", "builtin.host.browser 能力源（10 命令、R 级审批）", "viewer/browser UI（标签页、工具栏、状态）与 FileWorkspace 集成"]
+      out: ["响应式视口、元素拾取、DevTools、录制、residency 挂起恢复、Chrome 数据导入", "浏览器 MCP 独立包化", "修改 Pi 上游镜像；覆盖既有未提交改动"]
+    constraints: ["渲染采用 renderer 内 <webview> guest（zcode 方案），guest 强制 sandbox/contextIsolation、剥 nodeintegration/disablewebsecurity", "回环控制服务仅监听 127.0.0.1 + Bearer token（启动引导下发）+ 请求体上限", "CDP detach 先于 webview 节点移除（防 UAF）；空闲释放；render-process-gone 事件驱动 renderer 重建", "能力走既有 execute_capability 审批链：navigate/back/forward/reload/snapshot/scroll/screenshot R1，click/type R2，evaluate R3", "目标会话无浏览器 tab 时：当前活跃会话自动开 tab（session-request 事件），非活跃会话返回明确错误", "viewer 组件不触碰 window.yuanpu，经 ViewerBrowserHost 接缝；完成需集成并在 main 验证；本轮测试后停在分支等用户审批"]
+    forbidden: ["guest 进程关闭 nodeintegration 或 websecurity", "回环服务监听非回环地址或无 Bearer 校验", "把 fixture、编译成功当作 UI/会话共享验收", "绕过审批直接执行 R2/R3 浏览器能力"]
+    acceptance:
+      - type: assertion
+        expect: "工作对话右侧栏经「+」菜单打开浏览器标签：地址栏导航、后退/前进/刷新、系统浏览器打开、加载/错误态、面板拖宽布局跟随；URL 按会话记忆"
+      - type: assertion
+        expect: "agent 在同一会话经 execute_capability 调用 browser_navigate 后，人工标签页看到同一页面；browser_screenshot 返回真实页面截图；R2/R3 命令先出审批卡，拒绝后不执行"
+      - type: assertion
+        expect: "webview 加固生效：guest 强制 sandbox、非白名单弹窗被拒并回传；CDP 在 webview 移除前 detach；guest 崩溃后 renderer 自动重建并恢复导航"
+      - type: assertion
+        expect: "回环控制服务拒绝无 token/跨源请求；目标会话未打开浏览器标签且非活跃时返回明确错误"
+      - type: assertion
+        expect: "单测覆盖：browser-state 纯函数、能力源定义/风险级/错误映射（fake executor）、控制客户端（fake 服务）、既有回归不破损"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-052"]
+    risk_level: "L4"
+    recommended_model: "glm-5.3"
+    investigation_hints: ["zcode 蓝本：packages/desktop/src/main/browserGuestManager.ts（裁剪至 attach/execute/detach + CDP 空闲释放）、desktopWindowChrome.ts:586-695（will-attach 加固）、UnifiedBrowserView.tsx + EmbeddedBrowserPaneParts.tsx（UI）、browser-use/commands.ts（命令面参考）", "yuanpu 接入点：viewer/files/file-tabs.tsx FileTab union、viewer/host/、chat.tsx fileHost 组装模式、apps/runtime/src/index.ts capabilitySources 数组与 stdin 引导（runtime-manager.ts:301-305）、notifications/index.ts SSE+回执先例", "验收环境 pnpm dev；models.dev 拉取偶发失败可先单独跑 pnpm --dir packages/ai run build"]
+    escalation_conditions: ["webview guest 在现有 CSP 下被拦截且 frame-src 放行无效时，记录证据回到架构决策（备选 WebContentsView）", "回执/命令载荷超过设计上限时回到通道决策，不私开第二通道"]
+    result:
+      owner: "zcode-63103"
+      attempts: 0
+      claimed_at: "2026-09-26T18:20:57.973Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/browser-tab"
+      branch: "task/task-063-browser-tab"
+      evidence: []
+      follow_up_candidates: []
