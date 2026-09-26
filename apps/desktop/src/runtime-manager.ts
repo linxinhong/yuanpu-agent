@@ -682,9 +682,10 @@ export class RuntimeManager {
     });
   }
 
-  listWorkFiles(conversationId: string, dirPath?: string): Promise<import('@yuanpu-agent/protocol').WorkDirectoryListing> {
+  listWorkFiles(conversationId: string, dirPath?: string, options?: { recursive?: boolean }): Promise<import('@yuanpu-agent/protocol').WorkDirectoryListing> {
     const query = new URLSearchParams({ conversationId });
     if (dirPath) query.set('path', dirPath);
+    if (options?.recursive) query.set('recursive', '1');
     return this.request(`${RUNTIME_ROUTES.workFiles}?${query}`);
   }
 

@@ -5,6 +5,9 @@ import { isAbsolute, relative, resolve } from 'node:path';
 export const MAX_TEXT_PREVIEW_BYTES = 256 * 1024;
 export const MAX_IMAGE_PREVIEW_BYTES = 8 * 1024 * 1024;
 export const MAX_PDF_PREVIEW_BYTES = 20 * 1024 * 1024;
+/** Flat workspace listings stop growing past this and report `truncated`. */
+export const MAX_TREE_ENTRIES = 5000;
+const MAX_TREE_DEPTH = 24;
 
 const IMAGE_MEDIA_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -115,6 +118,63 @@ export async function listWorkspaceFiles(root: string, dirPath: string) {
     return left.name.localeCompare(right.name, 'zh-Hans-CN');
   });
   return { path: toPosixPath(dirPath).replace(/^\.\//, '').replace(/\/+$/, ''), entries: visible };
+}
+
+/**
+ * Flattened recursive listing for path-first tree renderers. Symlinked
+ * entries are only included when their realpath stays inside the workspace;
+ * symlink cycles are cut by visited-set, and growth is capped by
+ * MAX_TREE_ENTRIES (reported via `truncated`).
+ */
+export async function listWorkspaceTree(root: string, dirPath: string) {
+  const realRoot = await fs.realpath(resolve(root));
+  const realDirectory = await resolveWorkspacePath(root, dirPath);
+  const stat = await fs.stat(realDirectory)
+    .catch(() => { throw new WorkspaceFileAccessError('文件或目录不存在。', 404); });
+  if (!stat.isDirectory()) {
+    throw new WorkspaceFileAccessError('所选路径不是目录。', 400);
+  }
+  const base = toPosixPath(dirPath).replace(/^\.\//, '').replace(/\/+$/, '');
+  const entries: Array<{ name: string; path: string; kind: 'file' | 'directory'; size?: number; updatedAt: string }> = [];
+  let truncated = false;
+  const visitedDirectories = new Set<string>([realDirectory]);
+  const walk = async (absDir: string, relDir: string, depth: number): Promise<void> => {
+    if (depth > MAX_TREE_DEPTH) {
+      truncated = true;
+      return;
+    }
+    let dirents;
+    try { dirents = await fs.readdir(absDir, { withFileTypes: true }); } catch { return; }
+    dirents.sort((left, right) => left.name.localeCompare(right.name, 'zh-Hans-CN'));
+    for (const dirent of dirents) {
+      if (entries.length >= MAX_TREE_ENTRIES) {
+        truncated = true;
+        return;
+      }
+      const childAbs = resolve(absDir, dirent.name);
+      const childRel = relDir ? `${relDir}/${dirent.name}` : dirent.name;
+      if (dirent.isSymbolicLink()) {
+        let real: string;
+        try { real = await fs.realpath(childAbs); } catch { continue; }
+        if (!containsReal(realRoot, real)) continue;
+      }
+      let childStat;
+      try { childStat = await fs.stat(childAbs); } catch { continue; }
+      if (childStat.isDirectory()) {
+        if (dirent.isSymbolicLink()) {
+          const real = await fs.realpath(childAbs);
+          if (visitedDirectories.has(real)) continue;
+          visitedDirectories.add(real);
+        }
+        entries.push({ name: dirent.name, path: childRel, kind: 'directory', updatedAt: childStat.mtime.toISOString() });
+        await walk(childAbs, childRel, depth + 1);
+      } else if (childStat.isFile()) {
+        entries.push({ name: dirent.name, path: childRel, kind: 'file', size: childStat.size, updatedAt: childStat.mtime.toISOString() });
+      }
+    }
+  };
+  await walk(realDirectory, base, 0);
+  return { path: base, entries, truncated };
 }
 
 export async function readWorkspaceFile(root: string, filePath: string) {

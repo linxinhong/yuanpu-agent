@@ -141,6 +141,8 @@ export interface WorkDirectoryListing {
   /** Normalized workspace-relative directory ('' is the workspace root). */
   path: string;
   entries: WorkFileEntry[];
+  /** Present on recursive listings: entry growth hit the server-side cap. */
+  truncated?: boolean;
 }
 
 /** Read-only preview of one workspace file. Never carries the absolute workspace path. */
@@ -406,7 +408,7 @@ export interface DesktopBridge {
   listWorkConversations(): Promise<WorkConversation[]>;
   createWorkConversation(): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string): Promise<WorkConversation>;
-  listWorkFiles(conversationId: string, dirPath?: string): Promise<WorkDirectoryListing>;
+  listWorkFiles(conversationId: string, dirPath?: string, options?: { recursive?: boolean }): Promise<WorkDirectoryListing>;
   readWorkFile(conversationId: string, filePath: string): Promise<WorkFilePreview>;
   getAssistantLink(): Promise<AssistantLinkStatus>;
   bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;

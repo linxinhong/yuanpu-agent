@@ -9,6 +9,6 @@ import type { WorkDirectoryListing, WorkFilePreview } from '@yuanpu-agent/protoc
  * components never bind to Electron, the bridge, or a storage layout.
  */
 export interface ViewerFileHost {
-  listDirectory(dirPath?: string): Promise<WorkDirectoryListing>;
+  listDirectory(dirPath?: string, options?: { recursive?: boolean }): Promise<WorkDirectoryListing>;
   readFile(filePath: string): Promise<WorkFilePreview>;
 }

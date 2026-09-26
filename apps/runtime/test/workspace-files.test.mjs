@@ -10,10 +10,12 @@ register();
 
 const {
   MAX_TEXT_PREVIEW_BYTES,
+  MAX_TREE_ENTRIES,
   WorkspaceFileAccessError,
   classifyWorkspaceFile,
   isProbablyBinary,
   listWorkspaceFiles,
+  listWorkspaceTree,
   readWorkspaceFile,
   resolveWorkspacePath,
 } = await import('../src/workspace-files.ts');
@@ -144,4 +146,54 @@ test('classifyWorkspaceFile and isProbablyBinary follow extension and content ru
   assert.equal(isProbablyBinary(Buffer.from([0x00, 0x01])), true);
   assert.equal(isProbablyBinary(Buffer.from('正常文本内容')), false);
   assert.equal(isProbablyBinary(Buffer.alloc(0)), false);
+});
+
+test('listWorkspaceTree flattens descendants and reports truncation', async () => {
+  const root = await createWorkspace();
+  try {
+    await mkdir(join(root, 'src', 'deep'));
+    await writeFile(join(root, 'src', 'deep', 'leaf.txt'), 'leaf');
+    const tree = await listWorkspaceTree(root, '');
+    assert.equal(tree.truncated, false);
+    assert.deepEqual(
+      tree.entries.filter((entry) => entry.kind === 'file').map((entry) => entry.path).sort(),
+      ['README.md', 'docs/report.pdf', 'empty.txt', 'logo.png', 'src/deep/leaf.txt', 'src/index.ts'],
+    );
+    assert.ok(tree.entries.some((entry) => entry.path === 'src/deep' && entry.kind === 'directory'));
+    const nested = await listWorkspaceTree(root, 'src');
+    assert.deepEqual(
+      nested.entries.map((entry) => entry.path).sort(),
+      ['src/deep', 'src/deep/leaf.txt', 'src/index.ts'],
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('listWorkspaceTree skips symlink escapes and cuts symlink cycles', async () => {
+  const root = await createWorkspace();
+  const outside = await mkdtemp(join(tmpdir(), 'yuanpu-outside-'));
+  try {
+    await writeFile(join(outside, 'secret.txt'), 'outside');
+    await symlink(outside, join(root, 'escape-dir'));
+    await symlink(join(root, 'src'), join(root, 'src', 'self-loop'));
+    const tree = await listWorkspaceTree(root, '');
+    const paths = tree.entries.map((entry) => entry.path);
+    assert.ok(!paths.includes('escape-dir/secret.txt'));
+    assert.ok(!paths.some((path) => path.includes('self-loop') && path.split('self-loop').length > 2));
+    assert.ok(paths.includes('src/index.ts'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('listWorkspaceTree stops growing at the entry cap', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-tree-cap-'));
+  try {
+    for (let index = 0; index < MAX_TREE_ENTRIES + 10; index += 1) {
+      await writeFile(join(root, `file-${String(index).padStart(5, '0')}.txt`), 'x');
+    }
+    const tree = await listWorkspaceTree(root, '');
+    assert.equal(tree.entries.length, MAX_TREE_ENTRIES);
+    assert.equal(tree.truncated, true);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

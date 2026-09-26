@@ -20,8 +20,7 @@ import { AssistantReply } from '../shared/assistant-reply.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
 import { normalizeWorkspacePath } from '../shared/work-file-links.js';
-import { FileTree } from '../viewer/files/file-tree.js';
-import { FilePreview } from '../viewer/preview/file-preview.js';
+import { FileWorkspace } from '../viewer/files/file-tabs.js';
 import type { ViewerFileHost } from '../viewer/host/file-host.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
@@ -626,7 +625,7 @@ export function ChatPanel({
   // Session association lives here; the viewer only receives its host seam.
   const fileHost: ViewerFileHost | undefined = surface === 'work' && workConversationId && desktop
     ? {
-      listDirectory: (dirPath?: string) => desktop.listWorkFiles(workConversationId, dirPath),
+      listDirectory: (dirPath?: string, options?: { recursive?: boolean }) => desktop.listWorkFiles(workConversationId, dirPath, options),
       readFile: (filePath: string) => desktop.readWorkFile(workConversationId, filePath),
     }
     : undefined;
@@ -957,14 +956,8 @@ export function ChatPanel({
           ) : (
             <div className="activity-content file-panel">
               {!fileHost || !workConversationId ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
-                : <>
-                  <FileTree key={workConversationId} host={fileHost} scopeKey={workConversationId}
-                    selectedPath={filePreviewPath} onOpenFile={setFilePreviewPath} hidden={Boolean(filePreviewPath)} />
-                  {filePreviewPath && <div className="file-preview-wrap">
-                    <FilePreview host={fileHost} scopeKey={workConversationId} filePath={filePreviewPath}
-                      onBack={() => setFilePreviewPath(undefined)} />
-                  </div>}
-                </>}
+                : <FileWorkspace key={workConversationId} host={fileHost} scopeKey={workConversationId}
+                  requestPath={filePreviewPath} onActiveFileChange={setFilePreviewPath} />}
             </div>
           )}
         </dialog>

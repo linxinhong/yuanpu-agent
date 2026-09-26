@@ -1,15 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { WorkFileEntry } from '@yuanpu-agent/protocol';
+import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 
 import type { ViewerFileHost } from '../host/file-host.js';
-import { AppIcon } from '../../shared/app-icon.js';
 
-function useViewerDirectory(host: ViewerFileHost | undefined, dirPath: string, enabled: boolean) {
+/** Shared recursive-listing query; the tree tab toolbar reuses it for refresh. */
+export function useWorkspaceTree(host: ViewerFileHost, scopeKey: string) {
   return useQuery({
-    queryKey: ['viewer', 'files', host, dirPath],
-    queryFn: () => host!.listDirectory(dirPath),
-    enabled: enabled && Boolean(host),
+    queryKey: ['viewer', 'files', scopeKey],
+    queryFn: () => host.listDirectory('', { recursive: true }),
   });
 }
 
@@ -17,41 +16,41 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function FileRow({ host, entry, depth, selectedPath, onOpenFile }: {
-  host: ViewerFileHost;
-  entry: WorkFileEntry;
-  depth: number;
+function TreeBody({ filePaths, fileSet, selectedPath, onOpenFile }: {
+  filePaths: string[];
+  fileSet: Set<string>;
   selectedPath?: string;
   onOpenFile: (path: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const children = useViewerDirectory(host, entry.path, entry.kind === 'directory' && expanded);
-  return <>
-    <button type="button" className={`file-tree-row ${selectedPath === entry.path ? 'selected' : ''}`}
-      style={{ paddingLeft: `${10 + depth * 14}px` }}
-      aria-expanded={entry.kind === 'directory' ? expanded : undefined}
-      aria-current={selectedPath === entry.path ? 'true' : undefined}
-      onClick={() => entry.kind === 'directory' ? setExpanded((value) => !value) : onOpenFile(entry.path)}>
-      {entry.kind === 'directory'
-        ? <span className={`file-tree-caret ${expanded ? 'open' : ''}`} aria-hidden="true"><AppIcon name="chevron" /></span>
-        : <span className="file-tree-dot" aria-hidden="true" />}
-      <span className="file-tree-name">{entry.name}</span>
-    </button>
-    {entry.kind === 'directory' && expanded && (
-      children.isLoading ? <p className="file-tree-status" style={{ paddingLeft: `${10 + (depth + 1) * 14}px` }}>正在读取…</p>
-        : children.error ? <p className="file-tree-status" role="alert" style={{ paddingLeft: `${10 + (depth + 1) * 14}px` }}>读取失败：{formatError(children.error)}</p>
-          : children.data && children.data.entries.length === 0
-            ? <p className="file-tree-status" style={{ paddingLeft: `${10 + (depth + 1) * 14}px` }}>空目录</p>
-            : children.data?.entries.map((child) => <FileRow key={child.path} host={host}
-              entry={child} depth={depth + 1} selectedPath={selectedPath} onOpenFile={onOpenFile} />)
-    )}
-  </>;
+  const { model } = useFileTree({
+    paths: filePaths,
+    initialExpansion: 1,
+    ...(selectedPath ? { initialSelectedPaths: [selectedPath] } : {}),
+    onSelectionChange: (selectedPaths) => {
+      const latest = [...selectedPaths].reverse()[0];
+      // Directory rows are selectable in the tree but never open a preview.
+      if (latest && fileSet.has(latest)) onOpenFile(latest);
+    },
+  });
+
+  useEffect(() => {
+    model.resetPaths(filePaths);
+  }, [model, filePaths]);
+
+  useEffect(() => {
+    if (!selectedPath) return;
+    model.getItem(selectedPath)?.select();
+    model.scrollToPath(selectedPath);
+  }, [model, selectedPath]);
+
+  return <PierreFileTree model={model} className="file-tree-host" />;
 }
 
 /**
- * Lazy-loading directory tree over the file host. Stays mounted behind the
- * preview to keep expansion state; the app remounts it (by scope key) when
- * the associated conversation changes.
+ * Workspace file tree over @pierre/trees. The renderer is path-first, so the
+ * file host provides one flat recursive listing (capped server-side) instead
+ * of lazy per-directory loads. The app remounts this component (by scope key)
+ * on conversation switch to reset expansion and selection.
  */
 export function FileTree({ host, scopeKey, selectedPath, onOpenFile, hidden }: {
   host: ViewerFileHost;
@@ -61,12 +60,18 @@ export function FileTree({ host, scopeKey, selectedPath, onOpenFile, hidden }: {
   onOpenFile: (path: string) => void;
   hidden?: boolean;
 }) {
-  const root = useViewerDirectory(host, '', true);
-  return <div className={hidden ? 'file-tree hidden' : 'file-tree'} aria-hidden={hidden || undefined} role="tree" aria-label="工作区文件">
-    {root.isLoading && <p className="file-tree-status">正在读取工作区…</p>}
-    {root.error && <p className="file-tree-status" role="alert">工作区读取失败：{formatError(root.error)}</p>}
-    {root.data && root.data.entries.length === 0 && <p className="file-tree-status">工作区还没有文件。</p>}
-    {root.data?.entries.map((entry) => <FileRow key={entry.path} host={host}
-      entry={entry} depth={0} selectedPath={selectedPath} onOpenFile={onOpenFile} />)}
+  const tree = useWorkspaceTree(host, scopeKey);
+  const filePaths = useMemo(
+    () => (tree.data?.entries ?? []).filter((entry) => entry.kind === 'file').map((entry) => entry.path),
+    [tree.data],
+  );
+  const fileSet = useMemo(() => new Set(filePaths), [filePaths]);
+  return <div className={hidden ? 'file-tree hidden' : 'file-tree'} aria-hidden={hidden || undefined}>
+    {tree.isLoading && <p className="file-tree-status">正在读取工作区…</p>}
+    {tree.error && <p className="file-tree-status" role="alert">工作区读取失败：{formatError(tree.error)}</p>}
+    {tree.data?.truncated && <p className="file-tree-status" role="status">文件较多，仅显示前一部分。</p>}
+    {tree.data && filePaths.length === 0 && <p className="file-tree-status">工作区还没有文件。</p>}
+    {filePaths.length > 0 && <TreeBody filePaths={filePaths} fileSet={fileSet}
+      selectedPath={selectedPath} onOpenFile={onOpenFile} />}
   </div>;
 }
