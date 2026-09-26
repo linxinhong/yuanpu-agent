@@ -1455,7 +1455,7 @@ tasks:
         expect: "独立测试 host 无 Electron 启动助理、改变 Home 根、断开再 attach 并拒绝第二写入者；记录可迁移边界证据，真实远程同步和云端运行仍标为未实现。"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-041"]
+    dependencies: ["TASK-041", "TASK-054"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["复用 TASK-019/TASK-021 历史 probe 与 apps/runtime/test/runtime-parent-exit.test.mjs，仅重跑本轮影响路径", "按 docs/assistant-memory-proposal.md 的双入口验收；先 API/进程再真实 IM，不能仅截图", "pnpm check 后当前平台 pnpm build:native && pnpm smoke:native；其他平台证据缺失保持未验证"]
@@ -1468,7 +1468,7 @@ tasks:
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
       branch: "task/task-042-assistant-verification"
       evidence: []
-      follow_up_candidates: []
+      follow_up_candidates: ["TASK-054"]
   - id: TASK-043
     title: "实现来源与可修订记忆存储"
     status: pending
@@ -1848,7 +1848,7 @@ tasks:
     scope:
       in: ["shared/font-preference 偏好模块：normalize 校验、localStorage 读写、documentElement 变量注入（主题同款模式，无 IPC）", "themes/tokens.css 新增字体 token；muse-theme/styles/management/assistant-home 字号 px→rem 转换与正文 token 化", "设置通用区新增界面字体大小、正文字体大小、界面字型三个设置块（复用 theme-setting/theme-options 控件样式）", "main.tsx 启动时应用字体偏好", "font-preference 单测；theme-contract 增加禁止硬编码 px font-size 的防回归断言"]
       out: ["代码字体（mono）单独配置", "连续 slider、多窗口差异化、界面整体缩放", "runtime config、protocol、DesktopBridge 或 IPC 链路改动", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["持久化仅用渲染端 localStorage 键 yuanpu:font:v1；字体 token 仅声明在 themes/tokens.css，dark.css/mindlink.css 不修改", "标准档（界面 100%、正文 14px、系统字型）渲染结果与改造前一致；档位只缩放文字不缩放布局尺寸", "界面字号与正文字号相互独立：界面档位不得缩放聊天正文，正文档位不得影响界面文字", "完成需集成并在 main 验证；本轮不自动提交推送"]
+    constraints: ["持久化仅用渲染端 localStorage 键 yuanpu:font:v1；字体 token 仅声明在 themes/tokens.css，dark.css 不修改，mindlink.css 仅允许 font-size px→rem 机械转换（默认渲染不变，2026-09-26 依 mindlink.css:85-124 取证修正）", "标准档（界面 100%、正文 14px、系统字型）渲染结果与改造前一致；档位只缩放文字不缩放布局尺寸", "界面字号与正文字号相互独立：界面档位不得缩放聊天正文，正文档位不得影响界面文字", "完成需集成并在 main 验证；本轮不自动提交推送"]
     forbidden: ["把界面整体 zoom/缩放冒充界面字体大小", "在 muse-theme.css 之外新声明字体 token 或引入第二套字体持久化", "将构建成功当作视觉验收通过"]
     acceptance:
       - type: assertion
@@ -1856,9 +1856,9 @@ tasks:
       - type: assertion
         expect: "界面档位只改变界面文字大小、聊天正文不变；正文档位只改变消息正文、输入框与 markdown 衍生字号、界面不变；两档在浅色/深色/MindLink 三主题下均生效"
       - type: assertion
-        expect: "font-preference 单测覆盖非法/越界/缺失字段回退默认；theme-contract 断言四个 CSS 文件无硬编码 px font-size 且字体 token 已在 tokens.css 声明"
+        expect: "font-preference 单测覆盖非法/越界/缺失字段回退默认；theme-contract 断言 muse/styles/management/mindlink 无硬编码 px font-size 且字体 token 已在 tokens.css 声明"
       - type: assertion
-        expect: "标准档下聊天、设置、助理首页、管理页与改造前渲染一致；特大界面档 + 超大正文 + 自定义字型组合无明显溢出或文字挤压"
+        expect: "标准档下聊天、设置、管理页与改造前渲染一致；特大界面档 + 超大正文 + 自定义字型组合无明显溢出或文字挤压；assistant-home/shell-layout 等未提交增量文件在集成时按同一规则补齐转换"
       - type: command
         run: "pnpm --filter @yuanpu-agent/app test"
       - type: command
@@ -1866,7 +1866,7 @@ tasks:
     dependencies: []
     risk_level: "L2"
     recommended_model: "glm-5.3"
-    investigation_hints: ["设置样板 apps/app/src/modules/settings.tsx 的 selectTheme（先 apply 再 setState）与 .theme-setting/.theme-options 控件；偏好样板 shared/theme-preference.ts；启动注入点 main.tsx", "字号硬编码分布：muse-theme.css 131、styles.css 65、management.css 27、assistant-home.css 15；正文规则在 muse-theme.css 约 210-244（.message-body p/.message-markdown/h2/h3/pre code/table）与 composer textarea；assistant-home.css L60 的 13px 变体", "rem 基准 16px：Npx→N/16rem；正文衍生 calc(var(--yp-font-size-content) / 14 * N)；成对 px 行高改无量纲比值；theme-contract.test.mjs 的 var(--yp-*)→tokens.css 守护对新 token 自动生效", "测试范式：node:test + tsx register 动态导入 TS（apps/app/test/panel-resize.test.mjs）；normalize 保持纯函数以便 node 环境测试", "主工作区存在未提交增量且与 settings.tsx、main.tsx、muse-theme.css、tokens.css、theme-contract.test.mjs、assistant-home.css 有交集：worktree 基于 main 提交态实施，集成前先核对增量归属并协调合并顺序"]
+    investigation_hints: ["设置样板 apps/app/src/modules/settings.tsx 的 selectTheme（先 apply 再 setState）与 .theme-setting/.theme-options 控件；偏好样板 shared/theme-preference.ts；启动注入点 main.tsx", "字号硬编码分布（worktree HEAD 4bf9352 实测）：muse-theme.css 126、styles.css 65、management.css 27、mindlink.css 7；assistant-home.css 与 shell-layout.css 仅存在于主工作区未提交增量，HEAD 无此文件，集成时按同一规则补齐转换", "正文规则在 muse-theme.css 210-244（.message-body p/.message-markdown/h2/h3/pre code/table）与 composer textarea 303-317、媒体查询 512；px 行高共 6 处（214/215/222/315/563/749）改无量纲比值", "rem 基准 16px：Npx→N/16rem；正文衍生 calc(var(--yp-font-size-content) * N / 14)；theme-contract.test.mjs 的 var(--yp-*)→tokens.css 守护对新 token 自动生效", "测试范式：node:test + tsx register 动态导入 TS（apps/app/test/panel-resize.test.mjs）；normalize 保持纯函数以便 node 环境测试", "主工作区存在未提交增量且与 settings.tsx、main.tsx、muse-theme.css、tokens.css、theme-contract.test.mjs 有交集：worktree 基于 main 提交态实施，集成前先核对增量归属并协调合并顺序"]
     escalation_conditions: ["如 rem 转换后标准档无法保持渲染一致（行高、截断、滚动行为回归），记录差异证据并回到设计协调，不静默接受", "如自定义字型需要第二持久化或协议改动才能满足，停下报告，不私增链路"]
     result:
       owner: "zcode-fontconfig-20260926-87617"
@@ -1875,5 +1875,39 @@ tasks:
       completed_at: null
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/font-config"
       branch: "task/task-053-font-config"
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-054
+    title: "修复助理与工作目录的 SQLite v8 迁移冲突"
+    status: ready
+    goal: "已有 Work 目录版 schema v8 的用户数据库升级后可创建独立助理表，历史会话和配对保持可读。"
+    scope:
+      in: ["识别 schema v8 助理版与 Work 目录版两种历史形态", "幂等且原子的助理表补建与版本推进", "合成旧库升级、重启重试和现有数据保留回归"]
+      out: ["复制或提交真实用户数据库与聊天正文", "修改 Pi 上游包或重构 Work/助理业务路由"]
+    constraints: ["TASK-042 的真实 Home 只读预检已观察 schema v8 + working_directory 列、却没有 yp_assistant_bindings 等新表；不得直接在真实 Home 上试运行迁移", "保留主工作区未提交 Work 目录改动；在独立分支修复并由单一集成者合并", "兼容可能已由开发版推进到 v9 但仍缺助理表的数据库；助理表存在时不能重建或覆盖数据"]
+    forbidden: ["靠清空数据库、重置迁移账本或手工改用户库绕过问题", "把新库 pnpm check 通过当作历史升级成功"]
+    acceptance:
+      - type: assertion
+        expect: "合成 Work 目录版 v8 及可能的缺表 v9 数据库升级后，助理表完整，旧 Work 会话、配对和归档未丢失；重复打开结果一致"
+      - type: assertion
+        expect: "助理版 v8 和全新库升级同样成功，任何补建失败回滚，不留下半套表或虚假的完成版本"
+      - type: assertion
+        expect: "TASK-042 独立验证者使用无私人正文的历史形态 fixture 复测通过，并更新失败场景结果"
+      - type: command
+        run: "pnpm check"
+      - type: command
+        run: "pnpm build:native && pnpm smoke:native"
+    dependencies: ["TASK-041"]
+    risk_level: "L3"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["packages/yuanpu-runtime/src/persistence/index.ts 的迁移与 schema 常量、packages/yuanpu-runtime/test/persistence.test.mjs", "apps/runtime/scripts/native/smoke.mjs 的 schema 断言；TASK-042 的 .tasks/verification/TASK-042/results.md", "先以合成 v8 Work 目录库重现缺表，再实现带事务的修复；复测 v8 助理版、v9 缺表版及新库，最后全量与当前平台 SEA"]
+    escalation_conditions: ["若出现同名表结构不兼容或真实库比 v9 更新，先停止写入并记录实际 schema，不自动猜测迁移", "修复不触碰或打印真实用户内容"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
       evidence: []
       follow_up_candidates: []
