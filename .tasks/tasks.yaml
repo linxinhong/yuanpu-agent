@@ -1437,7 +1437,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-042
     title: "独立助理与双入口阶段验证"
-    status: in_progress
+    status: done
     goal: "在真实服务与持久层证明隔离、迁移、双入口和进程退出成立，为记忆系统提供可信来源。"
     scope:
       in: ["独立 Worker 与双入口的 API/IPC/存储业务场景", "真实企业微信一位已授权用户私聊；本地服务调用", "迁移、重启、拒绝身份和 SEA 退出验证"]
@@ -1464,19 +1464,24 @@ tasks:
       owner: "assistant-contract-review-verify-20260926-10414"
       attempts: 0
       claimed_at: "2026-09-26T15:22:25.617Z"
-      completed_at: null
+      completed_at: "2026-09-26T16:26:58.987Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
       branch: "task/task-042-assistant-verification"
-      evidence: []
-      follow_up_candidates: ["TASK-054"]
+      evidence:
+        - {type: "commit", check: "integrated stage evidence", status: "passed", summary: "Independent TASK-042 harness and real WeCom acceptance evidence are ancestors of main c8b863f; clean darwin-arm64 packaged App product revision 8ac4d5b was tested and TASK-054 migration repair is included."}
+        - {type: "test", check: "offline isolation, migration and process lifecycle", status: "passed", summary: "Independent V42-01 through V42-08 and V42-11/V42-12 pass: two local clients, fixture WeCom route and dedup, legacy archive, headless relocation, competing writer, Worker/parent exit, SEA/native smoke, packaged App normal exit, and v8 Work database repair. See .tasks/verification/TASK-042/results.md."}
+        - {type: "test", check: "authorized real local and Enterprise WeChat roundtrip", status: "passed", summary: "At 2026-09-26 16:16–16:22 UTC, real Home after backed-up v8→v10 migration had one completed desktop request and one completed WeCom request in distinct sessions, one accepted WeCom delivery, no Work WeCom inbound, quick_check ok. The user confirmed the test account received the requested reply; App, Runtime and Worker exited. Independent read-only metadata review is recorded as V42-09. Real platform redelivery/reconnect and other platforms remain unverified boundaries."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Full build, typecheck and tests passed on main product tree at f0a1a8c/c8b863f (the intervening merge changed only the TASK-042 evidence document), Node 24.15.0 and pnpm 11.22.0; Runtime 43/43. Pre-existing unrelated dirty files were preserved and not staged."}
+      follow_up_candidates:
+        - "TASK-054"
   - id: TASK-043
     title: "实现来源与可修订记忆存储"
-    status: pending
+    status: in_progress
     goal: "助理可靠收集工作和自身对话证据，维护可追溯、可纠正、可遗忘的个人记忆。"
     scope:
       in: ["来源登记、持久队列、游标、补扫、版本与受众范围", "memories/work/reviews 文档仓库、原子提交、索引与修订", "手工修改、删除来源、遗忘、旧 MEMORY 导入和中文检索"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
-    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "助理通过 host 来源接口读取正文和产物，不按 contentRef 直接打开本机绝对路径；来源不可用与已删除分别处理。单写入者维护持久状态，禁止把运行中的 SQLite/会话目录双向文件同步作为设计。"]
+    constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "助理通过 host 来源接口读取正文和产物，不按 contentRef 直接打开本机绝对路径；来源不可用与已删除分别处理。单写入者维护持久状态，禁止把运行中的 SQLite/会话目录双向文件同步作为设计。", "本卡消费已通过本地进程和 fixture 验证的 Work/助理来源契约；TASK-042 的真实企业微信往返仍独立验收，本卡不得声称真实渠道已验证。"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
@@ -1491,21 +1496,20 @@ tasks:
         expect: "测试来源适配器返回与本地路径无关的正文引用；重复、乱序、暂不可用后恢复及删除事件可重放，ID/版本与受众保持有效；暂时离线不会误作删除或事实撤回。"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-042"]
+    dependencies: ["TASK-041", "TASK-054"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["入口 packages/yuanpu-assistant/src 的新 source/memory 存储模块，复用宿主来源接口而非连接 automation.sqlite", "测试临时 Home、崩溃提交恢复、重复事件、编辑冲突及权限范围；先 assistant test 再 pnpm check", "旧 agent/memory/MEMORY.md 与 Pi 会话只读导入，不清空；大文件保留引用与有预算摘要"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-architecture-memory-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T16:06:03.653Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
+      branch: "task/task-043-assistant-memory"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-051
     title: "实现助理内部自动化与定时调度"
     status: pending
@@ -1565,7 +1569,7 @@ tasks:
         expect: "记录密钥不得进入笔记；注入内容不能更改行为指令；评估失败不阻断 Work，不在 Work 页插入建议"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-043", "TASK-051"]
+    dependencies: ["TASK-043", "TASK-051", "TASK-061"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["packages/evals/README.md、src/harness.ts 仅作离线评分/证据方法参考，不修改上游或依赖其生产 runner", "新增 yuanpu-assistant review 模块与技能；输入来自已验证来源仓库，专业核验接口可先返回待委派状态", "临时文件与 loopback 模型验证真实写入；费用上限/取消/新版本重试/误报完成是最近行为测试，再 pnpm check"]
@@ -1619,7 +1623,7 @@ tasks:
 
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
-    status: pending
+    status: in_progress
     goal: "助理通过独立普通任务对话调用专业技能，持续跟进并回收可验证结果。"
     scope:
       in: ["skills/delegate-and-verify/SKILL.md 与宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
@@ -1647,15 +1651,14 @@ tasks:
     investigation_hints: ["已有 packages/yuanpu-runtime/src/pi/subagents/{manager,runner,tools}.ts 与 test/subagents.test.mjs，当前无恢复和自动父会话唤醒，不能直接复制默认资源加载", "实现置于宿主 Yuanpu 模块，通过协议服务暴露；助理仅持有委派接口，低层共享代码如需抽取不得引入业务循环依赖", "先子任务 follow-up/工具访问/授权一次性/取消/恢复行为测试，后 pnpm check 和子进程 cleanup probe"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-contract-review-20260927-046-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T16:28:00.683Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
+      branch: "task/task-046-assistant-delegation"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
     status: pending
@@ -1886,7 +1889,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-054
     title: "修复助理与工作目录的 SQLite v8 迁移冲突"
-    status: in_progress
+    status: done
     goal: "已有 Work 目录版 schema v8 的用户数据库升级后可创建独立助理表，历史会话和配对保持可读。"
     scope:
       in: ["识别 schema v8 助理版与 Work 目录版两种历史形态", "幂等且原子的助理表补建与版本推进", "合成旧库升级、重启重试和现有数据保留回归"]
@@ -1913,12 +1916,16 @@ tasks:
       owner: "assistant-architecture-schema-repair-10414"
       attempts: 0
       claimed_at: "2026-09-26T15:42:45.864Z"
-      completed_at: null
+      completed_at: "2026-09-26T16:05:03.577Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
       branch: "task/task-054-assistant-schema-repair"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated repair and handoff", status: "passed", summary: "TASK-054 owner repair a8f2bc6 and handoff are ancestors of main 8ac4d5b; independent verifier retest bd7f4ef is also integrated. No real user database was migrated for testing."}
+        - {type: "test", check: "historical SQLite migration compatibility", status: "passed", summary: "Synthetic Work-v8 dual-column, missing-table v9, Assistant-v8 and new databases upgrade idempotently to schema10 with Work/pairing/link/mirror records retained; incompatible table rolls back, current missing table fails closed. Independent V42-12 fixture failed on old revision and passed on repair in verifier worktree and integrated main."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node24.15/pnpm11.22: full build, typecheck and tests passed on main 8ac4d5b with unrelated dirty Work/UI changes preserved; runtime-kit 175/175 and Runtime 43/43; independent v8 Work fixture 1/1."}
+        - {type: "command", check: "native build and smoke", status: "passed", summary: "Owner branch a8f2bc6 passed pnpm build:native and pnpm smoke:native on macOS arm64, including SEA and staged Runtime updater. Product Runtime and schema files were unchanged by subsequent integration merges."}
+        - {type: "boundary", check: "remaining stage verification", status: "unverified", summary: "Actual user Home was only inspected read-only; real Enterprise WeChat private roundtrip remains TASK-042 and was not sent. Windows/Linux native upgrade remains unverified."}
       follow_up_candidates: []
-
   - id: TASK-055
     title: "建立工作会话文件夹与标签管理契约"
     status: pending
@@ -1932,7 +1939,7 @@ tasks:
       - type: assertion
         expect: "用户创建多层文件夹，在任意文件夹中新建两条会话后各有独立 cwd 和 Pi ID；重启后层级、标题、同级顺序与当前会话保持"
       - type: assertion
-        expect: "会话/文件夹名称、内置图标和多个标签可修改并跨重启保留；归档会话从普通列表退出，在已归档原层级可恢复，Pi JSONL 与工作目录未删除"
+        expect: "会话/文件夹显示名、内置图标和多个标签可修改并跨重启保留；显示名变更不改磁盘目录；归档会话从普通列表退出，在已归档原层级可恢复，Pi JSONL 与工作目录未删除"
       - type: assertion
         expect: "旧 default 仍只读且不可改名、移动或恢复；无效父节点、循环父子关系、跨用户作用域和非法图标 ID 被服务端拒绝，失败不留半条记录"
       - type: assertion
@@ -1959,7 +1966,7 @@ tasks:
     status: pending
     goal: "用户把会话或文件夹移到树中其他位置时，实际工作目录随之搬迁，Pi 历史、下一轮运行和文件预览继续指向正确目录。"
     scope:
-      in: ["单会话移动与文件夹子树移动/重命名的受控磁盘迁移", "受影响会话的 cwd、绑定、Pi JSONL header 关联更新与迁移恢复", "运行中冲突、目标占用、根外目录、符号链接与中途失败处理"]
+      in: ["单会话与文件夹子树移动的受控磁盘迁移", "受影响会话的 cwd、绑定、Pi JSONL header 关联更新与迁移恢复", "运行中冲突、目标占用、根外目录、符号链接与中途失败处理"]
       out: ["跨卷或任意外部目录自动导入", "修改历史聊天正文中的绝对路径", "前端拖放视觉与搜索"]
     constraints: ["设计权威 docs/work-conversation-tree.md；只在受管理 workspace 根内自动搬迁，不跟随符号链接或覆盖目标", "SQLite、文件系统和 JSONL 无共享事务：需可恢复的意图记录、回滚或重启续迁，移动失败时旧会话仍可打开", "独立复核者评审迁移顺序、路径包含、故障恢复及旧来源 ID 稳定性；不修改 Pi 上游镜像", "与实现工作文件夹与会话内容搜索（TASK-057）并行时，协议与 Runtime 入口由单一集成 writer 修改；本卡负责迁移状态与路径映射模块"]
     forbidden: ["只更新树 parentId 或 working_directory 而不验证 Pi findById 和 JSONL 历史", "在活动运行、待审批或写入中的会话子树上搬迁", "静默移动用户手选的根外目录或复制后删除外部文件"]
@@ -1967,7 +1974,7 @@ tasks:
       - type: assertion
         expect: "移动含真实文件和 Pi 历史的会话到另一文件夹后，旧路径不再是 cwd，新路径保留文件；重启后 transcript、后续模型工具运行与右侧文件预览都从新路径工作，Work/Pi/来源 ID 不变"
       - type: assertion
-        expect: "移动或重命名上层文件夹会同步处理全部后代会话；空会话尚无 JSONL 也可移动；已归档项维持原归档状态"
+        expect: "移动上层文件夹会同步处理全部后代会话；空会话尚无 JSONL 也可移动；已归档项维持原归档状态"
       - type: assertion
         expect: "运行中、循环目标、路径逃逸、符号链接、目标冲突及根外 cwd 被拒绝且无部分写入；在磁盘移动、header/SQLite 更新间注入失败并重启后可恢复或回滚，旧/新位置恰有一个可读权威状态"
       - type: assertion
@@ -2113,6 +2120,41 @@ tasks:
     recommended_model: "gpt-6 sol"
     investigation_hints: ["从 .tasks/ui/conversation-management/prototype-v003.md 的新建、树移动、搜索、归档旅程出发；对比工作对话右侧栏文件预览（TASK-052）的验收结果", "复用 .tasks/verification/TASK-058/results.md 的真实后端/故障证据，只新增 UI、主题、键盘、重启组合场景；用 pnpm check 守仓库门禁"]
     escalation_conditions: ["若当前环境无法运行 Electron，记录浏览器 UI 与 Runtime 真实服务各自证据及未验证的桌面组合，不标整体完成", "发现迁移后 Pi 历史或文件丢失立即停止后续移动，退回安全搬迁工作会话及文件夹的磁盘目录（TASK-056）修复"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+
+  - id: TASK-061
+    title: "建立工作工具结果与产物的助理来源契约"
+    status: pending
+    goal: "助理能以稳定、授权且可撤回的来源引用读取已保存工作过程中的工具结果和产物，而不依赖文件路径猜测。"
+    scope:
+      in: ["Work 运行提交时登记有界工具结果和明确产物 ID、版本、受众、所属 run 与不透明引用", "宿主受权解析、暂不可用/删除事件和助理持久来源队列接入", "既有 Pi 会话的只读可恢复补扫与无法确定的历史产物标记"]
+      out: ["抓取工作目录内所有文件或任意外部服务数据", "修改 Pi 上游包、云端同步和新的渠道接入"]
+    constraints: ["以实现来源与可修订记忆存储（TASK-043）的单写入队列和 Host 来源接口为接缝；保留 Work/Pi 原件", "产物必须由工具或宿主显式登记，稳定 ID 不含绝对路径；读取时重新检查身份、所属 run、受众、路径包含和大小预算", "未登记产物不得从模型文本中的路径推断；已保存正文及工具结果和产物引用分别保留来源版本"]
+    forbidden: ["让 Assistant Worker 直接打开 Work 目录或 Pi JSONL", "把工具名称与成功状态当成工具结果或产物内容", "无法读取的旧产物伪装成已核实证据"]
+    acceptance:
+      - type: assertion
+        expect: "真实 Work 回合含工具结果及显式登记产物时，Host 提供稳定不透明引用，助理来源队列在重启/重复补扫后各接收一次；同一 run 的正文、工具结果、产物能分别定位原始证据"
+      - type: assertion
+        expect: "受众错误、未登记引用、根外与符号链接目标被拒绝；文件搬迁或来源暂不可用不误报删除，明确删除会撤回只由该证据支持的审阅和记忆"
+      - type: assertion
+        expect: "既有 Pi 会话仅只读补扫可确定的工具结果；无法建立稳定引用的旧产物标为 unavailable，不能臆造文件路径或宣称完整回填"
+      - type: assertion
+        expect: "临时 Home 的真实 Runtime/Pi 回合、结构化产物与拒绝路径测试通过；独立复核者确认授权边界和迁移/重启行为"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-043"]
+    risk_level: "L4"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["当前 yp_work_turn_sources 只存用户/助理文本，yp_agent_run_outputs.output_json 只保留 message 与工具名称/状态；从 Work 执行和 Pi JSONL 权威来源确定可稳定登记的最小结构", "复用 TASK-043 的 AssistantSourceHost 与 contentRef 读取，不给 Worker 本机路径；参照 TASK-052 文件预览的路径包含检查但不复用 renderer 授权", "先保存/读取/拒绝行为测试，再做 v10+ schema 升级、旧会话补扫和 native smoke"]
+    escalation_conditions: ["若工具 API 无法提供可证明身份的产物 ID，先定义显式登记契约并把对应工具保留为无产物，不扫描任意目录", "如迁移号与工作会话树分支冲突，先由单一集成 writer 协调"]
     result:
       owner: null
       attempts: 0
