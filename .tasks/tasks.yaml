@@ -1843,7 +1843,7 @@ tasks:
 
   - id: TASK-053
     title: "设置全局字体配置"
-    status: in_progress
+    status: done
     goal: "用户在设置的通用区配置界面字体大小、正文字体大小与界面字型，选择即时生效、三套主题通用并跨启动保留。"
     scope:
       in: ["shared/font-preference 偏好模块：normalize 校验、localStorage 读写、documentElement 变量注入（主题同款模式，无 IPC）", "themes/tokens.css 新增字体 token；muse-theme/styles/management/assistant-home 字号 px→rem 转换与正文 token 化", "设置通用区新增界面字体大小、正文字体大小、界面字型三个设置块（复用 theme-setting/theme-options 控件样式）", "main.tsx 启动时应用字体偏好", "font-preference 单测；theme-contract 增加禁止硬编码 px font-size 的防回归断言"]
@@ -1872,10 +1872,17 @@ tasks:
       owner: "zcode-fontconfig-20260926-87617"
       attempts: 0
       claimed_at: "2026-09-26T15:34:51.871Z"
-      completed_at: null
+      completed_at: "2026-09-26T15:56:26.446Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/font-config"
       branch: "task/task-053-font-config"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Branch task/task-053-font-config (implementation e542aeb, claim base 4bf9352) merged into main at 97ae3c6; card corrections and memory recorded at b71e777. No push performed."}
+        - {type: "command", check: "pnpm --filter @yuanpu-agent/app test", status: "passed", summary: "12/12 passed on the task branch tree; after integration fusion 18/18 passed on the main working tree (includes foreign hotkeys/assistant/panel-resize tests coexisting). Node 24.15.0, macOS arm64."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Full build, Yuanpu typecheck and all package tests passed on the task branch tree, which is identical to the merged main commit state (97ae3c6); reused the gitignored Pi model-data cache because the network hydrate timed out in the fresh worktree."}
+        - {type: "verification", check: "standard-scale rendering parity", status: "passed", summary: "Playwright comparison of vite builds (pre-change base vs task branch, static hash routes #/work #/settings #/skills): work and skills screenshots byte-identical at 1280x800@2x; settings differs only by the three new setting blocks; computed styles identical (root 16px, composer textarea 14px, breadcrumb 12px, same font stack). Screenshots in .tasks/ui/task-053-font-config/images/."}
+        - {type: "verification", check: "scale, content and family behavior", status: "passed", summary: "With stored preference uiScale=xlarge, contentSize=17, fontFamily=songti: root font-size 20px, composer textarea 17px (content independent of ui scale), chat breadcrumb 15px (ui text scales), Songti stack applied to body; screenshots show no overflow or cramping. Persistence via localStorage yuanpu:font:v1 exercised through addInitScript."}
+        - {type: "assert", check: "regression guard and integration fusion", status: "passed", summary: "theme-contract now asserts the three font tokens in tokens.css and bans hardcoded px font-size/line-height across muse-theme/styles/management/assistant-home/shell-layout/mindlink/dark. Main-workspace uncommitted increments were preserved via stash and fused: hotkey-settings rules (5 px) and assistant-home.css (15 px, 13px variant now a content-token calc) converted to the same rem/token scheme; tokens.css keeps both assistant gradient tokens and font tokens."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-053.md records entry points, px-to-rem conversion procedure, independence mechanics, environment note about the model-data hydrate cache, and follow-up candidates (mono font token, layout sizing beyond 125%)."}
       follow_up_candidates: []
   - id: TASK-054
     title: "修复助理与工作目录的 SQLite v8 迁移冲突"
@@ -2036,7 +2043,7 @@ tasks:
     dependencies: ["TASK-056", "TASK-057"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
-    investigation_hints: ["复用完成工作会话持久化服务（TASK-039）的 work-conversation.test.mjs 与 apps/runtime/test/runtime.test.mjs；重点核对工作对话右侧栏文件预览（TASK-052）在 cwd 迁移后指向新目录", "沿用 docs/work-conversation-tree.md 不变量；必要时做额外 native smoke，但单纯网页 fixture 不替代 Pi JSONL/SQLite 证据"]
+    investigation_hints: ["复用隔离工作会话并保留历史（TASK-039）的 work-conversation.test.mjs 与 apps/runtime/test/runtime.test.mjs；重点核对工作对话右侧栏文件预览（TASK-052）在 cwd 迁移后指向新目录", "沿用 docs/work-conversation-tree.md 不变量；必要时做额外 native smoke，但单纯网页 fixture 不替代 Pi JSONL/SQLite 证据"]
     escalation_conditions: ["如目录迁移无法在故障窗口保持单一可读状态，退回安全搬迁工作会话及文件夹的磁盘目录（TASK-056）而不是放宽验收", "如果当前平台不能运行打包 Runtime，标记平台项 unverified 并保留可运行的临时 Home 证据"]
     result:
       owner: null
