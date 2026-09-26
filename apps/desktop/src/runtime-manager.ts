@@ -682,6 +682,17 @@ export class RuntimeManager {
     });
   }
 
+  listWorkFiles(conversationId: string, dirPath?: string): Promise<import('@yuanpu-agent/protocol').WorkDirectoryListing> {
+    const query = new URLSearchParams({ conversationId });
+    if (dirPath) query.set('path', dirPath);
+    return this.request(`${RUNTIME_ROUTES.workFiles}?${query}`);
+  }
+
+  readWorkFile(conversationId: string, filePath: string): Promise<import('@yuanpu-agent/protocol').WorkFilePreview> {
+    const query = new URLSearchParams({ conversationId, path: filePath });
+    return this.request(`${RUNTIME_ROUTES.workFileContent}?${query}`);
+  }
+
   getAssistantLink(): Promise<AssistantLinkStatus> {
     return this.request(RUNTIME_ROUTES.assistantLink);
   }

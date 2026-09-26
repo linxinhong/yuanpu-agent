@@ -53,7 +53,7 @@ import {
   type AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createPublicKey, randomUUID, verify } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -68,6 +68,7 @@ import { runAssistantWorker } from './assistant-worker.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
+import { WorkspaceFileAccessError, listWorkspaceFiles, readWorkspaceFile } from './workspace-files.js';
 import {
   closeWecomChannels,
   configuredWecomDocument,
@@ -1086,6 +1087,50 @@ async function serve(): Promise<void> {
           catch { response.statusCode = 404; response.end(JSON.stringify({ error: 'Unknown Work conversation.' })); }
           return;
         }
+      }
+
+      const workFileConversation = (conversationId: string | null): boolean => {
+        if (!conversationId || conversationId.length > 200) return false;
+        if (conversationId === 'default') return true;
+        return Boolean(workConversations.row(home.config.workingDirectory, conversationId));
+      };
+      const respondWorkspaceFileError = (response: ServerResponse, error: unknown): void => {
+        if (error instanceof WorkspaceFileAccessError) {
+          response.statusCode = error.statusCode;
+          response.end(JSON.stringify({ error: error.message }));
+          return;
+        }
+        throw error;
+      };
+
+      if (url.pathname === RUNTIME_ROUTES.workFiles && request.method === 'GET') {
+        const conversationId = url.searchParams.get('conversationId');
+        if (!workFileConversation(conversationId)) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
+        try {
+          response.end(JSON.stringify(await listWorkspaceFiles(home.config.workingDirectory, url.searchParams.get('path') ?? '')));
+        } catch (error) {
+          respondWorkspaceFileError(response, error);
+        }
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workFileContent && request.method === 'GET') {
+        const conversationId = url.searchParams.get('conversationId');
+        if (!workFileConversation(conversationId)) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
+        try {
+          response.end(JSON.stringify(await readWorkspaceFile(home.config.workingDirectory, url.searchParams.get('path') ?? '')));
+        } catch (error) {
+          respondWorkspaceFileError(response, error);
+        }
+        return;
       }
 
       if (url.pathname === RUNTIME_ROUTES.desktopTranscript && request.method === 'GET') {

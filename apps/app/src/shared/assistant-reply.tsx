@@ -16,10 +16,12 @@ export function AssistantReply({
   text,
   surface,
   run,
+  onOpenFilePath,
 }: {
   text: string;
   surface: 'work' | 'assistant';
   run?: ReplyRunInfo;
+  onOpenFilePath?: (path: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [errorNotice, setErrorNotice] = useState('');
@@ -59,7 +61,7 @@ export function AssistantReply({
         {run.events.length === 0 && !run.tools.length && <p>没有更详细的运行步骤。</p>}
       </div>
     </details>}
-    <MessageContent text={text} />
+    <MessageContent text={text} onOpenFilePath={onOpenFilePath} />
     <div className="reply-toolbar" role="toolbar" aria-label="回复操作">
       <button type="button" className={copied ? 'copied' : ''} aria-label={copied ? '已复制' : '复制'} data-tooltip={copied ? '已复制' : '复制'} onClick={() => void copy()}><AppIcon name={copied ? 'check' : 'copy'} /></button>
       <button type="button" className={savedMemory ? 'saved' : ''} aria-label={savedMemory ? '取消保存到记忆' : '保存到记忆'} aria-pressed={savedMemory}

@@ -19,6 +19,9 @@ import { AppIcon } from '../shared/app-icon.js';
 import { AssistantReply } from '../shared/assistant-reply.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
+import { WorkFilePreview } from '../shared/work-file-preview.js';
+import { WorkFileTree } from '../shared/work-file-tree.js';
+import { normalizeWorkspacePath } from '../shared/work-file-utils.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
 type ChatMessage = {
@@ -136,7 +139,8 @@ export function ChatPanel({
   });
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [rightPanelMaximized, setRightPanelMaximized] = useState(false);
-  const [activityTab, setActivityTab] = useState<'activity' | 'run'>('activity');
+  const [activityTab, setActivityTab] = useState<'activity' | 'run' | 'files'>('activity');
+  const [filePreviewPath, setFilePreviewPath] = useState<string>();
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const activityEventsRef = useRef<ActivityEvent[]>([]);
   const [lastRun, setLastRun] = useState<AgentRunRecord>();
@@ -450,6 +454,7 @@ export function ChatPanel({
       setActivityEvents([]);
       activityEventsRef.current = [];
       appliedTranscript.current = '';
+      setFilePreviewPath(undefined);
       void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
     } catch (error) { setWorkListError(formatError(error)); }
   }
@@ -472,6 +477,7 @@ export function ChatPanel({
       setActivityEvents([]);
       activityEventsRef.current = [];
       appliedTranscript.current = '';
+      setFilePreviewPath(undefined);
       void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
     } catch (error) { setWorkListError(formatError(error)); }
   }
@@ -607,6 +613,13 @@ export function ChatPanel({
       event.preventDefault();
       void sendMessage();
     }
+  }
+
+  function openWorkspaceFile(rawPath: string) {
+    if (surface !== 'work' || !workConversationId) return;
+    setActivityOpen(true);
+    setActivityTab('files');
+    setFilePreviewPath(normalizeWorkspacePath(rawPath) ?? rawPath);
   }
 
   const visibleRun = navigationTarget?.runId
@@ -754,7 +767,8 @@ export function ChatPanel({
                   {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
                 </div>
                 <div className="message-body">
-                  {message.role === 'assistant' ? <AssistantReply text={message.text} surface={surface} run={message.run} /> : <p>{message.text}</p>}
+                  {message.role === 'assistant' ? <AssistantReply text={message.text} surface={surface} run={message.run}
+                    onOpenFilePath={surface === 'work' ? openWorkspaceFile : undefined} /> : <p>{message.text}</p>}
                   {message.role !== 'assistant' && message.tools?.map((tool) => (
                     <div className={`tool-event ${tool.status}`} key={`${message.id}-${tool.name}`}>
                       <span className="tool-check">{tool.status === 'completed' ? '✓' : '!'}</span>
@@ -890,9 +904,10 @@ export function ChatPanel({
               resizeRightPanel(bounds.right - rightPanelWidth + (event.key === 'ArrowLeft' ? -16 : 16), panel);
             }} />
           <div className="activity-panel-heading"><strong>运行详情</strong><span>{surface === 'work' ? '当前工作' : '助理会话'}</span></div>
-          <div className="activity-tabs" role="group" aria-label="会话信息">
+          <div className={`activity-tabs ${surface === 'work' ? 'work-tabs' : ''}`} role="group" aria-label="会话信息">
             <button type="button" aria-pressed={activityTab === 'activity'} onClick={() => setActivityTab('activity')}>动态</button>
             <button type="button" aria-pressed={activityTab === 'run'} onClick={() => setActivityTab('run')}>运行</button>
+            {surface === 'work' && <button type="button" aria-pressed={activityTab === 'files'} onClick={() => setActivityTab('files')}>文件</button>}
           </div>
           {activityTab === 'activity' ? (
             <div className="activity-content">
@@ -919,7 +934,7 @@ export function ChatPanel({
                 <div className="activity-empty"><strong>还没有运行记录</strong><span>发送消息后，当前会话的任务状态会显示在这里。</span></div>
               )}
             </div>
-          ) : (
+          ) : activityTab === 'run' ? (
             <div className="activity-content">
               <h2>最近一次运行</h2>
               {visibleRun ? <dl className="activity-run-facts">
@@ -929,6 +944,18 @@ export function ChatPanel({
                 <div><dt>更新</dt><dd>{new Date(visibleRun.updatedAt).toLocaleString('zh-CN')}</dd></div>
                 <div><dt>运行 ID</dt><dd><code>{visibleRun.runId}</code></dd></div>
               </dl> : <div className="activity-empty"><strong>还没有运行记录</strong><span>任务提交后可在这里查看状态与时间。</span></div>}
+            </div>
+          ) : (
+            <div className="activity-content file-panel">
+              {!workConversationId ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
+                : <>
+                  <WorkFileTree conversationId={workConversationId} selectedPath={filePreviewPath}
+                    onOpenFile={setFilePreviewPath} hidden={Boolean(filePreviewPath)} />
+                  {filePreviewPath && <div className="file-preview-wrap">
+                    <WorkFilePreview conversationId={workConversationId} filePath={filePreviewPath}
+                      onBack={() => setFilePreviewPath(undefined)} />
+                  </div>}
+                </>}
             </div>
           )}
         </dialog>
