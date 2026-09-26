@@ -42,6 +42,24 @@ export async function inspectWorkArtifact(workspace: string, relativePath: strin
     try {
       const info = await file.stat();
       if (!info.isFile() || info.size > maximumArtifactBytes) return undefined;
+      const stillBoundToTarget = async (): Promise<boolean> => {
+        // O_NOFOLLOW covers only the last component. Revalidate each parent and
+        // compare the opened inode with the path after open, before and after read.
+        let component = root;
+        for (const segment of relativePath.split(sep)) {
+          component = join(component, segment);
+          const current = await lstat(component);
+          if (current.isSymbolicLink()) return false;
+        }
+        const resolvedTarget = await realpath(target);
+        const inside = relative(root, resolvedTarget);
+        if (!inside || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+          return false;
+        }
+        const current = await lstat(target);
+        return current.isFile() && current.dev === info.dev && current.ino === info.ino;
+      };
+      if (!await stillBoundToTarget()) return undefined;
       const buffer = Buffer.alloc(info.size + 1);
       let count = 0;
       while (count < buffer.length) {
@@ -50,6 +68,7 @@ export async function inspectWorkArtifact(workspace: string, relativePath: strin
         count += read.bytesRead;
       }
       if (count !== info.size) return undefined;
+      if (!await stillBoundToTarget()) return undefined;
       let text: string;
       try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, count)); }
       catch { return undefined; }

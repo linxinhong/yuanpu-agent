@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 import { register } from 'tsx/esm/api';
 import { PersistentAgentService, openYuanpuMetadataDatabase,
   readYuanpuChatTranscript, readYuanpuSavedToolResults } from '@yuanpu-agent/runtime-kit';
@@ -12,6 +14,18 @@ import { AGENT_CONTRACT_VERSION } from '@yuanpu-agent/protocol';
 register();
 const { RuntimeAgentExecutor } = await import('../src/agent-runtime.ts');
 const { RuntimeAssistantSourceHost } = await import('../src/assistant-source-host.ts');
+const require = createRequire(import.meta.url);
+const { AssistantWorkerManager } = require('../dist/index.cjs');
+const entry = resolve(import.meta.dirname, '../dist/index.cjs');
+
+async function eventually(assertion) {
+  const deadline = Date.now() + 12_000;
+  while (Date.now() < deadline) {
+    try { return await assertion(); }
+    catch { await new Promise((resolveWait) => setTimeout(resolveWait, 80)); }
+  }
+  return assertion();
+}
 
 test('real Runtime/Pi Work file tool settles distinct turn, tool and verified artifact sources', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-live-'));
@@ -96,4 +110,50 @@ test('real Runtime/Pi Work file tool settles distinct turn, tool and verified ar
     { kind: 'personal', id: 'local-user' }, 1_000)).text, /# report/);
   assert.equal(metadata.workEvidence.recordToolResults(conversation.id, piSessionId, results), 0);
   assert.equal(metadata.workEvidence.recordArtifacts(conversation.id, piSessionId), 0);
+
+  const assistantHome = join(root, 'assistant');
+  const workerOptions = { home: assistantHome, model: { appPath: agentDir, agentPath: agentDir,
+    provider: 'fixture', model: 'fixture-model' }, sources: host,
+  command: { executable: process.execPath, args: [entry, '--assistant-worker'] } };
+  const worker = new AssistantWorkerManager(workerOptions);
+  t.after(() => worker.stop());
+  await worker.start();
+  const statePath = join(assistantHome, 'state.sqlite');
+  await eventually(() => {
+    const state = new DatabaseSync(statePath);
+    try {
+      assert.equal(state.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status='processed'").get().n, 3);
+      assert.equal(state.prepare("SELECT COUNT(*) AS n FROM automation_jobs WHERE kind='review-work'").get().n, 3);
+      assert.equal(state.prepare("SELECT cursor FROM source_feeds WHERE feed_id='work-evidence'").get().cursor,
+        String(metadata.workEvidence.sourcePage(0, 10).at(-1).eventId));
+    } finally { state.close(); }
+  });
+  await worker.stop();
+  const restarted = new AssistantWorkerManager(workerOptions);
+  t.after(() => restarted.stop());
+  await restarted.start();
+  await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+  await restarted.stop();
+  const state = new DatabaseSync(statePath);
+  try {
+    assert.equal(state.prepare('SELECT COUNT(*) AS n FROM source_events').get().n, 3);
+    assert.equal(state.prepare("SELECT COUNT(*) AS n FROM automation_jobs WHERE kind='review-work'").get().n, 3);
+  } finally { state.close(); }
+
+  host.markDeleted('work', artifact.sourceId);
+  const afterDelete = new AssistantWorkerManager(workerOptions);
+  t.after(() => afterDelete.stop());
+  await afterDelete.start();
+  await eventually(() => {
+    const state = new DatabaseSync(statePath);
+    try {
+      assert.equal(state.prepare('SELECT availability FROM source_current WHERE source_id=?')
+        .get(artifact.sourceId).availability, 'deleted');
+      assert.equal(state.prepare('SELECT COUNT(*) AS n FROM source_text WHERE source_id=?')
+        .get(artifact.sourceId).n, 0);
+      assert.equal(state.prepare("SELECT COUNT(*) AS n FROM automation_jobs WHERE kind='maintain-memory' AND source_id=?")
+        .get(artifact.sourceId).n, 1);
+    } finally { state.close(); }
+  });
+  await afterDelete.stop();
 });
