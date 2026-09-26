@@ -63,7 +63,10 @@
 .assistant-home .assistant-run-card .message-markdown { max-height: 260px; overflow: auto; }
 .assistant-home .assistant-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .assistant-home .assistant-source-list { margin: 14px 0 0; padding: 0; list-style: none; }
-.assistant-source-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--yp-border-subtle); color: var(--yp-text-muted); font-size: .75rem; overflow-wrap: anywhere; }
+.assistant-source-list li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 8px 0; border-top: 1px solid var(--yp-border-subtle); color: var(--yp-text-muted); font-size: .75rem; overflow-wrap: anywhere; }
+.assistant-source-detail { flex-basis: 100%; display: grid; gap: 8px; padding: 10px 0; }
+.assistant-source-detail p { margin: 0; }
+.assistant-home details.assistant-card summary { cursor: pointer; font-weight: 600; }
 .assistant-home .assistant-form { display: grid; gap: 8px; margin-top: 14px; }
 .assistant-form label { font-weight: 500; }
 .assistant-form textarea { display: block; width: 100%; min-height: 110px; padding: 12px; resize: vertical; border: 1px solid var(--yp-border-tinted); border-radius: 10px; background: var(--yp-surface); color: var(--yp-text); font: inherit; }

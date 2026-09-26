@@ -2,7 +2,7 @@ export const PROTOCOL_VERSION = 7;
 
 import type { NotificationNavigationTarget } from './host-events.js';
 import type { AssistantMemoryView, AssistantSuggestion, AssistantSuggestionInbox,
-  AssistantWorkspaceSnapshot, AssistantDelegationRecord } from './assistant.js';
+  AssistantWorkspaceSnapshot, AssistantDelegationRecord, AssistantSourceRevocationReceipt } from './assistant.js';
 import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
 import type {
   ScheduleHistoryRecord,
@@ -530,6 +530,8 @@ export interface DesktopBridge {
   setAssistantSuggestionsPaused(until?: string): Promise<{ pausedUntil?: string }>;
   markAssistantSuggestionRead(id: string): Promise<AssistantSuggestion>;
   getAssistantWorkspace(memoryLimit?: number): Promise<AssistantWorkspaceSnapshot>;
+  revokeAssistantSource(sourceId: string, expectedVersion: string):
+    Promise<AssistantSourceRevocationReceipt>;
   correctAssistantMemory(id: string, expectedVersion: number, text: string,
     revisionId: string): Promise<AssistantMemoryView>;
   forgetAssistantMemory(id: string): Promise<{ forgottenIds: string[] }>;

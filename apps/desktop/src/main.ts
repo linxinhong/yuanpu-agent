@@ -152,6 +152,8 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
     runtime.markAssistantSuggestionRead(id)));
   ipcMain.handle('assistant:workspace:get', trustedHandler((_event, memoryLimit?: number) =>
     runtime.getAssistantWorkspace(memoryLimit)));
+  ipcMain.handle('assistant:source:revoke', trustedHandler((sourceId: string, expectedVersion: string) =>
+    runtime.revokeAssistantSource(sourceId, expectedVersion)));
   ipcMain.handle('assistant:memory:correct', trustedHandler((id: string, expectedVersion: number,
     text: string, revisionId: string) => runtime.correctAssistantMemory(id, expectedVersion, text, revisionId)));
   ipcMain.handle('assistant:memory:forget', trustedHandler((id: string) => runtime.forgetAssistantMemory(id)));

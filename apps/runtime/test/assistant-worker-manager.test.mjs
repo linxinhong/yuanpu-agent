@@ -12,6 +12,31 @@ const require = createRequire(import.meta.url);
 const { AssistantWorkerManager } = require('../dist/index.cjs');
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
 
+test('Worker host routes a four-field stable delegation follow-up request', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-delegation-ipc-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const worker = join(root, 'request-worker.cjs');
+  await writeFile(worker, `process.on('message', (message) => {
+    if (message.kind === 'bootstrap') {
+      process.send({ kind: 'ready' });
+      process.send({ kind: 'delegation-request', id: 'follow-one', method: 'followUp',
+        args: ['task-one', 'session-one', 'check again', 'stable-request'] });
+    }
+    if (message.kind === 'shutdown') process.exit(0);
+  });`);
+  let resolveCall;
+  const called = new Promise((resolveCallPromise) => { resolveCall = resolveCallPromise; });
+  const manager = new AssistantWorkerManager({ home: join(root, 'assistant'),
+    model: { appPath: root, agentPath: root, provider: 'fixture', model: 'fixture' },
+    delegations: { followUp(...args) { resolveCall(args); return Promise.resolve({ taskId: 'task-one' }); } },
+    command: { executable: process.execPath, args: [worker] } });
+  t.after(() => manager.stop());
+  await manager.start();
+  assert.deepEqual(await Promise.race([called, new Promise((_, reject) => setTimeout(() =>
+    reject(new Error('Follow-up IPC was not routed.')), 2_000))]),
+  ['task-one', 'session-one', 'check again', 'stable-request']);
+});
+
 test('headless Runtime host resolves a model and runs, queries, and stops its Worker', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-assistant-host-'));
   t.after(() => rm(root, { recursive: true, force: true }));

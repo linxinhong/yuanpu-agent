@@ -1597,6 +1597,13 @@ async function serve(): Promise<void> {
             if (!isRecord(body)) {
               throw new Error('Invalid Assistant workspace request.');
             }
+            if (body.action === 'revoke-source' && typeof body.sourceId === 'string'
+              && typeof body.expectedVersion === 'string') {
+              const receipt = assistantSources.revokeSource(body.sourceId, body.expectedVersion);
+              assistantWorker.refreshSources();
+              response.end(JSON.stringify(receipt));
+              return;
+            }
             if (body.action === 'import-saved' && typeof body.savedId === 'string'
               && (body.surface === 'work' || body.surface === 'assistant')
               && typeof body.text === 'string' && typeof body.savedAt === 'string') {

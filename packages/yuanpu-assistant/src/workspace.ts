@@ -165,7 +165,33 @@ export class AssistantWorkspaceService {
         && validId(event.work_id.slice(5)) ? event.work_id.slice(5) : undefined;
       sources.push({ sourceId: ref.sourceId, sourceVersion: ref.sourceVersion,
         availability: current?.sourceVersion === ref.sourceVersion
-          ? current.availability : 'unknown', ...(workConversationId ? { workConversationId } : {}) });
+          ? current.availability : 'unknown',
+        ...(current?.sourceVersion === ref.sourceVersion ? { current: true } : {}),
+        ...(workConversationId ? { workConversationId } : {}) });
+    }
+    const currentRows = this.memory.sources.database.prepare(`SELECT c.source_id,c.source_version,
+      c.availability,(SELECT e.work_id FROM source_events e WHERE e.source_id=c.source_id
+        AND e.audience_kind='personal' AND e.audience_id='local-user' AND e.work_id IS NOT NULL
+        ORDER BY e.rowid DESC LIMIT 1) AS work_id
+      FROM source_current c WHERE c.audience_kind='personal' AND c.audience_id='local-user'
+      ORDER BY c.occurred_at DESC LIMIT ?`).all(memoryLimit + 1) as
+      Array<{ source_id: string; source_version: string; availability: AssistantSourceView['availability'];
+        work_id: string | null }>;
+    const hasMoreSources = currentRows.length > memoryLimit;
+    for (const row of currentRows.slice(0, memoryLimit)) {
+      const key = `${row.source_id}:${row.source_version}`;
+      if (seenSource.has(key)) {
+        const source = sources.find((item) => item.sourceId === row.source_id
+          && item.sourceVersion === row.source_version);
+        if (source) source.current = true;
+        continue;
+      }
+      seenSource.add(key);
+      const workConversationId = row.work_id?.startsWith('work:')
+        && validId(row.work_id.slice(5)) ? row.work_id.slice(5) : undefined;
+      sources.push({ sourceId: row.source_id, sourceVersion: row.source_version,
+        availability: row.availability, current: true,
+        ...(workConversationId ? { workConversationId } : {}) });
     }
     const sync = this.memory.sources.database.prepare(`SELECT
       SUM(CASE WHEN status='processed' THEN 1 ELSE 0 END) AS processed,
@@ -176,7 +202,7 @@ export class AssistantWorkspaceService {
         processed: number | null; pending: number | null;
         unavailable: number | null; last_observed_at: string | null };
     return { memories, hasMoreMemories, reviews, hasMoreReviews, delegations,
-      hasMoreDelegations, delegationVerifications, sources,
+      hasMoreDelegations, delegationVerifications, sources, hasMoreSources,
       ...(delegationsUnavailable ? { delegationsUnavailable: true } : {}),
       ...(this.organizingPausedUntil() ? { organizingPausedUntil: this.organizingPausedUntil() } : {}),
       sourceSync: { processed: sync.processed ?? 0, pending: sync.pending ?? 0,
