@@ -271,6 +271,9 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     body: JSON.stringify({ parentId: parent.id, name: 'Models', iconId: 'code',
       requestId: '11111111-1111-4111-8111-111111111111' }) }).then((response) => response.json());
   assert.equal(childRetry.id, childFolder.id);
+  assert.equal((await fetch(folderEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ parentId: parent.id, name: 'Different', iconId: 'code',
+      requestId: '11111111-1111-4111-8111-111111111111' }) })).status, 400);
   const nested = await fetch(workEndpoint, { method: 'POST', headers: workHeaders,
     body: JSON.stringify({ folderId: childFolder.id,
       requestId: '22222222-2222-4222-8222-222222222222' }) }).then((response) => response.json());
@@ -292,8 +295,13 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     body: JSON.stringify({ parentId: 'folder:foreign', name: 'bad' }) })).status, 400);
   assert.equal((await fetch(folderEndpoint, { method: 'PATCH', headers: workHeaders,
     body: JSON.stringify({ folderId: parent.id, iconId: 'execute-file' }) })).status, 400);
-  const tag = await fetch(`http://${ready.host}:${ready.port}/v1/work/tags`, { method: 'POST',
-    headers: workHeaders, body: JSON.stringify({ name: 'review', color: 'blue' }) }).then((response) => response.json());
+  const tagEndpoint = `http://${ready.host}:${ready.port}/v1/work/tags`;
+  const tag = await fetch(tagEndpoint, { method: 'POST',
+    headers: workHeaders, body: JSON.stringify({ name: 'review', color: 'blue',
+      requestId: '33333333-3333-4333-8333-333333333333' }) }).then((response) => response.json());
+  assert.equal((await fetch(tagEndpoint, { method: 'POST', headers: workHeaders,
+    body: JSON.stringify({ name: 'review', color: 'red',
+      requestId: '33333333-3333-4333-8333-333333333333' }) })).status, 400);
   const edited = await fetch(workEndpoint, { method: 'PATCH', headers: workHeaders,
     body: JSON.stringify({ conversationId: nested.id, title: 'Plan', tagIds: [tag.id], archived: true }) })
     .then((response) => response.json());

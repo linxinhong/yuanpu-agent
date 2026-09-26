@@ -1188,7 +1188,10 @@ async function serve(): Promise<void> {
             const requestId = body.requestId as string | undefined;
             const previous = requestId ? workConversations.folderForRequest(workScope, requestId) : undefined;
             if (previous) {
-              if (previous.parentId !== parentId) throw new Error('Work create request conflicts with an earlier parent.');
+              if (previous.parentId !== parentId || previous.name !== body.name.trim()
+                || previous.iconId !== (body.iconId ?? 'folder')) {
+                throw new Error('Work create request conflicts with an earlier folder input.');
+              }
               response.end(JSON.stringify(previous));
               return;
             }
@@ -1213,7 +1216,8 @@ async function serve(): Promise<void> {
                 } catch { /* Keep the intent for startup recovery. */ }
               }
               const raced = requestId ? workConversations.folderForRequest(workScope, requestId) : undefined;
-              if (raced && raced.parentId === parentId) { response.end(JSON.stringify(raced)); return; }
+              if (raced && raced.parentId === parentId && raced.name === body.name.trim()
+                && raced.iconId === (body.iconId ?? 'folder')) { response.end(JSON.stringify(raced)); return; }
               throw error;
             }
             return;
@@ -1241,14 +1245,21 @@ async function serve(): Promise<void> {
               && typeof body.requestId !== 'string')) throw new Error('Invalid Work tag name.');
             const requestId = body.requestId as string | undefined;
             const previous = requestId ? workConversations.tagForRequest(workScope, requestId) : undefined;
-            if (previous) { response.end(JSON.stringify(previous)); return; }
+            if (previous) {
+              if (previous.name !== body.name.trim() || previous.color !== (body.color ?? 'gray')) {
+                throw new Error('Work create request conflicts with an earlier tag input.');
+              }
+              response.end(JSON.stringify(previous)); return;
+            }
             response.statusCode = 201;
             try {
               response.end(JSON.stringify(workConversations.createTag(workScope, body.name,
                 body.color as string | undefined, requestId)));
             } catch (error) {
               const raced = requestId ? workConversations.tagForRequest(workScope, requestId) : undefined;
-              if (raced) { response.end(JSON.stringify(raced)); return; }
+              if (raced && raced.name === body.name.trim() && raced.color === (body.color ?? 'gray')) {
+                response.end(JSON.stringify(raced)); return;
+              }
               throw error;
             }
           } else if (request.method === 'PATCH') {
