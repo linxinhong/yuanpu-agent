@@ -8,6 +8,16 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
+const childrenByHome = new Map();
+
+async function bounded(promise, label, timeoutMs = 10_000) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out awaiting ${label}.`)), timeoutMs);
+    })]);
+  } finally { clearTimeout(timer); }
+}
 
 async function eventually(check, label, timeoutMs = 10_000) {
   const until = Date.now() + timeoutMs;
@@ -21,8 +31,18 @@ async function eventually(check, label, timeoutMs = 10_000) {
 
 async function home(t) {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-assistant-worker-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  return join(root, 'assistant');
+  const assistantHome = join(root, 'assistant');
+  const children = new Set();
+  childrenByHome.set(assistantHome, children);
+  t.after(async () => {
+    try {
+      for (const child of children) await stopWorker(child);
+    } finally {
+      childrenByHome.delete(assistantHome);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  return assistantHome;
 }
 
 function startWorker(homePath, parentPid = process.pid) {
@@ -34,6 +54,7 @@ function startWorker(homePath, parentPid = process.pid) {
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => errors.push(chunk));
   child.send({ kind: 'bootstrap', home: homePath, parentPid });
+  childrenByHome.get(homePath)?.add(child);
   return { child, errors };
 }
 
@@ -60,8 +81,15 @@ function nextMessage(child, predicate, timeoutMs = 8_000) {
 
 async function stopWorker(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolveExit) => child.once('exit', resolveExit));
   child.send({ kind: 'shutdown' });
-  await new Promise((resolveExit) => child.once('exit', resolveExit));
+  try {
+    await bounded(exited, 'Assistant Worker shutdown');
+  } catch (error) {
+    child.kill('SIGKILL');
+    await bounded(exited, 'Assistant Worker forced exit');
+    throw new Error(`${error.message} pid=${child.pid} stderr=${child.testErrors?.join('').slice(0, 1000) ?? ''}`);
+  }
 }
 
 test('headless Worker performs local daily and weekly checks, then stops with the host', async (t) => {
@@ -209,7 +237,7 @@ test('cancelling a queued turn does not abort the active turn in the same Sessio
   const first = nextMessage(worker.child, (message) => message.kind === 'result' && message.correlationId === 'first');
   worker.child.send({ kind: 'prompt', id: 'active', correlationId: 'first', sessionId: 'shared',
     text: 'First', deadlineAt: Date.now() + 10_000 });
-  await firstStarted;
+  await bounded(firstStarted, 'first loopback request');
   const second = nextMessage(worker.child, (message) => message.kind === 'result' && message.correlationId === 'second');
   worker.child.send({ kind: 'prompt', id: 'queued', correlationId: 'second', sessionId: 'shared',
     text: 'Second', deadlineAt: Date.now() + 10_000 });
@@ -354,31 +382,38 @@ test('a killed Worker leaves its accepted task identifiable as interrupted after
   const assistantHome = await home(t);
   let began;
   const started = new Promise((resolveStart) => { began = resolveStart; });
-  const server = createServer(async (request) => {
-    for await (const _chunk of request) { /* consume request */ }
-    began();
-  });
-  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
-  t.after(() => new Promise((resolveClose) => { server.closeAllConnections(); server.close(resolveClose); }));
   const first = startWorker(assistantHome);
+  t.after(() => stopWorker(first.child));
   first.child.on('message', (message) => {
-    if (message.kind !== 'model-request') return;
-    first.child.send({ kind: 'model', id: message.id, config: {
-      model: { id: 'assistant-loopback', name: 'Assistant loopback', provider: 'assistant-loopback',
-        api: 'openai-completions', baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
-        reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 128000, maxTokens: 1024 },
-      auth: { apiKey: 'loopback-test-key' },
-    } });
+    if (message.kind === 'source-request' && message.method === 'listChanges') {
+      first.child.send({ kind: 'source-result', id: message.id,
+        value: { events: [], nextCursor: message.args[1] } });
+    } else if (message.kind === 'source-request') {
+      first.child.send({ kind: 'source-result', id: message.id,
+        value: { status: 'temporarily_unavailable' } });
+    }
+    if (message.kind === 'model-request') began();
   });
   await nextMessage(first.child, (message) => message.kind === 'ready');
   first.child.send({ kind: 'prompt', id: 'unfinished', correlationId: 'unfinished',
     text: 'Wait', deadlineAt: Date.now() + 10_000 });
-  await started;
+  await bounded(started, 'in-flight model selection');
+  const killed = new Promise((resolveExit) => first.child.once('exit', resolveExit));
   first.child.kill('SIGKILL');
-  await new Promise((resolveExit) => first.child.once('exit', resolveExit));
+  await bounded(killed, 'killed Worker exit');
   const second = startWorker(assistantHome);
   t.after(() => stopWorker(second.child));
+  second.child.on('message', (message) => {
+    if (message.kind === 'model-request') {
+      second.child.send({ kind: 'model', id: message.id, error: 'Fixture model unavailable.' });
+    } else if (message.kind === 'source-request' && message.method === 'listChanges') {
+      second.child.send({ kind: 'source-result', id: message.id,
+        value: { events: [], nextCursor: message.args[1] } });
+    } else if (message.kind === 'source-request') {
+      second.child.send({ kind: 'source-result', id: message.id,
+        value: { status: 'temporarily_unavailable' } });
+    }
+  });
   await nextMessage(second.child, (message) => message.kind === 'ready');
   const queried = nextMessage(second.child, (message) => message.kind === 'task' && message.correlationId === 'interrupted');
   second.child.send({ kind: 'task', id: 'unfinished', correlationId: 'interrupted' });

@@ -36,13 +36,16 @@ test('checkpoint pauses safely and resume replays completed calls across manager
   assert.equal(calls, 1);
   await assert.rejects(manager.resume(first.id), /confirmation/);
   const reloaded = new WorkflowManager({ directory: join(directory, 'runs'), cwd: directory, subagents, approveCheckpoint: async () => {} });
-  t.after(() => reloaded.dispose());
-  await reloaded.confirm(first.id);
-  const resumed = await reloaded.resume(first.id);
-  const final = await settled(reloaded, resumed.id);
-  assert.equal(final.status, 'completed', final.error);
-  assert.equal(calls, 2);
-  assert.equal(JSON.parse(final.result), 'first second');
+  try {
+    await reloaded.confirm(first.id);
+    const resumed = await reloaded.resume(first.id);
+    const final = await settled(reloaded, resumed.id);
+    assert.equal(final.status, 'completed', final.error);
+    assert.equal(calls, 2);
+    assert.equal(JSON.parse(final.result), 'first second');
+  } finally {
+    await reloaded.dispose();
+  }
 });
 test('workflow timeout stops busy scripts and cancellation stops child agents', async (t) => {
   const { manager } = await setup(t, ({ signal }) => new Promise((resolve, reject) => {
