@@ -17,6 +17,7 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+  koffi: true
   protobufjs: false
 
 minimumReleaseAgeExclude:
