@@ -1931,7 +1931,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-055
     title: "建立工作会话文件夹与标签管理契约"
-    status: ready
+    status: in_progress
     goal: "用户可用稳定 ID 管理任意层级文件夹、会话名称与图标、标签及可恢复归档；新会话在选定文件夹下拥有独立工作目录。"
     scope:
       in: ["Work 文件夹/会话/标签的 SQLite 元数据、兼容迁移与排序", "Runtime 管理路由、Yuanpu 协议 DTO、DesktopBridge/IPC 接线", "新建文件夹与会话、服务端重命名、图标、标签、归档/恢复、同级排序的服务行为"]
@@ -1955,15 +1955,14 @@ tasks:
     investigation_hints: ["入口 packages/yuanpu-runtime/src/persistence/work-conversation-store.ts 与 persistence/index.ts，协议 packages/yuanpu-protocol/src/index.ts；Runtime apps/runtime/src/index.ts；Desktop apps/desktop/src/{runtime-manager,main,preload}.ts", "现有 work-conversation.test.mjs、persistence.test.mjs、apps/runtime/test/runtime.test.mjs 用合成旧库和临时 Home 做行为测试；先 focused 后 pnpm check", "预检 main 中修复助理与工作目录的 SQLite v8 迁移冲突（TASK-054）的最终 schema 版本与工作对话右侧栏文件预览（TASK-052）的新增协议接口，不从当前未提交迁移号推断可用版本；保留文件预览按 conversationId 解析 cwd 的契约"]
     escalation_conditions: ["如迁移后 schema 与修复助理与工作目录的 SQLite v8 迁移冲突（TASK-054）或其他未集成分支冲突，先协调唯一集成 writer，不在并行分支重用版本号", "如文件夹目录名与展示名无法一一对应，以稳定 ID/安全磁盘名为准并记录 UI 表达差异"]
     result:
-      owner: null
+      owner: "conversation-tree-sol-055-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T17:22:28.143Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-tree-sol"
+      branch: "task/task-055-work-tree-contract"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-056
     title: "安全搬迁工作会话及文件夹的磁盘目录"
     status: pending
