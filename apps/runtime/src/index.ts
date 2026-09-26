@@ -67,6 +67,8 @@ import { smokeBuiltinAgentTools } from './agent-tools-smoke.js';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { AssistantHostService } from './assistant-host.js';
+import { RuntimeAssistantSourceHost } from './assistant-source-host.js';
+export { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { runAssistantWorker } from './assistant-worker.js';
 import { createWorkspaceDirectory, resolveSelectedWorkspaceDirectory } from './workspace-directory.js';
@@ -585,6 +587,8 @@ async function serve(): Promise<void> {
   });
   const assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
+    sources: new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
+      metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md')),
     model: {
       appPath: home.appPath,
       agentPath: home.agentPath,

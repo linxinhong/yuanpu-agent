@@ -223,10 +223,36 @@ export class WorkConversationStore {
     }));
   }
 
+  /** Explicit event IDs survive VACUUM and are independent of turn timestamps. */
+  sourcePage(afterRowId: number, limit: number): Array<{ eventId: number; change: AssistantSourceChange }> {
+    if (!Number.isSafeInteger(afterRowId) || afterRowId < 0
+      || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error('Invalid Work source page boundary.');
+    }
+    const rows = this.database.prepare(`SELECT * FROM yp_work_turn_sources
+      WHERE event_id > ? ORDER BY event_id LIMIT ?`).all(afterRowId, limit) as unknown as
+      Array<SourceRow & { event_id: number }>;
+    return rows.map((row) => {
+      const source = this.sourceFromRow(row);
+      return { eventId: row.event_id, change: {
+        sourceId: source.sourceId, sourceVersion: source.sourceVersion, kind: 'created',
+        audience: { kind: 'personal', id: 'local-user' }, occurredAt: source.committedAt,
+        contentRef: source.contentRef, workId: source.conversationId,
+      } };
+    });
+  }
+
   /** The host resolves the opaque reference; a Worker never sees a local absolute path. */
   resolveContentRef(contentRef: string): WorkTurnSource | undefined {
     const row = this.database.prepare('SELECT * FROM yp_work_turn_sources WHERE content_ref = ?')
       .get(contentRef) as unknown as SourceRow | undefined;
     return row ? this.sourceFromRow(row) : undefined;
+  }
+
+  sourceById(sourceId: string): WorkTurnSource | undefined {
+    if (!sourceId.startsWith('work-turn:')) return undefined;
+    const contentRef = `work-content:${createHash('sha256').update(sourceId).digest('hex')}`;
+    const source = this.resolveContentRef(contentRef);
+    return source?.sourceId === sourceId ? source : undefined;
   }
 }
