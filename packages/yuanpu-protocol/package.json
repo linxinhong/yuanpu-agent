@@ -13,6 +13,7 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsdown",
+    "test": "node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }
