@@ -1364,7 +1364,7 @@ tasks:
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
-        expect: "用户消息只进入助理执行器；Work 仍使用自己的池；助理崩溃不影响 Work"
+        expect: "Runtime 宿主通过专属 Worker 接口可执行、查询和取消一次真实助理回合；Work 仍使用自己的池；助理崩溃不影响 Work。桌面及企微用户入口切换由 TASK-041 验收"
       - type: assertion
         expect: "App 完整退出、父进程异常退出与启动失败均有界回收 Worker；重启获取唯一 Home 写入锁，未完成任务可识别"
       - type: assertion
@@ -1399,6 +1399,8 @@ tasks:
     acceptance:
       - type: assertion
         expect: "同一已配对身份共享助理知识服务但两渠道聊天上下文独立；普通回复不再默认互相镜像"
+      - type: assertion
+        expect: "桌面助理与企业微信已配对消息均只进入专属 Assistant Worker；Work 消息仍进入工作执行器，旧共享 AgentService 的 assistant 分支不再接受新助理消息"
       - type: assertion
         expect: "重复入站只创建一次请求，断线后查询已有 run；回复成功/失败/未知独立于执行结果，未知不盲重发"
       - type: assertion
