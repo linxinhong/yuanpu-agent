@@ -98,6 +98,70 @@ function fixture() {
   return { database, store, record, job, memory };
 }
 
+test('daily reflection stays silent without fresh evidence and considers a candidate once', async (t) => {
+  const database = new DatabaseSync(':memory:');
+  t.after(() => database.close());
+  const store = new AssistantAutomationStore(database);
+  store.scheduleActivePeriods();
+  let candidates = [];
+  let calls = 0;
+  const considered = [];
+  const recorded = [];
+  const suggestions = { store: {
+    async candidates() { return candidates; },
+    record(items, proposal) { considered.push(...items); recorded.push(...proposal); candidates = []; },
+    recordReflectionAttempt() {}, reflectionAttempt() { return undefined; },
+  }, async reflect(items, _signal, beforeModel) {
+    assert.equal(beforeModel(), true);
+    calls++;
+    return { costUsd: 0.01, message: JSON.stringify({ suggestions: [{ candidateId: items[0].candidateId,
+      reason: 'The report is unverified.', nextStep: 'Check the report totals.' }] }) };
+  } };
+  const engine = new AssistantAutomationEngine(store,
+    assistantAutomationHandler({ sources: { database } }, store, undefined, undefined, undefined, suggestions));
+  assert.equal((await engine.tick()).status, 'completed');
+  assert.equal(calls, 0);
+  candidates = [{ candidateId: 'follow-up-one', fingerprint: 'v1', context: 'report',
+    text: 'The report is unverified.', evidence: [{ sourceId: 'work-one', sourceVersion: 'v1',
+      observedAt: new Date().toISOString() }] }];
+  assert.equal((await engine.tick()).status, 'completed');
+  assert.equal(calls, 1);
+  assert.equal(considered.length, 1);
+  assert.equal(recorded[0].nextStep, 'Check the report totals.');
+  await engine.tick();
+  assert.equal(calls, 1);
+});
+
+test('a changed candidate after a paid reflection is not silently marked considered', async (t) => {
+  const database = new DatabaseSync(':memory:');
+  t.after(() => database.close());
+  const store = new AssistantAutomationStore(database);
+  const daily = store.scheduleActivePeriods()[0];
+  const original = { candidateId: 'follow-up-one', fingerprint: 'v1', context: 'one',
+    text: 'Original evidence', evidence: [] };
+  const changed = { ...original, fingerprint: 'v2', text: 'New evidence' };
+  let candidates = [original];
+  let calls = 0;
+  const recorded = [];
+  const host = { store: { async candidates() { return candidates; },
+    record(items) { recorded.push(...items); },
+    recordReflectionAttempt() {}, reflectionAttempt() { return [original]; } },
+  async reflect(_items, _signal, beforeModel) {
+    assert.equal(beforeModel(), true);
+    calls++;
+    candidates = [changed];
+    return { costUsd: 0.01, message: '{"suggestions":[]}' };
+  } };
+  const engine = new AssistantAutomationEngine(store,
+    assistantAutomationHandler({ sources: { database } }, store, undefined, undefined, undefined, host));
+  assert.equal((await engine.tick()).status, 'waiting');
+  database.prepare('UPDATE automation_jobs SET retry_at=? WHERE job_id=?')
+    .run(new Date(0).toISOString(), daily.jobId);
+  assert.equal((await engine.tick()).status, 'completed');
+  assert.equal(calls, 1, 'the same period is never billed twice');
+  assert.deepEqual(recorded, [], 'new evidence remains eligible for a later period');
+});
+
 test('verification job accounts for cost before linking evidence and commits once', async (t) => {
   const { database, store, record, job, memory } = fixture();
   t.after(() => database.close());

@@ -674,10 +674,12 @@ async function serve(): Promise<void> {
   );
   await delegations.open();
   await delegations.reconcileEffectApprovals((requestId) => approvals.get(requestId)?.status);
+  let assistantHost: AssistantHostService;
   assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
     sources: assistantSources,
     delegations,
+    deliverSuggestion: (id, content) => assistantHost.deliverSuggestion(id, content),
     model: {
       appPath: home.appPath,
       agentPath: home.agentPath,
@@ -686,8 +688,8 @@ async function serve(): Promise<void> {
     },
     onError: (error) => console.warn(`[assistant-worker] ${error.message}`),
   });
-  const assistantHost = new AssistantHostService(metadata.assistantHost, assistantWorker,
-    home.config.workingDirectory);
+  assistantHost = new AssistantHostService(metadata.assistantHost, assistantWorker,
+    home.config.workingDirectory, join(home.root, 'assistant', 'config.json'));
   const agentService = await PersistentAgentService.open({
     store: metadata.agentRuns,
     executor: agentExecutor,
@@ -1539,6 +1541,44 @@ async function serve(): Promise<void> {
           }
         } catch (error) {
           response.statusCode = 409;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+          return;
+        }
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.assistantSuggestions) {
+        try {
+          if (request.method === 'GET') {
+            response.end(JSON.stringify(await assistantWorker.suggestions()));
+            return;
+          }
+          if (request.method === 'POST') {
+            const body = await readJsonBody(request);
+            if (!isRecord(body)) throw new Error('Invalid Assistant suggestion request.');
+            if (body.action === 'pause') {
+              if (body.until !== undefined && typeof body.until !== 'string') {
+                throw new Error('Invalid pause deadline.');
+              }
+              response.end(JSON.stringify(await assistantWorker.suggestionPause(body.until)));
+              return;
+            }
+            if (typeof body.id !== 'string' || !/^suggestion-[a-f0-9]{24}$/u.test(body.id)) {
+              throw new Error('Invalid suggestion ID.');
+            }
+            if (body.action === 'read') {
+              response.end(JSON.stringify(await assistantWorker.suggestionRead(body.id)));
+              return;
+            }
+            if (body.action === 'feedback' && ['ignored', 'snoozed', 'accepted'].includes(String(body.feedback))
+              && (body.snoozedUntil === undefined || typeof body.snoozedUntil === 'string')) {
+              response.end(JSON.stringify(await assistantWorker.suggestionFeedback(body.id,
+                body.feedback as 'ignored' | 'snoozed' | 'accepted', body.snoozedUntil)));
+              return;
+            }
+            throw new Error('Invalid Assistant suggestion action.');
+          }
+        } catch (error) {
+          response.statusCode = 400;
           response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
           return;
         }

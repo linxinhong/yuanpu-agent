@@ -98,6 +98,26 @@ export interface AssistantEvidenceRef {
   observedAt: string;
 }
 
+export interface AssistantSuggestion {
+  suggestionId: string;
+  candidateId: string;
+  fingerprint: string;
+  reason: string;
+  nextStep: string;
+  evidence: AssistantEvidenceRef[];
+  generatedAt: string;
+  feedback: 'none' | 'ignored' | 'snoozed' | 'accepted';
+  snoozedUntil?: string;
+  deliveryStatus: 'not_requested' | 'accepted' | 'failed' | 'unknown';
+  deliveryRef?: string;
+  readAt?: string;
+}
+
+export interface AssistantSuggestionInbox {
+  items: AssistantSuggestion[];
+  pausedUntil?: string;
+}
+
 export type AssistantReviewJudgment = 'supported' | 'partial' | 'failed' | 'unverified';
 
 /** Reviews assess work content and artifacts, never the assistant's own model score. */

@@ -6,6 +6,7 @@ import {
   BACKGROUND_CONTEXT,
   formatSkillsForSystemPrompt,
   JsonlSessionRepo,
+  MemorySessionRepo,
   NodeExecutionEnv,
   type AgentLane,
   type Entry,
@@ -130,6 +131,7 @@ export async function createAssistantExecutor(options: {
     reviewOnly?: boolean; backgroundSkill?: string } = {}): Promise<AssistantSession> => {
     if (closed) throw new Error('Assistant executor is closed.');
     const backgroundSkill = openOptions.backgroundSkill ?? (openOptions.reviewOnly ? 'review-work' : undefined);
+    const ephemeralReflection = backgroundSkill === 'reflect-and-suggest';
     if (backgroundSkill && selectedId) {
       throw new Error('Background skill requires a new isolated Session.');
     }
@@ -150,13 +152,17 @@ export async function createAssistantExecutor(options: {
       if (selectedId && !metadata && !openOptions.createIfMissing) {
         throw new Error(`Unknown assistant Session: ${selectedId}`);
       }
+      const sessionRepo = ephemeralReflection ? new MemorySessionRepo() : repo;
       const session = metadata
         ? await repo.open(metadata, BACKGROUND_CONTEXT)
-        : await repo.create({ id: sessionId, cwd: paths.root }, BACKGROUND_CONTEXT);
+        : await sessionRepo.create({ id: sessionId, cwd: paths.root }, BACKGROUND_CONTEXT);
       try {
         const snapshotFile = snapshotPath(paths, sessionId);
         let frozen: FrozenSessionPrompt;
-        if (metadata) {
+        if (ephemeralReflection) {
+          frozen = { version: 1,
+            prompt: await createFrozenAssistantPrompt(paths, formatSkillsForSystemPrompt(skills)) };
+        } else if (metadata) {
           frozen = JSON.parse(await readAssistantHomeFile(paths, snapshotFile)) as FrozenSessionPrompt;
           if (frozen.version !== 1 || typeof frozen.prompt !== 'string') {
             throw new Error(`Invalid assistant prompt snapshot: ${sessionId}`);
