@@ -141,6 +141,8 @@ export interface AssistantDelegationBrief {
   goal: string;
   completionCriteria: string[];
   contextRefs: string[];
+  /** Filled by the trusted host when the task is first accepted. */
+  sourceVersions?: Record<string, string>;
   authorizedCapabilities: string[];
   readOnly: boolean;
   deadlineAt: string;
@@ -160,6 +162,8 @@ export interface AssistantDelegationRecord extends AssistantDelegationBrief {
   status: Exclude<AssistantDelegationStatus, 'requested'>;
   followUps: string[];
   result?: AssistantDelegationResult;
+  /** Host-issued task grant; only trusted approval code can set it. */
+  approvedGrantId?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -19,7 +19,7 @@ export interface ProfessionalTaskScope {
 
 export interface ProfessionalTaskHost {
   /** Return a task-bound grant only after checking trusted user authorization. */
-  authorizeTask(brief: DelegationBrief): Promise<ProfessionalTaskAccess>;
+  authorizeTask(brief: DelegationBrief, approvedGrantId?: string): Promise<ProfessionalTaskAccess>;
 }
 
 export interface ProfessionalTaskAccess {
@@ -208,10 +208,11 @@ export class LocalProfessionalAdapter implements DelegationExecutionAdapter {
     }
   }
 
-  async run(brief: DelegationBrief, followUp: string | undefined, signal: AbortSignal): Promise<DelegationResult> {
+  async run(brief: DelegationBrief, followUp: string | undefined, signal: AbortSignal,
+    approvedGrantId?: string): Promise<DelegationResult> {
     if (this.active.has(brief.taskId)) throw new Error('Professional task is already running.');
     signal.throwIfAborted();
-    const access = await this.options.host.authorizeTask(brief);
+    const access = await this.options.host.authorizeTask(brief, approvedGrantId);
     signal.throwIfAborted();
     const scope: ProfessionalTaskScope = {
       taskId: brief.taskId, skillName: brief.skillName,

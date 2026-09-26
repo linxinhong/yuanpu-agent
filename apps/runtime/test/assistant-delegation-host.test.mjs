@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { createReadOnlyProfessionalTaskHost } = require('../dist/index.cjs');
+const { createProfessionalTaskHost, createReadOnlyProfessionalTaskHost } = require('../dist/index.cjs');
 
 test('production task grant scopes every source read and refuses model-proposed execution', async () => {
   const reads = [];
@@ -31,4 +31,35 @@ test('production task grant scopes every source read and refuses model-proposed 
   await assert.rejects(host.authorizeTask({ ...brief, readOnly: false }), /trusted user grant/);
   await assert.rejects(host.authorizeTask({ ...brief,
     authorizedCapabilities: ['fixture.inspect'] }), /trusted user grant/);
+});
+
+test('task-level approval binds capabilities but concrete effects still use MCP approval', async () => {
+  const calls = [];
+  const sources = { async delegatedSourceVersion() { return 'v1'; },
+    async readDelegatedSource() { return 'source'; } };
+  const brief = { taskId: 'task_capability', assistantSessionId: 'session_one',
+    skillName: 'reviewer', goal: 'Inspect', completionCriteria: ['Report result'],
+    contextRefs: [], authorizedCapabilities: ['fixture.inspect'], readOnly: false,
+    deadlineAt: new Date(Date.now() + 60_000).toISOString() };
+  const host = createProfessionalTaskHost(sources, {
+    async execute(input, context) {
+      calls.push([input.name, context.sessionId, context.workspaceId]);
+      if (!input.approvalRequestId) throw { failure: { error: 'needs_approval',
+        approvalRequestId: 'effect_one' } };
+      return { content: [{ type: 'text', text: 'inspected' }] };
+    },
+  }, async (candidate, grant) => candidate.taskId === brief.taskId && grant === 'task_grant');
+  await assert.rejects(host.authorizeTask(brief), /trusted user grant/);
+  await assert.rejects(host.authorizeTask(brief, 'other'), /trusted user grant/);
+  const access = await host.authorizeTask(brief, 'task_grant');
+  const pending = await access.executeCapability({ name: 'fixture.inspect', arguments: {} });
+  assert.equal(pending.status, 'needs_approval');
+  assert.equal(pending.approvalRequestId, 'effect_one');
+  await assert.rejects(access.executeCapability({ name: 'fixture.write', arguments: {} }), /trusted user grant/);
+  const completed = await access.executeCapability({ name: 'fixture.inspect', arguments: {},
+    approvalRequestId: 'effect_one' });
+  assert.equal(completed.status, 'completed');
+  assert.match(completed.resultRef, /^capability-result:task_capability:/);
+  assert.deepEqual(calls, [['fixture.inspect', 'session_one', 'assistant-delegation:task_capability'],
+    ['fixture.inspect', 'session_one', 'assistant-delegation:task_capability']]);
 });

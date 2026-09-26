@@ -57,7 +57,7 @@ import {
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createPublicKey, randomUUID, verify } from 'node:crypto';
+import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -71,8 +71,8 @@ import { AssistantHostService } from './assistant-host.js';
 import { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 import { AssistantDelegationService } from './assistant-delegation-service.js';
 import { LocalProfessionalAdapter } from './assistant-delegation-local.js';
-import { createReadOnlyProfessionalTaskHost } from './assistant-delegation-host.js';
-export { createReadOnlyProfessionalTaskHost } from './assistant-delegation-host.js';
+import { createProfessionalTaskHost } from './assistant-delegation-host.js';
+export { createProfessionalTaskHost, createReadOnlyProfessionalTaskHost } from './assistant-delegation-host.js';
 export { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
 export { AssistantDelegationService } from './assistant-delegation-service.js';
@@ -594,11 +594,18 @@ async function serve(): Promise<void> {
   });
   const assistantSources = new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
     metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md'));
+  let delegations: AssistantDelegationService;
   const professionalAdapter = new LocalProfessionalAdapter({
     root: join(home.workflowsPath, 'professional-tasks'),
     assistantHome: join(home.root, 'assistant'),
     skillsRoot: join(home.agentPath, 'skills'),
-    host: createReadOnlyProfessionalTaskHost(assistantSources),
+    host: createProfessionalTaskHost(assistantSources, { execute: (input, context) => {
+      const encoded = JSON.stringify(input.arguments);
+      if (!encoded || encoded.length > 16_000) throw new Error('Professional capability arguments exceed budget.');
+      return mcp.execute({ ...input,
+        arguments: JSON.parse(encoded) as Parameters<typeof mcp.execute>[0]['arguments'] }, context);
+    } },
+      (brief, approvalRequestId) => delegations.verifyApprovedGrant(brief, approvalRequestId)),
     resolveModel: async () => {
       const modelRuntime = await ModelRuntime.create({
         authPath: join(home.appPath, 'auth.json'),
@@ -611,11 +618,14 @@ async function serve(): Promise<void> {
     },
   });
   let assistantWorker: AssistantWorkerManager;
-  const delegations = new AssistantDelegationService(
+  delegations = new AssistantDelegationService(
     join(home.workflowsPath, 'delegation-ledger'), professionalAdapter,
     (record) => assistantWorker?.notifyDelegation(record),
+    async (refs) => Object.fromEntries(await Promise.all(refs.map(async (ref) =>
+      [ref, await assistantSources.delegatedSourceVersion(ref)] as const))),
   );
   await delegations.open();
+  await delegations.reconcileEffectApprovals((requestId) => approvals.get(requestId)?.status);
   assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
     sources: assistantSources,
@@ -1448,7 +1458,29 @@ async function serve(): Promise<void> {
       }
 
       if (url.pathname === RUNTIME_ROUTES.capabilityApprovals && request.method === 'GET') {
-        response.end(JSON.stringify(await approvals.listPending()));
+        const professional = (await delegations.pendingApprovals()).map((record) => ({
+          requestId: record.result!.approvalRequestId!,
+          sessionId: record.assistantSessionId,
+          workspaceId: `assistant-delegation:${record.taskId}`,
+          sourceInstanceId: 'assistant-delegation',
+          capabilityId: 'assistant:professional-task',
+          packageVersion: '1',
+          argumentsDigest: createHash('sha256').update(JSON.stringify({
+            taskId: record.taskId, assistantSessionId: record.assistantSessionId,
+            skillName: record.skillName, goal: record.goal,
+            completionCriteria: record.completionCriteria, contextRefs: record.contextRefs,
+            sourceVersions: record.sourceVersions,
+            authorizedCapabilities: record.authorizedCapabilities, readOnly: record.readOnly,
+          })).digest('hex'),
+          status: 'pending' as const, createdAt: record.updatedAt, expiresAt: record.deadlineAt,
+          assistantDelegation: {
+            taskId: record.taskId, skillName: record.skillName, goal: record.goal,
+            completionCriteria: record.completionCriteria, contextRefs: record.contextRefs,
+            sourceVersions: record.sourceVersions,
+            authorizedCapabilities: record.authorizedCapabilities, readOnly: record.readOnly,
+          },
+        }));
+        response.end(JSON.stringify([...(await approvals.listPending()), ...professional]));
         return;
       }
 
@@ -1494,10 +1526,31 @@ async function serve(): Promise<void> {
           const oldest = usedDecisionNonces.values().next().value as string | undefined;
           if (oldest) usedDecisionNonces.delete(oldest);
         }
+        const professionalApproval = (await delegations.pendingApprovals()).find((record) =>
+          record.result?.approvalRequestId === body.requestId);
+        if (professionalApproval) {
+          const record = await delegations.decideApproval(professionalApproval.taskId,
+            body.requestId, body.decision);
+          response.end(JSON.stringify({ requestId: body.requestId,
+            status: body.decision === 'denied' ? 'denied' : 'completed',
+            message: body.decision === 'denied' ? '专业任务已拒绝。'
+              : `专业任务 ${record.taskId} 已获授权并开始执行。` }));
+          return;
+        }
         const execution = approvals.executionFor(body.requestId);
+        const delegatedEffect = execution?.workspaceId.startsWith('assistant-delegation:')
+          ? execution.workspaceId.slice('assistant-delegation:'.length) : undefined;
         let approvalSignal: AbortSignal | undefined;
         try {
           if (!execution) throw new Error('Approved capability execution is no longer available.');
+          if (delegatedEffect) {
+            const record = await delegations.status(delegatedEffect);
+            if (record?.status !== 'waiting_approval'
+              || record.result?.approvalRequestId !== body.requestId
+              || Date.parse(record.deadlineAt) <= Date.now()) {
+              throw new Error('Delegated effect is no longer awaiting this approval.');
+            }
+          }
           if (execution.runId) {
             approvalSignal = await agentService.beginApproval(execution.runId, body.requestId, {
               executeCapability: body.decision === 'approved',
@@ -1505,6 +1558,10 @@ async function serve(): Promise<void> {
           }
           await approvals.decide(body.requestId, body.decision);
           if (body.decision === 'denied') {
+            if (delegatedEffect) {
+              await delegations.settleApproval(delegatedEffect, body.requestId,
+                { status: 'failed', errorCode: 'user_denied' });
+            }
             if (execution.runId && approvalSignal) {
               agentService.failApproval(
                 execution.runId,
@@ -1545,8 +1602,21 @@ async function serve(): Promise<void> {
               );
             }
           }
+          if (delegatedEffect) {
+            const resultRef = `capability-result:${delegatedEffect}:${randomUUID()}`;
+            await delegations.settleApproval(delegatedEffect, body.requestId,
+              result.isError ? { status: 'failed', errorCode: 'capability_error', summary: message }
+                : { status: 'completed', summary: message, resultRef, evidenceRefs: [resultRef] });
+          }
           response.end(JSON.stringify({ requestId: body.requestId, status: 'completed', message }));
         } catch (error) {
+          if (delegatedEffect) {
+            const failure = (error as { failure?: { error?: string } }).failure;
+            await delegations.settleApproval(delegatedEffect, body.requestId,
+              { status: failure?.error === 'result_unknown' || failure?.error === 'timeout'
+                ? 'unknown' : 'failed', errorCode: failure?.error ?? 'capability_error' })
+              .catch(() => undefined);
+          }
           if (execution?.runId && approvalSignal) {
             try {
               agentService.failApproval(

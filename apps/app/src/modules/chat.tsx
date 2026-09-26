@@ -19,6 +19,7 @@ import mindlinkSeal from '../../themes/assets/mindlink-seal.png';
 import { AppIcon } from '../shared/app-icon.js';
 import { bindingFromKeyEvent } from '../shared/hotkeys.js';
 import { AssistantReply } from '../shared/assistant-reply.js';
+import { DelegationApprovalDetails, isVisibleAssistantDelegationApproval } from '../shared/delegation-approval-details.js';
 import { elapsedLabel, ReplyRunDetails } from '../shared/reply-run-details.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
 import { resizePanel } from '../shared/panel-resize.js';
@@ -357,6 +358,11 @@ export function ChatPanel({
     const requestedContext = approvalContext;
     const pendingApprovals = await desktop.listCapabilityApprovals();
     const ready = await Promise.all(pendingApprovals.map(async (approval) => {
+      if (approval.assistantDelegation) {
+        return isVisibleAssistantDelegationApproval(approval, surface)
+          ? approval.requestId : undefined;
+      }
+      if (isVisibleAssistantDelegationApproval(approval, surface)) return approval.requestId;
       if (!approval.runId) return undefined;
       const run = await desktop.getAgentRun(approval.runId).catch(() => undefined);
       if (!run) return undefined;
@@ -702,7 +708,9 @@ export function ChatPanel({
         setMessages((current) => [...current, {
           id: nextId.current++,
           role: 'assistant',
-          text: `已拒绝能力 ${approval.capabilityId} 的本次调用，没有执行外部操作。`,
+          text: approval.assistantDelegation
+            ? `已拒绝专业任务 ${approval.assistantDelegation.taskId}，未启动执行。`
+            : `已拒绝能力 ${approval.capabilityId} 的本次调用，没有执行外部操作。`,
         }]);
         return;
       }
@@ -924,15 +932,17 @@ export function ChatPanel({
               <article className="approval-card" key={approval.requestId}>
                 <div className="approval-heading">
                   <span>待确认</span>
-                  <strong>外部能力请求一次性授权</strong>
+                  <strong>{approval.assistantDelegation ? '专业任务授权' : '外部能力请求一次性授权'}</strong>
                 </div>
-                <dl>
+                {approval.assistantDelegation ? <DelegationApprovalDetails delegation={approval.assistantDelegation} /> : <dl>
                   <div><dt>能力</dt><dd>{approval.capabilityId}</dd></div>
                   <div><dt>来源</dt><dd>{approval.sourceInstanceId}</dd></div>
                   <div><dt>版本</dt><dd>{approval.packageVersion ?? '未声明'}</dd></div>
                   <div><dt>参数摘要</dt><dd><code>{approval.argumentsDigest.slice(0, 16)}…</code></dd></div>
-                </dl>
-                <p>允许只对当前会话、当前参数和当前版本生效一次；刷新或重放不会复用。</p>
+                </dl>}
+                <p>{approval.assistantDelegation
+                  ? '仅允许此任务使用列出的来源和能力；具体敏感能力调用仍需单独审批。'
+                  : '允许只对当前会话、当前参数和当前版本生效一次；刷新或重放不会复用。'}</p>
                 <div className="approval-actions">
                   <button type="button" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'denied')}>拒绝</button>
                   <button type="button" className="primary" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'approved')}>

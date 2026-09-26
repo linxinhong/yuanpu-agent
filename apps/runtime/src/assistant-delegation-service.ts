@@ -9,13 +9,15 @@ export type DelegationResult = AssistantDelegationResult;
 export type DelegationRecord = AssistantDelegationRecord;
 
 export interface DelegationExecutionAdapter {
-  run(brief: DelegationBrief, followUp: string | undefined, signal: AbortSignal): Promise<DelegationResult>;
+  run(brief: DelegationBrief, followUp: string | undefined, signal: AbortSignal,
+    approvedGrantId?: string): Promise<DelegationResult>;
   query(taskId: string): Promise<DelegationResult | undefined>;
   cancel(taskId: string): Promise<void>;
   close(): Promise<void>;
 }
 
 const validId = (id: string) => /^[A-Za-z0-9_-]{1,128}$/.test(id);
+const needsTaskGrant = (brief: DelegationBrief) => !brief.readOnly || brief.authorizedCapabilities.length > 0;
 
 function validateBrief(brief: DelegationBrief): void {
   if (!validId(brief.taskId) || !validId(brief.assistantSessionId)
@@ -37,16 +39,19 @@ export class AssistantDelegationService {
   private canonicalRoot?: string;
   private readonly adapter: DelegationExecutionAdapter;
   private readonly onTerminal?: (record: DelegationRecord) => void;
+  private readonly resolveSourceVersions?: (refs: readonly string[]) => Promise<Record<string, string>>;
   private active = new Map<string, { controller: AbortController; done: Promise<void> }>();
   private operations = new Map<string, Promise<void>>();
   private closed = false;
 
   constructor(root: string, adapter: DelegationExecutionAdapter,
-    onTerminal?: (record: DelegationRecord) => void) {
+    onTerminal?: (record: DelegationRecord) => void,
+    resolveSourceVersions?: (refs: readonly string[]) => Promise<Record<string, string>>) {
     if (!isAbsolute(root)) throw new Error('Delegation ledger root must be absolute.');
     this.root = resolve(root);
     this.adapter = adapter;
     this.onTerminal = onTerminal;
+    this.resolveSourceVersions = resolveSourceVersions;
   }
 
   async open(): Promise<void> {
@@ -129,10 +134,17 @@ export class AssistantDelegationService {
         return existing;
       }
       validateBrief(brief);
+      if (brief.sourceVersions) throw new Error('Delegation source versions are host-owned.');
+      const sourceVersions = this.resolveSourceVersions
+        ? await this.resolveSourceVersions(brief.contextRefs) : undefined;
       const now = new Date().toISOString();
-      const record: DelegationRecord = { ...brief, status: 'accepted', followUps: [], createdAt: now, updatedAt: now };
+      const approvalRequestId = needsTaskGrant(brief) ? randomUUID() : undefined;
+      const record: DelegationRecord = { ...brief, ...(sourceVersions ? { sourceVersions } : {}),
+        status: approvalRequestId ? 'waiting_approval' : 'accepted',
+        ...(approvalRequestId ? { result: { status: 'waiting_approval', approvalRequestId } } : {}),
+        followUps: [], createdAt: now, updatedAt: now };
       await this.save(record);
-      this.dispatch(record);
+      if (!approvalRequestId) this.dispatch(record);
       return record;
     });
   }
@@ -151,7 +163,7 @@ export class AssistantDelegationService {
           await this.save(record);
         });
         const result = await Promise.race([
-          this.adapter.run(record, followUp, controller.signal),
+          this.adapter.run(record, followUp, controller.signal, record.approvedGrantId),
           new Promise<DelegationResult>((resolveAbort) => {
             const interrupted = () => {
               void this.adapter.cancel(record.taskId).catch(() => undefined);
@@ -208,11 +220,90 @@ export class AssistantDelegationService {
       const current = await this.read(taskId);
       if (!current || current.assistantSessionId !== assistantSessionId) throw new Error('Unknown delegation in this Assistant Session.');
       if (!['completed', 'failed'].includes(current.status)) throw new Error('Delegation is not ready for follow-up.');
-      const next = { ...current, status: 'accepted' as const, result: undefined,
+      const approvalRequestId = needsTaskGrant(current) ? randomUUID() : undefined;
+      const next: DelegationRecord = { ...current,
+        status: approvalRequestId ? 'waiting_approval' : 'accepted',
+        result: approvalRequestId ? { status: 'waiting_approval', approvalRequestId } : undefined,
+        approvedGrantId: undefined,
         followUps: [...current.followUps, text], updatedAt: new Date().toISOString() };
       await this.save(next);
-      this.dispatch(next, text);
+      if (!approvalRequestId) this.dispatch(next, text);
       return next;
+    });
+  }
+
+  async pendingApprovals(): Promise<DelegationRecord[]> {
+    await this.assertRoot();
+    const pending: DelegationRecord[] = [];
+    for (const name of await readdir(this.root)) {
+      if (!name.endsWith('.json')) continue;
+      const id = name.slice(0, -5);
+      if (!validId(id)) continue;
+      const record = await this.read(id);
+      if (record?.status === 'waiting_approval' && record.result?.approvalRequestId
+        && !record.approvedGrantId) {
+        if (Date.parse(record.deadlineAt) <= Date.now()) {
+          await this.settleApproval(id, record.result.approvalRequestId,
+            { status: 'failed', errorCode: 'approval_expired' });
+        } else pending.push(record);
+      }
+    }
+    return pending;
+  }
+
+  /** A restart cannot replay an approved external effect whose outcome was not durably settled. */
+  async reconcileEffectApprovals(statusOf: (requestId: string) => string | undefined): Promise<void> {
+    await this.assertRoot();
+    for (const name of await readdir(this.root)) {
+      if (!name.endsWith('.json')) continue;
+      const id = name.slice(0, -5);
+      if (!validId(id)) continue;
+      const record = await this.read(id);
+      const approvalRequestId = record?.result?.approvalRequestId;
+      if (!record?.approvedGrantId || record.status !== 'waiting_approval' || !approvalRequestId) continue;
+      if (statusOf(approvalRequestId) === 'pending') continue;
+      await this.settleApproval(id, approvalRequestId,
+        { status: 'unknown', errorCode: 'external_effect_unresolved_after_restart' });
+    }
+  }
+
+  async verifyApprovedGrant(brief: DelegationBrief, approvalRequestId: string): Promise<boolean> {
+    const record = await this.read(brief.taskId);
+    return Boolean(record && record.status === 'running'
+      && record.approvedGrantId === approvalRequestId
+      && record.assistantSessionId === brief.assistantSessionId
+      && record.skillName === brief.skillName
+      && JSON.stringify(record.contextRefs) === JSON.stringify(brief.contextRefs)
+      && JSON.stringify(record.sourceVersions) === JSON.stringify(brief.sourceVersions)
+      && JSON.stringify(record.authorizedCapabilities) === JSON.stringify(brief.authorizedCapabilities)
+      && JSON.stringify(record.completionCriteria) === JSON.stringify(brief.completionCriteria)
+      && record.readOnly === brief.readOnly && record.goal === brief.goal);
+  }
+
+  async decideApproval(taskId: string, approvalRequestId: string,
+    decision: 'approved' | 'denied'): Promise<DelegationRecord> {
+    return this.exclusive(taskId, async () => {
+      const record = await this.read(taskId);
+      if (!record || record.status !== 'waiting_approval'
+        || record.result?.approvalRequestId !== approvalRequestId || record.approvedGrantId) {
+        throw new Error('Approval does not match a waiting delegation.');
+      }
+      if (Date.parse(record.deadlineAt) <= Date.now()) {
+        throw new Error('Delegation approval expired.');
+      }
+      const now = new Date().toISOString();
+      if (decision === 'denied') {
+        const denied: DelegationRecord = { ...record, status: 'failed',
+          result: { status: 'failed', errorCode: 'user_denied' }, updatedAt: now };
+        await this.save(denied);
+        this.onTerminal?.(denied);
+        return denied;
+      }
+      const approved: DelegationRecord = { ...record, status: 'accepted', result: undefined,
+        approvedGrantId: approvalRequestId, updatedAt: now };
+      await this.save(approved);
+      this.dispatch(approved, record.followUps.at(-1));
+      return approved;
     });
   }
 

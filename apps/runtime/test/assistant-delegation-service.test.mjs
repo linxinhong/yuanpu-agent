@@ -107,6 +107,64 @@ test('approval waits and cannot be converted to a follow-up or repeated executio
   await service.close();
 });
 
+test('execution task waits durably for an exact grant before one same-ID run', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-delegation-task-grant-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const runs = [];
+  const adapter = { async run(input, followUp, _signal, grant) {
+    runs.push([input.taskId, followUp, grant]);
+    return { status: 'completed', resultRef: `result:${input.taskId}` };
+  }, async query() { return undefined; }, async cancel() {}, async close() {} };
+  const input = { ...brief('task_granted'), readOnly: false,
+    authorizedCapabilities: ['fixture.inspect'] };
+  const first = new AssistantDelegationService(root, adapter);
+  await first.open();
+  const waiting = await first.start(input);
+  assert.equal(waiting.status, 'waiting_approval');
+  assert.equal(runs.length, 0);
+  const grant = waiting.result.approvalRequestId;
+  assert.deepEqual((await first.pendingApprovals()).map((record) => record.taskId), ['task_granted']);
+  await first.close();
+  const resumed = new AssistantDelegationService(root, adapter);
+  await resumed.open();
+  assert.equal((await resumed.start(input)).result.approvalRequestId, grant);
+  await assert.rejects(resumed.decideApproval('task_granted', 'wrong', 'approved'), /does not match/);
+  assert.equal((await resumed.decideApproval('task_granted', grant, 'approved')).status, 'accepted');
+  await eventually(async () => (await resumed.status('task_granted'))?.status === 'completed');
+  assert.deepEqual(runs, [['task_granted', undefined, grant]]);
+  assert.equal((await resumed.pendingApprovals()).length, 0);
+  await assert.rejects(resumed.decideApproval('task_granted', grant, 'approved'), /does not match/);
+  await resumed.followUp('task_granted', 'assistant_session', 'check again');
+  const followApproval = (await resumed.status('task_granted')).result.approvalRequestId;
+  assert.notEqual(followApproval, grant);
+  assert.equal(runs.length, 1);
+  await resumed.decideApproval('task_granted', followApproval, 'denied');
+  assert.equal((await resumed.status('task_granted')).result.errorCode, 'user_denied');
+  assert.equal(runs.length, 1);
+  await resumed.close();
+});
+
+test('restart never replays an unsettled approved external effect', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-delegation-effect-restart-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const input = { ...brief('task_effect'), readOnly: false,
+    authorizedCapabilities: ['fixture.effect'] };
+  await writeFile(join(root, 'task_effect.json'), JSON.stringify({ ...input,
+    status: 'waiting_approval', approvedGrantId: 'task-grant',
+    result: { status: 'waiting_approval', approvalRequestId: 'effect-grant' },
+    followUps: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
+  let runs = 0;
+  const service = new AssistantDelegationService(root, { async run() { runs++; throw new Error('replayed'); },
+    async query() { return undefined; }, async cancel() {}, async close() {} });
+  await service.open();
+  await service.reconcileEffectApprovals((id) => id === 'effect-grant' ? 'cancelled' : undefined);
+  const record = await service.status('task_effect');
+  assert.equal(record.status, 'unknown');
+  assert.equal(record.result.errorCode, 'external_effect_unresolved_after_restart');
+  assert.equal(runs, 0);
+  await service.close();
+});
+
 test('delegation ledger refuses a symlinked root before writing', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'yp-delegation-symlink-'));
   t.after(() => rm(root, { recursive: true, force: true }));
