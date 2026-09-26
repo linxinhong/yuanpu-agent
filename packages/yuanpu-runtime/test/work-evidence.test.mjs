@@ -122,6 +122,59 @@ test('historical file result without a verified descriptor stays unavailable acr
   reopened.close();
 });
 
+test('legacy default evidence requires its exact local desktop binding', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-default-evidence-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const sessions = join(root, 'sessions');
+  await mkdir(workspace);
+  const databasePath = join(root, 'automation.sqlite');
+  const metadata = openYuanpuMetadataDatabase(databasePath);
+  const piSessionId = 'legacy-default-session';
+  const pi = SessionManager.create(workspace, sessions, { id: piSessionId });
+  pi.appendMessage({ role: 'assistant', content: [{ type: 'toolCall', id: 'old-write', name: 'write',
+    arguments: { path: 'note.md', content: 'old content' } }],
+  api: 'anthropic-messages', provider: 'anthropic', model: 'fixture', stopReason: 'toolUse',
+  usage, timestamp: Date.now() });
+  pi.appendMessage({ role: 'toolResult', toolCallId: 'old-write', toolName: 'write',
+    content: [{ type: 'text', text: 'Saved.' }], isError: false, timestamp: Date.now() });
+  const saved = readYuanpuSavedToolResults(workspace, piSessionId, sessions);
+  assert.equal(saved.length, 1);
+  const fixture = new DatabaseSync(databasePath);
+  const now = new Date().toISOString();
+  fixture.prepare(`INSERT INTO yp_conversation_bindings
+    (binding_id,entry_point,authority_id,subject_id,namespace,conversation_id,thread_id,
+     pi_session_id,workspace_id,created_at,updated_at)
+    VALUES ('legacy-default','desktop','local-desktop','local-user','desktop','default','',?,?,?,?)`)
+    .run(piSessionId, workspace, now, now);
+  const assertRejected = () => {
+    assert.throws(() => metadata.workEvidence.recordToolResults('default', piSessionId, saved), /not bound/);
+    assert.throws(() => metadata.workEvidence.recordUnverifiedArtifacts('default', piSessionId, saved), /not bound/);
+  };
+  assert.throws(() => metadata.workEvidence.recordToolResults('default', 'other-session', saved), /not bound/);
+  for (const [column, invalid] of [['entry_point', 'im'], ['subject_id', 'other-user'],
+    ['authority_id', 'other-desktop'], ['namespace', 'assistant'], ['thread_id', 'thread-1']]) {
+    const original = { entry_point: 'desktop', subject_id: 'local-user', authority_id: 'local-desktop',
+      namespace: 'desktop', thread_id: '' }[column];
+    fixture.prepare(`UPDATE yp_conversation_bindings SET ${column}=? WHERE binding_id='legacy-default'`).run(invalid);
+    assertRejected();
+    fixture.prepare(`UPDATE yp_conversation_bindings SET ${column}=? WHERE binding_id='legacy-default'`).run(original);
+  }
+  assert.equal(metadata.workEvidence.recordToolResults('default', piSessionId, saved), 1);
+  assert.equal(metadata.workEvidence.recordUnverifiedArtifacts('default', piSessionId, saved), 1);
+  const source = metadata.workEvidence.sourceById(`work-tool:${piSessionId}:${saved[0].entryId}`);
+  assert.equal(source.conversationId, 'default');
+  assert.equal(metadata.workEvidence.workspaceForSource(source), workspace);
+  assert.equal(metadata.workEvidence.recordToolResults('default', piSessionId, saved), 0);
+  assert.equal(metadata.workEvidence.recordUnverifiedArtifacts('default', piSessionId, saved), 0);
+  fixture.prepare("UPDATE yp_conversation_bindings SET subject_id='other-user' WHERE binding_id='legacy-default'").run();
+  assert.equal(metadata.workEvidence.workspaceForSource(source), undefined);
+  fixture.prepare("DELETE FROM yp_conversation_bindings WHERE binding_id='legacy-default'").run();
+  assertRejected();
+  fixture.close();
+  metadata.close();
+});
+
 test('legacy Pi backfill skips a symlinked session file', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-symlink-'));
   context.after(() => rm(root, { recursive: true, force: true }));
