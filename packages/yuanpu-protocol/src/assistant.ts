@@ -130,7 +130,39 @@ export interface AssistantMemoryRevision {
   committedAt: string;
 }
 
-export type AssistantDelegationStatus = 'requested' | 'accepted' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AssistantDelegationStatus = 'requested' | 'accepted' | 'running' | 'waiting_approval'
+  | 'completed' | 'failed' | 'cancelled' | 'unknown';
+
+/** This is a logical task, not a local path or a borrowed Work session. */
+export interface AssistantDelegationBrief {
+  taskId: string;
+  assistantSessionId: string;
+  skillName: string;
+  goal: string;
+  completionCriteria: string[];
+  contextRefs: string[];
+  authorizedCapabilities: string[];
+  readOnly: boolean;
+  deadlineAt: string;
+}
+
+export interface AssistantDelegationResult {
+  status: 'completed' | 'failed' | 'waiting_approval' | 'unknown';
+  summary?: string;
+  /** Opaque host-owned result reference; never an executor filesystem path. */
+  resultRef?: string;
+  evidenceRefs?: string[];
+  approvalRequestId?: string;
+  errorCode?: string;
+}
+
+export interface AssistantDelegationRecord extends AssistantDelegationBrief {
+  status: Exclude<AssistantDelegationStatus, 'requested'>;
+  followUps: string[];
+  result?: AssistantDelegationResult;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface AssistantDelegationBase {
   taskId: string;
@@ -146,7 +178,7 @@ export interface AssistantDelegationBase {
 
 /** A completed task must identify an artifact; failure and cancellation stay explicit terminal states. */
 export type AssistantDelegation = AssistantDelegationBase & (
-  | { status: 'requested' | 'accepted' | 'running'; resultRef?: never; errorCode?: never }
+  | { status: 'requested' | 'accepted' | 'running' | 'waiting_approval' | 'unknown'; resultRef?: never; errorCode?: never }
   | { status: 'completed'; resultRef: string; errorCode?: never }
   | { status: 'failed'; resultRef?: never; errorCode: string }
   | { status: 'cancelled'; resultRef?: never; errorCode?: string }
