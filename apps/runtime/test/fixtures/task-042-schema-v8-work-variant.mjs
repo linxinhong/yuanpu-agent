@@ -23,17 +23,20 @@ test('a historical schema-v8 Work database gains the dedicated assistant tables 
       DROP TABLE yp_assistant_deliveries;
       DROP TABLE yp_assistant_requests;
       DROP TABLE yp_assistant_bindings;
-      ALTER TABLE yp_work_conversations RENAME COLUMN workspace_id TO working_directory;
       INSERT INTO yp_work_conversations(
-        conversation_id, pi_session_id, working_directory, created_at, updated_at
+        conversation_id, pi_session_id, workspace_id, created_at, updated_at
       ) VALUES (
         'work:fixture', 'old-work-session', '/synthetic/workspace',
         '2026-09-26T00:00:00.000Z', '2026-09-26T00:00:00.000Z'
       );
+      ALTER TABLE yp_work_conversations ADD COLUMN working_directory TEXT NOT NULL DEFAULT '';
+      UPDATE yp_work_conversations SET working_directory = workspace_id;
     `);
     assert.equal(seed.prepare('SELECT MAX(version) AS version FROM yp_schema_migrations').get().version, 8);
     assert.ok(seed.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table'
       AND name = 'yp_assistant_mirror'`).get());
+    const columns = seed.prepare('PRAGMA table_info(yp_work_conversations)').all().map((row) => row.name);
+    assert.equal(columns.includes('workspace_id') && columns.includes('working_directory'), true);
     seed.close();
 
     const metadata = openYuanpuMetadataDatabase(path);
@@ -49,7 +52,12 @@ test('a historical schema-v8 Work database gains the dedicated assistant tables 
       'yp_assistant_bindings', 'yp_assistant_deliveries',
       'yp_assistant_requests', 'yp_assistant_sources',
     ], 'an already-v8 Work variant must receive all dedicated assistant tables');
-    assert.equal(inspection.prepare(`SELECT pi_session_id FROM yp_work_conversations
-      WHERE conversation_id = 'work:fixture'`).get().pi_session_id, 'old-work-session');
+    assert.deepEqual(inspection.prepare(`SELECT pi_session_id, workspace_id, working_directory
+      FROM yp_work_conversations WHERE conversation_id = 'work:fixture'`).get(), {
+      pi_session_id: 'old-work-session', workspace_id: '/synthetic/workspace',
+      working_directory: '/synthetic/workspace',
+    });
+    assert.ok(inspection.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table'
+      AND name = 'yp_assistant_mirror'`).get());
     assert.equal(metadata.assistantHost.desktop().channel, 'desktop');
   });
