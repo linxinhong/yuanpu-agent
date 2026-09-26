@@ -7,6 +7,7 @@ import { AssistantLinkStore } from './assistant-link-store.js';
 import { AssistantHostStore } from './assistant-host-store.js';
 import { AssistantSourceLifecycleStore } from './assistant-source-lifecycle-store.js';
 import { WorkConversationStore } from './work-conversation-store.js';
+import { WorkEvidenceStore } from './work-evidence-store.js';
 import { ChannelStore } from '../channels/store.js';
 import { SchedulerStore } from '../scheduler/store.js';
 
@@ -15,8 +16,9 @@ export * from './assistant-link-store.js';
 export * from './assistant-host-store.js';
 export * from './assistant-source-lifecycle-store.js';
 export * from './work-conversation-store.js';
+export * from './work-evidence-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 13;
+export const YUANPU_METADATA_SCHEMA_VERSION = 14;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -516,6 +518,32 @@ const migrations: readonly Migration[] = [{
     ) STRICT;
     `);
   },
+}, {
+  version: 14,
+  sql: `
+    CREATE TABLE IF NOT EXISTS yp_work_evidence_sources (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT NOT NULL UNIQUE,
+      content_ref TEXT NOT NULL UNIQUE,
+      source_version TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('tool_result','artifact')),
+      conversation_id TEXT NOT NULL,
+      pi_session_id TEXT NOT NULL,
+      run_id TEXT,
+      entry_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      result_status TEXT NOT NULL CHECK(result_status IN ('completed','failed')),
+      text_content TEXT,
+      relative_path TEXT,
+      file_sha256 TEXT,
+      file_size INTEGER,
+      committed_at TEXT NOT NULL,
+      audience_id TEXT NOT NULL CHECK(audience_id='local-user'),
+      UNIQUE(kind,pi_session_id,entry_id)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS yp_work_evidence_conversation
+      ON yp_work_evidence_sources(conversation_id,event_id);
+  `,
 }];
 
 function assertWorkSourceEventSchema(database: DatabaseSync): void {
@@ -663,6 +691,7 @@ export class YuanpuMetadataDatabase {
   readonly assistantHost: AssistantHostStore;
   readonly assistantSourceLifecycle: AssistantSourceLifecycleStore;
   readonly workConversations: WorkConversationStore;
+  readonly workEvidence: WorkEvidenceStore;
   readonly channels: ChannelStore;
   readonly schedules: SchedulerStore;
 
@@ -673,6 +702,7 @@ export class YuanpuMetadataDatabase {
     this.assistantHost = new AssistantHostStore(database);
     this.assistantSourceLifecycle = new AssistantSourceLifecycleStore(database);
     this.workConversations = new WorkConversationStore(database);
+    this.workEvidence = new WorkEvidenceStore(database);
     this.channels = new ChannelStore(database);
     this.schedules = new SchedulerStore(database);
   }

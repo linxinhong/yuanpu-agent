@@ -91,6 +91,8 @@ test('publishes durable run state transitions to the host observer', async () =>
   assert.deepEqual(observed.map((run) => run.status), ['queued', 'running', 'succeeded']);
   assert.equal(observed.every((run) => run.runId === submitted.runId), true);
   await service.close();
+  assert.deepEqual(database.agentRuns.get(submitted.runId).output, { message: 'done', tools: [] },
+    'completed desktop output must remain available to the Work source scanner after service shutdown');
   database.close();
 });
 
