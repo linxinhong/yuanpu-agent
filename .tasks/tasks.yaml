@@ -1557,7 +1557,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-044
     title: "实现助理对工作过程的评估"
-    status: pending
+    status: ready
     goal: "助理自动审阅工作目标、过程、结论及产物，发现遗漏并生成有证据的后续动作。"
     scope:
       in: ["工作审阅服务与 skills/review-work/SKILL.md，消费助理自动化触发", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
@@ -2144,7 +2144,7 @@ tasks:
 
   - id: TASK-061
     title: "建立工作工具结果与产物的助理来源契约"
-    status: in_progress
+    status: done
     goal: "助理能以稳定、授权且可撤回的来源引用读取已保存工作过程中的工具结果和产物，而不依赖文件路径猜测。"
     scope:
       in: ["Work 运行提交时登记有界工具结果和明确产物 ID、版本、受众、所属 run 与不透明引用", "宿主受权解析、暂不可用/删除事件和助理持久来源队列接入", "既有 Pi 会话的只读可恢复补扫与无法确定的历史产物标记"]
@@ -2171,10 +2171,15 @@ tasks:
       owner: "root-assistant-artifacts-20260927-061-10414"
       attempts: 0
       claimed_at: "2026-09-26T17:24:13.822Z"
-      completed_at: null
+      completed_at: "2026-09-26T18:57:21.865Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-artifacts"
       branch: "task/task-061-assistant-artifact-sources"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "main integration", status: "passed", summary: "TASK-055 v13 merged before TASK-061 v14; source implementation integrated at main 3408b8b, follow-up root-symlink test included. Main integration HEAD 8b8bfb5 contains delegation and Worker stop fix."}
+        - {type: "command", check: "clean integrated pnpm check and native smoke", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0, macOS arm64, clean detached main 8b8bfb5. pnpm check log .git/worktrees/assistant-final-check/coding-owner/1790448641635590000.log and build:native plus smoke:native log 1790448987951885000.log exited 0, changed_during_run=false. Offline pinned model metadata used after models.dev timeout."}
+        - {type: "test", check: "real Work/Pi source chain", status: "passed", summary: "Temporary Home and loopback model: successful write tool result and bounded payload snapshot become distinct stable sources, Worker queue deduplicates across restart, explicit deletion withdraws; wrong audience, paths, symlinks and orphan historical results rejected. Main assistant and Runtime packages passed, Runtime 87/87."}
+        - {type: "review", check: "independent authorization and migration review", status: "passed", summary: "Read-only reviewer found no TASK-061 blocker within documented same-user Home trust boundary; verified v13 to v14 migration, settled output matching, Host audience/version/run/deletion rechecks and static symlink refusal."}
+        - {type: "boundary", check: "platform and historical coverage", status: "unverified", summary: "Windows/Linux and real user Home migration not exercised. Historical Pi JSONL over 32 MiB remains unavailable; same-UID concurrent replacement of entire managed sessions root is outside local Home trust boundary. Snapshot is historical write input, not current file state."}
       follow_up_candidates: []
   - id: TASK-062
     title: "接通用户撤销助理来源与权威删除事件"
