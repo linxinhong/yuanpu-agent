@@ -707,6 +707,18 @@ export class RuntimeManager {
   moveWorkNode(request: import('@yuanpu-agent/protocol').WorkMoveRequest): Promise<import('@yuanpu-agent/protocol').WorkMoveResult> {
     return this.request(RUNTIME_ROUTES.workMove, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
   }
+  searchWorkConversations(input: import('@yuanpu-agent/protocol').WorkSearchQuery): Promise<import('@yuanpu-agent/protocol').WorkSearchResult> {
+    const query = new URLSearchParams({ query: input.query });
+    if (input.archive) query.set('archive', input.archive);
+    if (input.limit !== undefined) query.set('limit', String(input.limit));
+    if (input.cursor) query.set('cursor', input.cursor);
+    return this.request(`${RUNTIME_ROUTES.workSearch}?${query}`);
+  }
+  getWorkMessageWindow(conversationId: string, entryId: string, radius?: number): Promise<import('@yuanpu-agent/protocol').WorkMessageWindowResult> {
+    const query = new URLSearchParams({ conversationId, entryId });
+    if (radius !== undefined) query.set('radius', String(radius));
+    return this.request(`${RUNTIME_ROUTES.workMessageWindow}?${query}`);
+  }
   listWorkFolders(): Promise<import('@yuanpu-agent/protocol').WorkFolder[]> { return this.request(RUNTIME_ROUTES.workFolders); }
   createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<import('@yuanpu-agent/protocol').WorkFolder> {
     return this.request(RUNTIME_ROUTES.workFolders, { method: 'POST', headers: { 'content-type': 'application/json' },

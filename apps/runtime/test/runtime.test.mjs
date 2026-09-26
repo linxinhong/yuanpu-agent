@@ -3,9 +3,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { SessionManager } from '@earendil-works/pi-coding-agent';
 
 import {
   AGENT_CONTRACT_VERSION,
@@ -313,6 +315,27 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   const restored = await fetch(workEndpoint, { method: 'PATCH', headers: workHeaders,
     body: JSON.stringify({ conversationId: nested.id, archived: false }) }).then((response) => response.json());
   assert.equal(restored.workingDirectory, nested.workingDirectory);
+  const searchDb = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'));
+  const piSessionId = searchDb.prepare('SELECT pi_session_id FROM yp_work_conversations WHERE conversation_id=?')
+    .get(nested.id).pi_session_id;
+  searchDb.close();
+  const savedSession = SessionManager.create(nested.workingDirectory, join(home, 'agent', 'sessions'), { id: piSessionId });
+  const searchEntryId = savedSession.appendMessage({ role: 'user', content: 'searchable needle', timestamp: Date.now() });
+  savedSession.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'visible answer' }],
+    api: 'fixture', provider: 'fixture', model: 'fixture', stopReason: 'stop', timestamp: Date.now(),
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  const searchEndpoint = `http://${ready.host}:${ready.port}/v1/work/search?query=needle`;
+  const searchBeforeMove = await fetch(searchEndpoint, { headers }).then((response) => response.json());
+  assert.equal(searchBeforeMove.items[0].messageEntryId, searchEntryId);
+  assert.deepEqual(searchBeforeMove.items[0].folderPath.map((part) => part.name), ['Renamed', 'Models']);
+  assert.equal((await fetch(`http://${ready.host}:${ready.port}/v1/work/search?query=`, { headers })).status, 400);
+  assert.equal((await fetch(`http://${ready.host}:${ready.port}/v1/work/search?query=needle&limit=51`, { headers })).status, 400);
+  const windowEndpoint = `http://${ready.host}:${ready.port}/v1/work/messages/window?conversationId=${encodeURIComponent(nested.id)}&entryId=${searchEntryId}`;
+  const windowBeforeMove = await fetch(windowEndpoint, { headers }).then((response) => response.json());
+  assert.equal(windowBeforeMove.messages[windowBeforeMove.targetIndex].id, searchEntryId);
+  assert.equal((await fetch(`http://${ready.host}:${ready.port}/v1/work/messages/window?conversationId=work%3Aforeign&entryId=${searchEntryId}`,
+    { headers })).status, 404);
   await writeFile(join(nested.workingDirectory, 'moved-preview.txt'), 'preview survives move');
   const moveRequest = { requestId: randomUUID(), kind: 'conversation', id: nested.id, targetFolderId: parent.id };
   const moveResponse = await fetch(`http://${ready.host}:${ready.port}/v1/work/move`, {
@@ -327,6 +350,10 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     .find((item) => item.id === nested.id);
   assert.equal(relocated.folderId, parent.id);
   assert.deepEqual(relocated.previousWorkingDirectories, [nested.workingDirectory]);
+  const searchAfterMove = await fetch(searchEndpoint, { headers }).then((response) => response.json());
+  assert.equal(searchAfterMove.items[0].messageEntryId, searchEntryId);
+  assert.deepEqual(searchAfterMove.items[0].folderPath.map((part) => part.name), ['Renamed']);
+  assert.equal((await fetch(windowEndpoint, { headers }).then((response) => response.json())).status, 'ok');
   const movedPreview = await fetch(`http://${ready.host}:${ready.port}/v1/work/files/content?conversationId=${nested.id}&path=moved-preview.txt`, { headers }).then((response) => response.json());
   assert.equal(movedPreview.content, 'preview survives move');
   const retryMove = await fetch(`http://${ready.host}:${ready.port}/v1/work/move`, {
@@ -644,7 +671,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.deepEqual(scheduleHistory, []);
   assert.deepEqual(health, {
     version: '0.1.0',
-    protocolVersion: 6,
+    protocolVersion: 7,
     piVersion: '0.86.1',
     mcpTools: ['search_capabilities', 'execute_capability'],
     configRoot: home,
