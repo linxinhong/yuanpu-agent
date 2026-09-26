@@ -1584,6 +1584,61 @@ async function serve(): Promise<void> {
         }
       }
 
+      if (url.pathname === RUNTIME_ROUTES.assistantWorkspace) {
+        try {
+          if (request.method === 'GET') {
+            const memoryLimit = url.searchParams.has('memoryLimit')
+              ? Number(url.searchParams.get('memoryLimit')) : undefined;
+            response.end(JSON.stringify(await assistantWorker.workspace(memoryLimit)));
+            return;
+          }
+          if (request.method === 'POST') {
+            const body = await readJsonBody(request);
+            if (!isRecord(body)) {
+              throw new Error('Invalid Assistant workspace request.');
+            }
+            if (body.action === 'import-saved' && typeof body.savedId === 'string'
+              && (body.surface === 'work' || body.surface === 'assistant')
+              && typeof body.text === 'string' && typeof body.savedAt === 'string') {
+              response.end(JSON.stringify(await assistantWorker.importSavedMemory(body.savedId,
+                body.surface, body.text, body.savedAt)));
+              return;
+            }
+            if (body.action === 'pause-organizing'
+              && (body.until === undefined || typeof body.until === 'string')) {
+              response.end(JSON.stringify(await assistantWorker.pauseOrganizing(body.until)));
+              return;
+            }
+            if (typeof body.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(body.id)) {
+              throw new Error('Invalid Assistant workspace ID.');
+            }
+            if (body.action === 'correct-memory' && Number.isSafeInteger(body.expectedVersion)
+              && typeof body.text === 'string' && typeof body.revisionId === 'string') {
+              response.end(JSON.stringify(await assistantWorker.correctMemory(body.id,
+                body.expectedVersion as number, body.text, body.revisionId)));
+              return;
+            }
+            if (body.action === 'forget-memory') {
+              response.end(JSON.stringify(await assistantWorker.forgetMemory(body.id)));
+              return;
+            }
+            if (body.action === 'follow-up-delegation' && typeof body.text === 'string') {
+              response.end(JSON.stringify(await assistantWorker.followUpDelegation(body.id, body.text)));
+              return;
+            }
+            if (body.action === 'cancel-delegation') {
+              response.end(JSON.stringify(await assistantWorker.cancelDelegation(body.id)));
+              return;
+            }
+          }
+          throw new Error('Invalid Assistant workspace action.');
+        } catch (error) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+          return;
+        }
+      }
+
       if (url.pathname === RUNTIME_ROUTES.assistantMirrors && request.method === 'GET') {
         const runId = url.searchParams.get('runId') ?? '';
         const run = runId.length <= 200 ? metadata.agentRuns.get(runId) : undefined;

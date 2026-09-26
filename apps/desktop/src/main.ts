@@ -150,6 +150,20 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
     runtime.setAssistantSuggestionsPaused(until)));
   ipcMain.handle('assistant:suggestions:read', trustedHandler((id: string) =>
     runtime.markAssistantSuggestionRead(id)));
+  ipcMain.handle('assistant:workspace:get', trustedHandler((_event, memoryLimit?: number) =>
+    runtime.getAssistantWorkspace(memoryLimit)));
+  ipcMain.handle('assistant:memory:correct', trustedHandler((id: string, expectedVersion: number,
+    text: string, revisionId: string) => runtime.correctAssistantMemory(id, expectedVersion, text, revisionId)));
+  ipcMain.handle('assistant:memory:forget', trustedHandler((id: string) => runtime.forgetAssistantMemory(id)));
+  ipcMain.handle('assistant:memory:import-saved', trustedHandler((savedId: string,
+    surface: 'work' | 'assistant', text: string, savedAt: string) =>
+    runtime.importAssistantSavedMemory(savedId, surface, text, savedAt)));
+  ipcMain.handle('assistant:organizing:pause', trustedHandler((until?: string) =>
+    runtime.setAssistantOrganizingPaused(until)));
+  ipcMain.handle('assistant:delegation:follow-up', trustedHandler((taskId: string, text: string) =>
+    runtime.followUpAssistantDelegation(taskId, text)));
+  ipcMain.handle('assistant:delegation:cancel', trustedHandler((taskId: string) =>
+    runtime.cancelAssistantDelegation(taskId)));
   ipcMain.handle('assistant:mirrors:list', trustedHandler((runId: string) => runtime.listAssistantMirrors(runId)));
   ipcMain.handle('assistant:mirrors:retry', trustedHandler((mirrorId: string) => runtime.retryAssistantMirror(mirrorId)));
   ipcMain.handle('agent:runs:get', trustedHandler((runId: string) => runtime.getAgentRun(runId)));

@@ -118,6 +118,42 @@ export interface AssistantSuggestionInbox {
   pausedUntil?: string;
 }
 
+/** Read model for the personal Assistant panel; source IDs are opaque references, never paths. */
+export interface AssistantMemoryView {
+  id: string;
+  version: number;
+  section: 'memories' | 'work' | 'reviews' | 'suggestions';
+  kind: 'explicit' | 'observed' | 'inferred';
+  context: string;
+  text: string;
+  status: 'active' | 'withdrawn';
+  verifiedAt: string;
+  evidence: AssistantEvidenceRef[];
+  manualAuthority: boolean;
+}
+
+export interface AssistantSourceView {
+  sourceId: string;
+  sourceVersion: string;
+  availability: 'available' | 'temporarily_unavailable' | 'deleted' | 'unknown';
+  workConversationId?: string;
+}
+
+export interface AssistantWorkspaceSnapshot {
+  memories: AssistantMemoryView[];
+  hasMoreMemories: boolean;
+  reviews: AssistantWorkReview[];
+  hasMoreReviews: boolean;
+  delegations: AssistantDelegationRecord[];
+  hasMoreDelegations: boolean;
+  delegationVerifications: Record<string, { checkedAt: string;
+    evidenceByCriterion: Record<string, string[]> }>;
+  delegationsUnavailable?: boolean;
+  sources: AssistantSourceView[];
+  organizingPausedUntil?: string;
+  sourceSync: { processed: number; pending: number; unavailable: number; lastObservedAt?: string };
+}
+
 export type AssistantReviewJudgment = 'supported' | 'partial' | 'failed' | 'unverified';
 
 /** Reviews assess work content and artifacts, never the assistant's own model score. */
@@ -181,6 +217,8 @@ export interface AssistantDelegationResult {
 export interface AssistantDelegationRecord extends AssistantDelegationBrief {
   status: Exclude<AssistantDelegationStatus, 'requested'>;
   followUps: string[];
+  /** Durable request IDs prevent a lost follow-up response from dispatching twice. */
+  followUpRequests?: Array<{ requestId: string; text: string }>;
   result?: AssistantDelegationResult;
   /** Host-issued task grant; only trusted approval code can set it. */
   approvedGrantId?: string;

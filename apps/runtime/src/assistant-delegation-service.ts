@@ -214,11 +214,19 @@ export class AssistantDelegationService {
     });
   }
 
-  async followUp(taskId: string, assistantSessionId: string, text: string): Promise<DelegationRecord> {
-    if (this.closed || !text.trim() || text.length > 16_000) throw new Error('Invalid delegation follow-up.');
+  async followUp(taskId: string, assistantSessionId: string, text: string,
+    requestId: string): Promise<DelegationRecord> {
+    if (this.closed || !text.trim() || text.length > 16_000 || !validId(requestId)) {
+      throw new Error('Invalid delegation follow-up.');
+    }
     return this.exclusive(taskId, async () => {
       const current = await this.read(taskId);
       if (!current || current.assistantSessionId !== assistantSessionId) throw new Error('Unknown delegation in this Assistant Session.');
+      const prior = current.followUpRequests?.find((item) => item.requestId === requestId);
+      if (prior) {
+        if (prior.text !== text) throw new Error('Delegation follow-up request ID conflict.');
+        return current;
+      }
       if (!['completed', 'failed'].includes(current.status)) throw new Error('Delegation is not ready for follow-up.');
       const approvalRequestId = needsTaskGrant(current) ? randomUUID() : undefined;
       const next: DelegationRecord = { ...current,
@@ -226,7 +234,9 @@ export class AssistantDelegationService {
         result: approvalRequestId ? { status: 'waiting_approval', approvalRequestId } : undefined,
         approvedGrantId: undefined,
         effectInFlightApprovalId: undefined,
-        followUps: [...current.followUps, text], updatedAt: new Date().toISOString() };
+        followUps: [...current.followUps, text],
+        followUpRequests: [...(current.followUpRequests ?? []), { requestId, text }],
+        updatedAt: new Date().toISOString() };
       await this.save(next);
       if (!approvalRequestId) this.dispatch(next, text);
       return next;

@@ -9,3 +9,4 @@ export * from './work-review.js';
 export * from './user-understanding.js';
 export * from './work-organization.js';
 export * from './suggestions.js';
+export * from './workspace.js';

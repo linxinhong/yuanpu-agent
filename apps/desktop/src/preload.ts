@@ -41,6 +41,16 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke('assistant:suggestions:feedback', id, action, snoozedUntil),
   setAssistantSuggestionsPaused: (until) => ipcRenderer.invoke('assistant:suggestions:pause', until),
   markAssistantSuggestionRead: (id) => ipcRenderer.invoke('assistant:suggestions:read', id),
+  getAssistantWorkspace: (memoryLimit) => ipcRenderer.invoke('assistant:workspace:get', memoryLimit),
+  correctAssistantMemory: (id, expectedVersion, text, revisionId) =>
+    ipcRenderer.invoke('assistant:memory:correct', id, expectedVersion, text, revisionId),
+  forgetAssistantMemory: (id) => ipcRenderer.invoke('assistant:memory:forget', id),
+  importAssistantSavedMemory: (savedId, surface, text, savedAt) =>
+    ipcRenderer.invoke('assistant:memory:import-saved', savedId, surface, text, savedAt),
+  setAssistantOrganizingPaused: (until) => ipcRenderer.invoke('assistant:organizing:pause', until),
+  followUpAssistantDelegation: (taskId, text) =>
+    ipcRenderer.invoke('assistant:delegation:follow-up', taskId, text),
+  cancelAssistantDelegation: (taskId) => ipcRenderer.invoke('assistant:delegation:cancel', taskId),
   getAgentRun: (runId) => ipcRenderer.invoke('agent:runs:get', runId),
   getPrivateImRunSummary: (runId) => ipcRenderer.invoke('im:private-runs:summary', runId),
   cancelAgentRun: (runId) => ipcRenderer.invoke('agent:runs:cancel', runId),
