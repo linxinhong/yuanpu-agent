@@ -35,8 +35,8 @@ YuanpuAgent 面向桌面工作场景：用户在 Electron 中与 Pi 对话，通
 
 ## 独立助理开发（2026-09-26）
 
-用户已要求制作开发卡，设计权威见[独立助理设计与任务映射](../docs/assistant-memory-proposal.md)。本轮只做本地与企业微信，飞书、微信、钉钉不在开发和验收范围。助理评估的是工作对话、执行过程及产物，不是给助理自身跑离线评测；packages/evals 仅作方法参考，不新增生产依赖。历史提醒暂缓记录保留，本轮新范围包含助理侧主动回顾与可选企微建议，不恢复系统原生通知的必交要求。
+用户已要求制作开发卡，设计权威见[独立助理设计与任务映射](../docs/assistant-memory-proposal.md)及[默认技能与内部自动化](../docs/assistant-skills-and-automation.md)。本轮只做本地与企业微信，飞书、微信、钉钉不在开发和验收范围。助理评估的是工作对话、执行过程及产物，不是给助理自身跑离线评测；packages/evals 仅作方法参考，不新增生产依赖。历史提醒暂缓记录保留，本轮新范围包含助理侧主动回顾与可选企微建议，不恢复系统原生通知的必交要求。
 
-从“固定助理契约并验证 Pi 会话适配（TASK-037）”开始，最终由“独立助理完整业务验收（TASK-050）”验证闭环；状态和依赖只以[注册表](tasks.yaml)为准。三个阶段分别验证双入口与进程、工作评估/记忆/委派、真实桌面完整业务。复用[已确认的助理双面板](ui/assistant-home/proposal.md)，不以占位数据代替后端接通。
+从“固定助理契约并验证 Pi 会话适配（TASK-037）”开始；“实现助理内部自动化与定时调度（TASK-051）”承接来源与记忆存储，供工作评估和主动回顾使用。最终由“独立助理完整业务验收（TASK-050）”验证闭环；状态和依赖只以[注册表](tasks.yaml)为准。三个阶段分别验证双入口与进程、工作评估/记忆/委派、真实桌面完整业务。复用[已确认的助理双面板](ui/assistant-home/proposal.md)，不以占位数据代替后端接通。
 
 当前源码取证基线为 main fbe7c05 及未提交增量：已有 subagents、内置工具、助理页面和协议修改，实施前必须保留并复核。检索：ZG 查询 assistant/work/runtime/subagents 与 packages/evals，命中 runtime/index、agent-runtime-contracts、evals README；再精确核对 subagents/runner、assistant-home、package.json。未创建或重建索引。卡片本身不是实现证据；既有历史 done 状态不改写，不自动领取、提交或推送。

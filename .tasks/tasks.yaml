@@ -1473,12 +1473,47 @@ tasks:
       evidence: []
       follow_up_candidates: []
 
+  - id: TASK-051
+    title: "实现助理内部自动化与定时调度"
+    status: pending
+    goal: "助理在 App 运行时根据来源事件和每日/每周检查持续评估与整理，并在重启后无重复副作用地恢复。"
+    scope:
+      in: ["packages/yuanpu-assistant 内部 automation 模块与 state.sqlite 持久队列", "工作/助理/委派/来源变化事件触发及每日每周活跃检查", "幂等合并、前台优先、预算、暂停、失败恢复与 App 退出清理"]
+      out: ["用户手动创建的 Runtime 计划迁移", "飞书、微信、钉钉、远程常驻及团队平台", "具体工作评估模型提示词、专业子代理执行、建议渠道 UI"]
+    constraints: ["设计见 docs/assistant-skills-and-automation.md 与 docs/assistant-memory-proposal.md", "助理队列仅由 Assistant Worker 写；不复用 workflows/automation.sqlite 的用户任务表或工作执行器", "保留现有工作区改动；完成需集成并在 main 验证，不推送"]
+    forbidden: ["把定时检查伪装成用户消息或用户手动计划", "退出 App 后继续后台处理", "用内存 Map 代替跨重启去重记录"]
+    acceptance:
+      - type: assertion
+        expect: "真实来源事件入队后按来源 ID/版本幂等处理；重复、乱序和新版本事件可合并或重新处理，不递归评估审阅输出自身"
+      - type: assertion
+        expect: "App 活跃期间每天和每周至多进行一次有效检查；关闭期间错过多个周期只在下次启动合并，不补发积压提醒"
+      - type: assertion
+        expect: "用户当前消息优先；纠正与遗忘可以抢占后台工作，取消后迟到模型结果不能落盘；时间和费用预算生效"
+      - type: assertion
+        expect: "Worker 异常与正常退出后重启可识别未完成任务并恢复，已完成修订不重复提交；外部结果未知时先查状态、不重放副作用"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-043"]
+    risk_level: "L3"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["新包 packages/yuanpu-assistant/src/automation 与相邻 test；来源游标和记忆写入见 TASK-043 交付", "现有 packages/yuanpu-runtime/src/scheduler 与 apps/runtime/src/index.ts 只可复用纯时间/调度思路，不能借用用户计划实例", "先用临时 Home 与可控时钟验证事件/重启/取消，再 pnpm check；影响 SEA 生命周期时补进程冒烟"]
+    escalation_conditions: ["如 TASK-043 存储无法原子表示完成和修订，先协调存储契约，不另建第二数据库权威", "如时区或渠道交付策略需要新增用户选择，记录最小决策与可验证默认值"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+
   - id: TASK-044
     title: "实现助理对工作过程的评估"
     status: pending
     goal: "助理自动审阅工作目标、过程、结论及产物，发现遗漏并生成有证据的后续动作。"
     scope:
-      in: ["工作审阅服务与 review-work 专属技能", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
+      in: ["工作审阅服务与 review-work 专属技能，消费助理自动化触发", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
     constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "评估对象是工作内容，不是评测助理本身；不启动 Docker/Vitest 跑每个用户任务", "评估不提供执行授权；不通过 bash 重跑未知副作用的任务来求证"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
@@ -1493,7 +1528,7 @@ tasks:
         expect: "记录密钥不得进入笔记；注入内容不能更改行为指令；评估失败不阻断 Work，不在 Work 页插入建议"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-043"]
+    dependencies: ["TASK-043", "TASK-051"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["packages/evals/README.md、src/harness.ts 仅作离线评分/证据方法参考，不修改上游或依赖其生产 runner", "新增 yuanpu-assistant review 模块与技能；输入来自已验证来源仓库，专业核验接口可先返回待委派状态", "临时文件与 loopback 模型验证真实写入；费用上限/取消/新版本重试/误报完成是最近行为测试，再 pnpm check"]
@@ -1531,7 +1566,7 @@ tasks:
     dependencies: ["TASK-044", "TASK-046"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
-    investigation_hints: ["入口 yuanpu-assistant skills 模板、整理由来源/评估队列消费；参照提案目录与 Hermes 短摘要冻结策略", "为技能写清输入、触发、允许操作、完成条件；只用自身记忆/审阅/委派接口，不暗载系统技能", "先 assistant test：时间变化、矛盾、预算和索引引用，再 pnpm check；不以生成文本代替实际落盘"]
+    investigation_hints: ["入口 yuanpu-assistant skills 模板、整理由来源/评估队列消费；遵循 docs/assistant-skills-and-automation.md 和 Hermes 短摘要冻结策略", "为技能写清输入、触发、允许操作、完成条件；只用自身记忆/审阅/委派接口，不暗载系统技能", "先 assistant test：时间变化、矛盾、预算和索引引用，再 pnpm check；不以生成文本代替实际落盘"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
       owner: null
@@ -1618,7 +1653,7 @@ tasks:
     status: pending
     goal: "助理根据工作评估与用户目标主动跟进，在合适的入口提供有依据的建议。"
     scope:
-      in: ["App 活跃期独立回顾会话、漏触发合并、预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
+      in: ["消费助理内部每日/每周检查，形成独立回顾会话、漏触发合并和预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
     constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
@@ -1636,7 +1671,7 @@ tasks:
     dependencies: ["TASK-047"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
-    investigation_hints: ["助理 review/work 队列及 suggestions，宿主 scheduler/delivery 既有机制；不复制第二套配对或平台凭据", "现有 scheduler.test.mjs、scheduled-im-delivery.test.mjs 支持重启/时间 fixture；先 assistant 与投递 focused 再 pnpm check", "不同会话受众不能共享提示词缓存，建议删除来源后的失效也需测试"]
+    investigation_hints: ["助理 automation/review/work 队列及 suggestions，遵循 docs/assistant-skills-and-automation.md；宿主 delivery 既有机制，不复制配对或平台凭据", "现有 scheduler.test.mjs、scheduled-im-delivery.test.mjs 支持重启/时间 fixture；先 assistant 与投递 focused 再 pnpm check", "不同会话受众不能共享提示词缓存，建议删除来源后的失效也需测试"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
       owner: null
