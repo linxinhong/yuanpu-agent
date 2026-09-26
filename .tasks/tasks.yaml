@@ -1517,7 +1517,7 @@ tasks:
     status: pending
     goal: "助理自动审阅工作目标、过程、结论及产物，发现遗漏并生成有证据的后续动作。"
     scope:
-      in: ["工作审阅服务与 review-work 专属技能，消费助理自动化触发", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
+      in: ["工作审阅服务与 skills/review-work/SKILL.md，消费助理自动化触发", "增量触发、材料快照、证据校验、评估记录", "台账和记忆修订候选、模型预算与前台优先"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
     constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送", "评估对象是工作内容，不是评测助理本身；不启动 Docker/Vitest 跑每个用户任务", "评估不提供执行授权；不通过 bash 重跑未知副作用的任务来求证"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
@@ -1528,6 +1528,8 @@ tasks:
         expect: "识别有来源的遗漏、矛盾、承诺和下一步；材料不可访问保留未知，收到新证据可增量更新"
       - type: assertion
         expect: "reviews/<work-id>/<review-id>.md 可回溯来源版本及已提交变更；重复事件不重复评估，自己的评估不递归触发评估"
+      - type: assertion
+        expect: "review-work 技能文件随包发布且可在独立助理环境发现；真实工作材料触发技能审阅，不依赖工作 Agent 的专业技能"
       - type: assertion
         expect: "记录密钥不得进入笔记；注入内容不能更改行为指令；评估失败不阻断 Work，不在 Work 页插入建议"
       - type: command
@@ -1552,7 +1554,7 @@ tasks:
     status: pending
     goal: "助理从有证据的工作评估和直接交流持续理解用户并维护工作台账。"
     scope:
-      in: ["理解用户、整理记忆、组织工作、跟进承诺、日常回顾专属技能", "USER/MEMORY 有预算摘要与按需专题生长", "work context/focus/commitments/projects 更新及协作反馈", "将评估待核验事项接到宿主委派接口，回收结果后重新审阅并提交修订"]
+      in: ["skills/understand-user、maintain-memory、organize-work、follow-up 四项专属技能", "USER/MEMORY 有预算摘要与按需专题生长", "work context/focus/commitments/projects 更新及协作反馈", "将评估待核验事项接到宿主委派接口，回收结果后重新审阅并提交修订"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
     constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
@@ -1565,6 +1567,8 @@ tasks:
         expect: "同一承诺单一主记录、项目/人物以 ID 引用；完成有证据；长期经验与当前进度不重复维护"
       - type: assertion
         expect: "回合后与 App 活跃时自动整理，前台抢占、暂停/恢复和费用预算有效；没有建议也持续更新台账"
+      - type: assertion
+        expect: "四份 SKILL.md 随包发布并在独立助理环境可发现，分别写明触发、输入、输出与禁区；follow-up 只形成待跟进候选，不自行向工作对话或外部渠道投递建议"
       - type: command
         run: "pnpm check"
     dependencies: ["TASK-044", "TASK-046"]
@@ -1587,7 +1591,7 @@ tasks:
     status: pending
     goal: "助理通过独立普通任务对话调用专业技能，持续跟进并回收可验证结果。"
     scope:
-      in: ["宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
+      in: ["skills/delegate-and-verify/SKILL.md 与宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
     constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
@@ -1596,6 +1600,8 @@ tasks:
         expect: "专业技能仅在子代理环境加载；助理提供最小任务背景，不共享全部记忆、执行器池或授权实例"
       - type: assertion
         expect: "同一任务可以追问/修正，新任务空上下文；完成事件唤醒助理处理，失败和待审批明确表示"
+      - type: assertion
+        expect: "delegate-and-verify 技能文件随包发布且可在助理环境发现，实际委派说明包含最小背景、完成条件和授权范围，回收结果后按证据核验"
       - type: assertion
         expect: "子代理无写助理 Home 的能力；对路径/工具访问有可执行约束，不靠提示词承诺；若广泛本地 shell 无法约束，须先收窄工具或落实隔离"
       - type: assertion
@@ -1632,6 +1638,8 @@ tasks:
       - type: assertion
         expect: "通过实际持久文件核对来源、画像、工作状态；用户纠正不复活旧结论，遗忘清除评估/摘要且不被补扫重新创建"
       - type: assertion
+        expect: "七项默认技能均从助理专属目录加载；专业技能只在委派的普通任务环境加载，端到端验证技能触发与产物而非只检查文件存在"
+      - type: assertion
         expect: "对恶意来源指令、跨会话身份、路径绕过和子任务修改助理目录做独立检查；说明保证机制与残余限制"
       - type: assertion
         expect: "发布 .tasks/verification/TASK-047/results.md，区分确定性 fixture、真实模型观察与未验证项，不用综合评分代替验收"
@@ -1657,13 +1665,15 @@ tasks:
     status: pending
     goal: "助理根据工作评估与用户目标主动跟进，在合适的入口提供有依据的建议。"
     scope:
-      in: ["消费助理内部每日/每周检查，形成独立回顾会话、漏触发合并和预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
+      in: ["skills/reflect-and-suggest/SKILL.md 消费助理内部每日/每周检查，形成独立回顾会话、漏触发合并和预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
       out: ["飞书、微信、钉钉接入；远程常驻和团队平台", "修改 Pi 上游镜像；覆盖已有未提交改动"]
     constraints: ["设计权威 docs/assistant-memory-proposal.md；本地与企业微信，App 完整退出停止助理及子任务", "独立 packages/yuanpu-assistant 与 assistant Home；助理不依赖工作 runtime-kit", "保留当前 main fbe7c05 及工作区增量；完成需集成并在 main 验证，本轮不自动提交或推送"]
     forbidden: ["将 fixture、编译成功或模型自述当作真实业务完成证据", "将原始工作记录或全量私人记忆自动注入新 Work 或执行子代理"]
     acceptance:
       - type: assertion
         expect: "无新证据不生成打扰；有期限或遗漏时建议含原因、来源和可行下一步，忽略/稍后反馈持久化"
+      - type: assertion
+        expect: "reflect-and-suggest 技能文件随包发布且可在助理环境发现；只把有新证据且通过去重、冷却和预算的建议交给助理侧投递"
       - type: assertion
         expect: "生成/投递成功/失败/未知/已读严格分开；无回执不假设已读，回复与建议不自动跨入口广播"
       - type: assertion

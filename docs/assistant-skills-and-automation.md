@@ -45,6 +45,18 @@
 
 ## 实施与验收入口
 
-“实现助理内部自动化与定时调度（TASK-051）”负责触发、队列、节流和恢复；“实现助理对工作过程的评估（TASK-044）”提供 `review-work`；“实现用户理解与自动工作整理技能（TASK-045）”提供理解、记忆与台账技能；“接通助理专业任务委派与核验（TASK-046）”实现专业子代理；“实现助理主动回顾与建议投递（TASK-048）”接上每日/每周回顾和投递。阶段验收分别复核无界面后台工作、App 退出、重复事件、错过周期合并、前台优先、用户纠正与遗忘、无证据不提示、建议仅在助理入口出现。状态和依赖以 `.tasks/tasks.yaml` 为准。
+按可独立验收的能力分卡，不为每份技能单独建卡。每张行为卡同时交付可发现的 `SKILL.md`、调用它的服务行为与相应验证；只有文件而没有真实触发和产物不算完成。
+
+| 任务卡 | 交付 |
+| --- | --- |
+| `TASK-038` | 独立助理包、专属技能装载与内置资源种子机制。 |
+| `TASK-043`、`TASK-051` | 有来源的记忆存储、内部事件队列和定时调度，为技能提供可恢复的输入与写入。 |
+| `TASK-044` | `review-work/SKILL.md` 和工作审阅服务；对象是用户工作，不是助理自身。 |
+| `TASK-045` | `understand-user/`、`maintain-memory/`、`organize-work/`、`follow-up/` 的 `SKILL.md` 与用户理解、记忆、台账和跟进候选行为。 |
+| `TASK-046` | `delegate-and-verify/SKILL.md`、专业子任务委派和证据核验。 |
+| `TASK-048` | `reflect-and-suggest/SKILL.md`、助理侧主动回顾、建议去重与投递。 |
+| `TASK-047` | 跨卡验收七项技能的装载隔离、触发、实际持久产物和专业委派边界。 |
+
+阶段验收分别复核无界面后台工作、App 退出、重复事件、错过周期合并、前台优先、用户纠正与遗忘、无证据不提示、建议仅在助理入口出现。状态和依赖以 `.tasks/tasks.yaml` 为准。
 
 检索：ZG 查询 Yuanpu scheduler durable job automation.sqlite triggers host events，定位 `docs/agent-runtime-contracts.md` 与 `apps/runtime/src/index.ts`；精确核对现有 `PersistentScheduler`、Pi 资源加载与助理提案。现有 Runtime 用户计划和固定 Work/Assistant 会话属于已实现事实；助理内部队列与专属技能是本设计目标。
