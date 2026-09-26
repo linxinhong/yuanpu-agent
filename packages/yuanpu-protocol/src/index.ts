@@ -292,6 +292,16 @@ export interface CapabilityApprovalSummary {
   status: 'pending';
   createdAt: string;
   expiresAt: string;
+  assistantDelegation?: {
+    taskId: string;
+    skillName: string;
+    goal: string;
+    completionCriteria: string[];
+    contextRefs: string[];
+    sourceVersions?: Record<string, string>;
+    authorizedCapabilities: string[];
+    readOnly: boolean;
+  };
 }
 
 export interface CapabilityApprovalDecisionInput {

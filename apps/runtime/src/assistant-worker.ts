@@ -203,7 +203,24 @@ export async function runAssistantWorker(): Promise<void> {
       memory ??= await AssistantMemoryRepository.open(paths.root);
       automation ??= new AssistantAutomationStore(memory.sources.database);
       automationEngine ??= new AssistantAutomationEngine(automation,
-        assistantAutomationHandler(memory, automation));
+        assistantAutomationHandler(memory, automation, {
+          current: (taskId) => delegationHost.status(taskId),
+          notify: async (record, signal, beforeModel) => {
+            if (closed || !['completed', 'failed', 'cancelled', 'unknown', 'waiting_approval']
+              .includes(record.status)) throw new Error('Delegation notification is no longer current.');
+            const current = await delegationHost.status(record.taskId);
+            if (!current || current.assistantSessionId !== record.assistantSessionId
+              || current.updatedAt !== record.updatedAt || current.status !== record.status) {
+              throw new Error('Delegation changed before notification.');
+            }
+            const session = await executor.openSession(record.assistantSessionId, { createIfMissing: false });
+            const result = await session.verifyDelegation(record.taskId, signal, beforeModel);
+            return { costUsd: result.costUsd, message: result.message };
+          },
+          linkEvidence: async (record, checks) => {
+            await executor.linkDelegationEvidence(record.taskId, record.assistantSessionId, checks);
+          },
+        }));
       automationEngine.setForeground(active.size > 0);
       automation.scheduleActivePeriods();
       for (const record of pendingDelegationEvents.values()) await queueCurrentDelegation(record.taskId);
@@ -248,7 +265,7 @@ export async function runAssistantWorker(): Promise<void> {
     })().catch((error) => send({ kind: 'source-error', error: String(error) }))
       .finally(() => { sourcePump = undefined; });
   };
-  let executor;
+  let executor: Awaited<ReturnType<typeof createAssistantExecutor>>;
   try { executor = await createAssistantExecutor({
     assistantHome: paths.root,
     bundledSkillFiles: bundledAssistantSkillFiles.map((file) => ({

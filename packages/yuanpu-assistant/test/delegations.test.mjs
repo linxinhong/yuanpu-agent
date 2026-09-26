@@ -58,6 +58,14 @@ test('delegation tool keeps one durable task ID and links only returned evidence
   assert.deepEqual(records.get(expectedId).followUps, ['Check the citation again.']);
   const otherSessionTool = createAssistantDelegationTool(coordinator, 'session_two');
   await assert.rejects(otherSessionTool.execute('query', { action: 'status', taskId: expectedId }), /Unknown delegation/);
+  const automationTool = createAssistantDelegationTool(coordinator, 'session_one', () => expectedId);
+  await assert.rejects(automationTool.execute('new', input), /only inspect its original/);
+  await assert.rejects(automationTool.execute('other', { action: 'status', taskId: 'other_task' }),
+    /only inspect its original/);
+  await assert.rejects(automationTool.execute('link', { action: 'link_evidence', taskId: expectedId,
+    checks: [{ criterion: 'Cited finding', evidenceRefs: ['source:one'] }] }), /only inspect its original/);
+  assert.equal(JSON.parse((await automationTool.execute('status', { action: 'status',
+    taskId: expectedId })).content[0].text).taskId, expectedId);
   const archive = JSON.parse(await readFile(join(home, 'delegations', `${expectedId}.json`), 'utf8'));
   assert.equal(archive.verification, undefined);
 });
