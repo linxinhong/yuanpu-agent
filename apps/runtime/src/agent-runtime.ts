@@ -53,6 +53,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
         retired: false,
         promise: createYuanpuChatSession({
           ...this.#options.chat,
+          cwd: input.run.context.workspaceId,
           includeGlobalMemory: input.run.owner.entryPoint === 'desktop'
             && input.run.context.conversation.conversationId === 'assistant',
           capabilityClient: this.#options.getCapabilityClient(),

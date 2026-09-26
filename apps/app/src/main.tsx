@@ -10,6 +10,7 @@ import './styles.css';
 import './muse-theme.css';
 import '../themes/mindlink.css';
 import '../themes/dark.css';
+import './shell/shell-layout.css';
 
 applyThemePreference(readThemePreference());
 applyFontPreference(readFontPreference());

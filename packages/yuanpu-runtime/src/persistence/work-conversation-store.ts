@@ -5,6 +5,7 @@ import type { AssistantSourceChange, DesktopTranscriptMessage, WorkConversation 
 interface WorkRow {
   conversation_id: string;
   pi_session_id: string;
+  working_directory: string;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +50,7 @@ export class WorkConversationStore {
 
   private toConversation(row: WorkRow, currentId: string): WorkConversation {
     return { id: row.conversation_id, createdAt: row.created_at, updatedAt: row.updated_at,
+      workingDirectory: row.working_directory,
       current: row.conversation_id === currentId, archived: false };
   }
 
@@ -58,20 +60,20 @@ export class WorkConversationStore {
     return row ? this.toConversation(row, selected!) : this.create(workspaceId);
   }
 
-  create(workspaceId: string): WorkConversation {
+  create(workspaceId: string, workingDirectory = workspaceId): WorkConversation {
     const id = `work:${randomUUID()}`;
     const piSessionId = randomUUID();
     const now = new Date().toISOString();
     this.database.exec('BEGIN IMMEDIATE');
     try {
       this.database.prepare(`INSERT INTO yp_work_conversations
-        (conversation_id, pi_session_id, workspace_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
-        .run(id, piSessionId, workspaceId, now, now);
+        (conversation_id, pi_session_id, workspace_id, working_directory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(id, piSessionId, workspaceId, workingDirectory, now, now);
       this.database.prepare(`INSERT INTO yp_conversation_bindings
         (binding_id, entry_point, authority_id, subject_id, namespace, conversation_id,
          thread_id, pi_session_id, workspace_id, created_at, updated_at)
         VALUES (?, 'desktop', 'local-desktop', 'local-user', 'desktop', ?, '', ?, ?, ?, ?)`)
-        .run(randomUUID(), id, piSessionId, workspaceId, now, now);
+        .run(randomUUID(), id, piSessionId, workingDirectory, now, now);
       this.database.prepare(`INSERT INTO yp_runtime_metadata(key, value, updated_at) VALUES (?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
         .run(this.currentKey(workspaceId), id, now);
@@ -80,7 +82,7 @@ export class WorkConversationStore {
       this.database.exec('ROLLBACK');
       throw error;
     }
-    return { id, createdAt: now, updatedAt: now, current: true, archived: false };
+    return { id, createdAt: now, updatedAt: now, workingDirectory, current: true, archived: false };
   }
 
   select(workspaceId: string, id: string): WorkConversation {
@@ -94,9 +96,15 @@ export class WorkConversationStore {
   }
 
   row(workspaceId: string, id: string): WorkRow | undefined {
-    return this.database.prepare(`SELECT conversation_id, pi_session_id, created_at, updated_at
+    return this.database.prepare(`SELECT conversation_id, pi_session_id, working_directory, created_at, updated_at
       FROM yp_work_conversations WHERE workspace_id = ? AND conversation_id = ?`)
       .get(workspaceId, id) as WorkRow | undefined;
+  }
+
+  hasWorkingDirectory(workspaceId: string, workingDirectory: string): boolean {
+    return Boolean(this.database.prepare(`SELECT 1 FROM yp_work_conversations
+      WHERE workspace_id = ? AND working_directory = ? LIMIT 1`)
+      .get(workspaceId, workingDirectory));
   }
 
   sessionId(workspaceId: string, id: string): string | undefined {
@@ -123,7 +131,7 @@ export class WorkConversationStore {
   /** Scans must not create an empty conversation merely because Runtime started. */
   listExisting(workspaceId: string): WorkConversation[] {
     const currentId = this.selectedId(workspaceId) ?? '';
-    const rows = this.database.prepare(`SELECT conversation_id, pi_session_id, created_at, updated_at
+    const rows = this.database.prepare(`SELECT conversation_id, pi_session_id, working_directory, created_at, updated_at
       FROM yp_work_conversations WHERE workspace_id = ? ORDER BY updated_at DESC`)
       .all(workspaceId) as unknown as WorkRow[];
     const conversations = rows.map((row) => this.toConversation(row, currentId));
@@ -131,7 +139,7 @@ export class WorkConversationStore {
       WHERE entry_point = 'desktop' AND authority_id = 'local-desktop' AND subject_id = 'local-user'
         AND namespace = 'desktop' AND conversation_id = 'default' AND workspace_id = ?`)
       .get(workspaceId) as { created_at: string; updated_at: string } | undefined;
-    if (legacy) conversations.push({ id: 'default', createdAt: legacy.created_at,
+    if (legacy) conversations.push({ id: 'default', createdAt: legacy.created_at, workingDirectory: workspaceId,
       updatedAt: legacy.updated_at, current: false, archived: true });
     return conversations;
   }

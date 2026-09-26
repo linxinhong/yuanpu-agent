@@ -6,11 +6,14 @@ import { AppIcon } from '../shared/app-icon.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
 import { BrandShowcase } from '../shared/brand-showcase.js';
 
+import { PageToolbarHost } from '../shared/page-toolbar.js';
+
 import { uiRegistry } from '../composition/catalog.js';
 
 type AppView = UiDestination;
 
 export function App() {
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const location = useLocation();
   const routerNavigate = useNavigate();
   const destinations = useSyncExternalStore(uiRegistry.subscribe, uiRegistry.getSnapshot);
@@ -41,11 +44,14 @@ export function App() {
   }), [routerNavigate]);
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
+    <PageToolbarHost.Provider value={toolbarHost}><main className="app-shell">
+      <div className="shell-topbar">
         <div className="window-controls-space" aria-hidden="true">
           {!window.yuanpu && <div className="window-controls-preview"><span /><span /><span /></div>}
         </div>
+        <div className="shell-toolbar-host" ref={setToolbarHost} />
+      </div>
+      <aside className="sidebar">
         <nav className="sidebar-nav" aria-label="主导航">{destinations.filter((entry) => entry.id !== 'settings').map((entry) =>
           <button key={entry.id} className={`nav-item ${view === entry.id ? 'active' : ''}`} type="button"
             title={entry.label} aria-label={entry.label} aria-current={view === entry.id ? 'page' : undefined} onClick={() => setView(entry.id)}>
@@ -85,6 +91,6 @@ export function App() {
         })}
       </div>)}
       <aside className="brand-rail" aria-label="品牌"><BrandShowcase variant="mindlink" /></aside>
-    </main>
+    </main></PageToolbarHost.Provider>
   );
 }

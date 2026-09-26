@@ -36,7 +36,16 @@ test('new Work sessions remain isolated and selected across restart while defaul
   assert.notEqual(first.id, second.id);
   assert.notEqual(database.workConversations.sessionId(workspace, first.id),
     database.workConversations.sessionId(workspace, second.id));
+  assert.equal(first.workingDirectory, workspace);
   assert.equal(database.workConversations.current(workspace).id, second.id);
+  const isolated = database.workConversations.create(workspace, join(root, 'isolated'));
+  assert.equal(isolated.workingDirectory, join(root, 'isolated'));
+  assert.equal(database.workConversations.hasWorkingDirectory(workspace, isolated.workingDirectory), true);
+  const isolatedBindingDb = new DatabaseSync(path);
+  const isolatedBinding = isolatedBindingDb.prepare('SELECT workspace_id FROM yp_conversation_bindings WHERE conversation_id = ?')
+    .get(isolated.id);
+  assert.equal(isolatedBinding.workspace_id, isolated.workingDirectory);
+  isolatedBindingDb.close();
   assert.equal(database.workConversations.sessionId(workspace, 'default'), 'legacy-pi-session');
   assert.equal(database.workConversations.list(workspace).find((item) => item.id === 'default').archived, true);
   assert.throws(() => database.workConversations.select(workspace, 'default'), /Unknown Work conversation/);
@@ -47,7 +56,7 @@ test('new Work sessions remain isolated and selected across restart while defaul
   const reopened = openYuanpuMetadataDatabase(path);
   assert.equal(reopened.workConversations.current(workspace).id, first.id);
   assert.deepEqual(reopened.workConversations.list(workspace).map((item) => item.id).sort(),
-    [first.id, second.id, 'default'].sort());
+    [first.id, second.id, isolated.id, 'default'].sort());
   assert.deepEqual(readYuanpuChatTranscript(workspace, 'legacy-pi-session', sessions).map((item) => item.text),
     ['old Work question', 'old Work answer']);
   reopened.close();

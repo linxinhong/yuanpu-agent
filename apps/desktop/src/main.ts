@@ -110,6 +110,8 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   );
 
   ipcMain.handle('runtime:info', trustedHandler(() => runtime.info()));
+  ipcMain.handle('settings:hotkeys:get', trustedHandler(() => runtime.getHotkeySettings()));
+  ipcMain.handle('settings:hotkeys:save', trustedHandler((input) => runtime.saveHotkeySetting(input)));
   ipcMain.handle('settings:models:get', trustedHandler(() => runtime.getModelSettings()));
   ipcMain.handle('settings:models:catalog', trustedHandler((provider) => runtime.getModelCatalog(provider)));
   ipcMain.handle('settings:models:save', trustedHandler((input) => runtime.saveModelSettings(input)));
@@ -121,7 +123,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
     clientMessageId?: string) => runtime.submitDesktopMessage(message, surface, conversationId, clientMessageId)));
   ipcMain.handle('desktop:transcript', trustedHandler((surface: 'work' | 'assistant' | 'assistantArchive', conversationId?: string) => runtime.getDesktopTranscript(surface, conversationId)));
   ipcMain.handle('work:conversations:list', trustedHandler(() => runtime.listWorkConversations()));
-  ipcMain.handle('work:conversations:create', trustedHandler(() => runtime.createWorkConversation()));
+  ipcMain.handle('work:conversations:create', trustedHandler((workingDirectory?: string) => runtime.createWorkConversation(workingDirectory)));
   ipcMain.handle('work:conversations:select', trustedHandler((conversationId: string) => runtime.selectWorkConversation(conversationId)));
   ipcMain.handle('assistant:link:get', trustedHandler(() => runtime.getAssistantLink()));
   ipcMain.handle('assistant:link:bind', trustedHandler((contactId: string) => runtime.bindAssistantContact(contactId)));

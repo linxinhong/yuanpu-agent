@@ -13,6 +13,8 @@ import {
   greeting,
   getModelCatalog,
   getModelSettings,
+  getHotkeySettings,
+  saveHotkeySetting,
   saveModelSettings,
   inspectYuanpuExtensions,
   inspectYuanpuSkills,
@@ -50,6 +52,7 @@ import {
   type WecomConnectionSummary,
   type WecomConnectionConfigInput,
   type SaveModelSettingsInput,
+  type SaveHotkeyInput,
   type AgentRunRecord,
 } from '@yuanpu-agent/protocol';
 import { execFile } from 'node:child_process';
@@ -66,6 +69,7 @@ import { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { AssistantHostService } from './assistant-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { runAssistantWorker } from './assistant-worker.js';
+import { createWorkspaceDirectory, resolveSelectedWorkspaceDirectory } from './workspace-directory.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
@@ -118,7 +122,7 @@ async function readBootstrap(): Promise<RuntimeBootstrap> {
   };
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+async function readJsonBody(request: IncomingMessage, allowEmpty = false): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -127,6 +131,7 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     if (size > 64 * 1024) throw new Error('Request body is too large');
     chunks.push(bytes);
   }
+  if (size === 0 && allowEmpty) return undefined;
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
 }
 
@@ -528,13 +533,34 @@ async function serve(): Promise<void> {
     }
   };
   scanLegacyAssistantArchives();
+  const workScope = home.config.workingDirectory;
+  const createWorkConversation = async (selectedDirectory?: string) => {
+    const directory = selectedDirectory === undefined
+      ? await createWorkspaceDirectory(home.workspacePath)
+      : await resolveSelectedWorkspaceDirectory(selectedDirectory);
+    try {
+      return workConversations.create(workScope, directory);
+    } catch (error) {
+      if (selectedDirectory === undefined) await rm(directory, { recursive: true, force: true });
+      throw error;
+    }
+  };
+  let currentWorkPromise: Promise<import('@yuanpu-agent/protocol').WorkConversation> | undefined;
+  const currentWorkConversation = () => {
+    if (!currentWorkPromise) currentWorkPromise = (async () => {
+      const existing = workConversations.listExisting(workScope).filter((item) => !item.archived);
+      return existing.find((item) => item.current)
+        ?? (existing[0] ? workConversations.select(workScope, existing[0].id) : await createWorkConversation());
+    })().finally(() => { currentWorkPromise = undefined; });
+    return currentWorkPromise;
+  };
   const scanSavedWorkTurns = (conversationId?: string) => {
-    for (const item of workConversations.listExisting(home.config.workingDirectory)) {
+    for (const item of workConversations.listExisting(workScope)) {
       if (conversationId && item.id !== conversationId) continue;
       const piSessionId = workConversations.sessionId(home.config.workingDirectory, item.id);
       if (!piSessionId) continue;
       workConversations.recordSavedTurns(item.id,
-        readYuanpuChatTranscript(home.config.workingDirectory, piSessionId, home.sessionsPath, Number.MAX_SAFE_INTEGER, true));
+        readYuanpuChatTranscript(item.workingDirectory, piSessionId, home.sessionsPath, Number.MAX_SAFE_INTEGER, true));
     }
   };
   scanSavedWorkTurns();
@@ -593,7 +619,8 @@ async function serve(): Promise<void> {
       authorityId: 'local-desktop',
       authenticatedBy: 'electron',
     },
-    authorizeWorkspace: (workspaceId) => workspaceId === home.config.workingDirectory,
+    authorizeWorkspace: (workspaceId) => workspaceId === home.config.workingDirectory
+      || workConversations.hasWorkingDirectory(workScope, workspaceId),
     authorizeConversation: (conversation) => conversation.namespace === 'desktop',
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
@@ -756,9 +783,10 @@ async function serve(): Promise<void> {
       return { error: 'Unknown desktop conversation surface.' } as const;
     }
     const workConversationId = body.surface === 'assistant' ? undefined
-      : body.conversationId === undefined ? workConversations.current(home.config.workingDirectory).id
+      : body.conversationId === undefined ? (await currentWorkConversation()).id
         : typeof body.conversationId === 'string' ? body.conversationId : undefined;
-    if (body.surface !== 'assistant' && (!workConversationId || !workConversations.row(home.config.workingDirectory, workConversationId))) {
+    const workConversation = workConversationId ? workConversations.row(workScope, workConversationId) : undefined;
+    if (body.surface !== 'assistant' && !workConversation) {
       return { error: 'Unknown or archived Work conversation.' } as const;
     }
     if (body.surface === 'assistant') {
@@ -772,7 +800,7 @@ async function serve(): Promise<void> {
       contractVersion: AGENT_CONTRACT_VERSION,
       entryPoint: 'desktop',
       identity: desktopCaller.identity,
-      workspaceId: home.config.workingDirectory,
+      workspaceId: workConversation!.working_directory,
       conversation: { namespace: 'desktop', conversationId: workConversationId! },
       input: { type: 'text', text: body.message.trim() },
       idempotencyKey: randomUUID(),
@@ -818,6 +846,14 @@ async function serve(): Promise<void> {
 
       if (url.pathname === RUNTIME_ROUTES.modelSettings && request.method === 'GET') {
         response.end(JSON.stringify(await getModelSettings(home)));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.hotkeySettings && request.method === 'GET') {
+        response.end(JSON.stringify(await getHotkeySettings(home)));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.hotkeySettings && request.method === 'POST') {
+        response.end(JSON.stringify(await saveHotkeySetting(home, await readJsonBody(request) as SaveHotkeyInput)));
         return;
       }
       if (url.pathname === RUNTIME_ROUTES.modelCatalog && request.method === 'GET') {
@@ -1058,12 +1094,27 @@ async function serve(): Promise<void> {
 
       if (url.pathname === RUNTIME_ROUTES.workConversations) {
         if (request.method === 'GET') {
-          response.end(JSON.stringify(workConversations.list(home.config.workingDirectory)));
+          await currentWorkConversation();
+          response.end(JSON.stringify(workConversations.listExisting(workScope)));
           return;
         }
         if (request.method === 'POST') {
+          const body = await readJsonBody(request, true);
+          const selectedDirectory = isRecord(body) ? body.workingDirectory : undefined;
+          if (selectedDirectory !== undefined && (typeof selectedDirectory !== 'string' || !selectedDirectory.trim())) {
+            response.statusCode = 400;
+            response.end(JSON.stringify({ error: 'A selected workspace directory must be a non-empty absolute path.' }));
+            return;
+          }
+          let created;
+          try { created = await createWorkConversation(selectedDirectory); }
+          catch (error) {
+            response.statusCode = 400;
+            response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            return;
+          }
           response.statusCode = 201;
-          response.end(JSON.stringify(workConversations.create(home.config.workingDirectory)));
+          response.end(JSON.stringify(created));
           return;
         }
         if (request.method === 'PUT') {
@@ -1096,7 +1147,8 @@ async function serve(): Promise<void> {
               Number.MAX_SAFE_INTEGER))));
           return;
         }
-        const workId = url.searchParams.get('conversationId') ?? workConversations.current(home.config.workingDirectory).id;
+        const workId = url.searchParams.get('conversationId') ?? (await currentWorkConversation()).id;
+        const workConversation = workConversations.row(workScope, workId);
         const piSessionId = workConversations.sessionId(home.config.workingDirectory, workId);
         if (surface === 'work' && !piSessionId) {
           response.statusCode = 404;
@@ -1104,7 +1156,8 @@ async function serve(): Promise<void> {
           return;
         }
         response.end(JSON.stringify(piSessionId
-          ? readYuanpuChatTranscript(home.config.workingDirectory, piSessionId, home.sessionsPath)
+          ? readYuanpuChatTranscript(workConversation?.working_directory ?? home.config.workingDirectory,
+            piSessionId, home.sessionsPath)
           : []));
         return;
       }

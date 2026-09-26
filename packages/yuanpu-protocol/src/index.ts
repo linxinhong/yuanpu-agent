@@ -12,6 +12,7 @@ import type {
 export * from './agent.js';
 export * from './assistant.js';
 export * from './host-events.js';
+export * from './hotkeys.js';
 export * from './scheduler.js';
 
 export const RUNTIME_ROUTES = {
@@ -48,6 +49,7 @@ export const RUNTIME_ROUTES = {
   modelSettings: '/v1/settings/models',
   modelSettingsDelete: '/v1/settings/models/delete',
   modelCatalog: '/v1/settings/models/catalog',
+  hotkeySettings: '/v1/settings/hotkeys',
 } as const;
 
 export type ModelApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
@@ -122,6 +124,7 @@ export interface WorkConversation {
   id: string;
   createdAt: string;
   updatedAt: string;
+  workingDirectory: string;
   current: boolean;
   archived: boolean;
 }
@@ -370,6 +373,8 @@ export interface PluginConfigValidation {
 
 export interface DesktopBridge {
   runtimeInfo(): Promise<RuntimeInfo>;
+  getHotkeySettings(): Promise<import('./hotkeys.js').HotkeySettings>;
+  saveHotkeySetting(input: import('./hotkeys.js').SaveHotkeyInput): Promise<import('./hotkeys.js').HotkeySettings>;
   getModelSettings(): Promise<ModelSettings>;
   getModelCatalog(provider?: string): Promise<ModelCatalog>;
   saveModelSettings(input: SaveModelSettingsInput): Promise<ModelSettings>;
@@ -381,7 +386,7 @@ export interface DesktopBridge {
     clientMessageId?: string): Promise<AgentRunReceipt>;
   getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
   listWorkConversations(): Promise<WorkConversation[]>;
-  createWorkConversation(): Promise<WorkConversation>;
+  createWorkConversation(workingDirectory?: string): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string): Promise<WorkConversation>;
   getAssistantLink(): Promise<AssistantLinkStatus>;
   bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;

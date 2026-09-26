@@ -220,6 +220,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .user-message-meta button.copied { color: var(--yp-accent); }
 .user-message-meta svg { width: 15px; height: 15px; }
 .message.error .message-body p { color: #a23d3d; }
+.conversation-stop-run { align-self: stretch; width: 100%; }
 .message-markdown { color: var(--yp-text); font-size: var(--yp-font-size-content); line-height: calc(var(--yp-font-size-content) * 24 / 14); overflow-wrap: anywhere; }
 .message-markdown > :first-child { margin-top: 0; }
 .message-markdown > :last-child { margin-bottom: 0; }
@@ -711,6 +712,21 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .font-family-row select, .font-family-row input { min-height: 38px; border: 1px solid var(--yp-border-control); border-radius: 8px; padding: 7px 12px; color: var(--yp-text); background: var(--yp-surface); font: inherit; }
 .font-family-row input { flex: 1 1 260px; min-width: 0; }
 .settings-connections { min-width: 0; min-height: 0; overflow: auto; }
+.hotkey-settings { width: min(100%, 950px); margin: 0 auto; padding: 40px clamp(24px, 4vw, 54px); color: var(--yp-text); }
+.hotkey-settings h2 { margin: 0 0 8px; font-size: 1.5rem; font-weight: 650; }
+.hotkey-settings > p { margin: 0 0 26px; color: var(--yp-text-muted); line-height: 1.6; }
+.hotkey-settings .hotkey-error { color: #ad4242; }
+.hotkey-category { border: 1px solid var(--yp-border); border-radius: 16px; padding: 16px 20px; background: var(--yp-surface); }
+.hotkey-category h3 { margin: 0 0 7px; font-size: 0.9375rem; font-weight: 600; }
+.hotkey-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid var(--yp-border-subtle); padding: 17px 0 2px; }
+.hotkey-description { display: grid; gap: 5px; }
+.hotkey-description strong { font-weight: 600; }
+.hotkey-description span { color: var(--yp-text-muted); font-size: 0.75rem; }
+.hotkey-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hotkey-controls button { min-height: 34px; border: 1px solid var(--yp-border-control); border-radius: 8px; padding: 6px 11px; color: var(--yp-text); background: var(--yp-surface); cursor: pointer; font-size: 0.75rem; }
+.hotkey-controls .hotkey-binding { min-width: 100px; border-color: var(--yp-accent); color: var(--yp-accent-ink); background: var(--yp-accent-soft); font-size: 0.8125rem; }
+.hotkey-controls button:disabled { opacity: .45; cursor: default; }
+@media (max-width: 650px) { .hotkey-row { align-items: flex-start; flex-direction: column; } }
 .assistant-link-settings { margin: 32px 36px 20px; border-bottom: 1px solid #e4eae6; padding-bottom: 24px; }
 .assistant-link-settings h2 { margin: 0 0 8px; font-size: 1.125rem; font-weight: 600; }
 .assistant-link-settings p { max-width: 640px; color: #68786f; font-size: 0.8125rem; line-height: 1.65; }

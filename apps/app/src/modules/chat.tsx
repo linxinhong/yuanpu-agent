@@ -13,17 +13,23 @@ import type {
   PrivateImRunSummary,
   WorkConversation,
 } from '@yuanpu-agent/protocol';
+import { effectiveHotkeyBinding } from '@yuanpu-agent/protocol';
 import mindlinkSeal from '../../themes/assets/mindlink-seal.png';
 
 import { AppIcon } from '../shared/app-icon.js';
+import { bindingFromKeyEvent } from '../shared/hotkeys.js';
 import { AssistantReply } from '../shared/assistant-reply.js';
+import { elapsedLabel, ReplyRunDetails } from '../shared/reply-run-details.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
+import { resizePanel } from '../shared/panel-resize.js';
+import { PageToolbar } from '../shared/page-toolbar.js';
+import { AssistantHome } from './assistant-home.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
 type ChatMessage = {
   id: number;
-  role: 'user' | 'assistant' | 'error';
+  role: 'user' | 'assistant' | 'error' | 'notice';
   text: string;
   at?: string;
   tools?: ToolState[];
@@ -49,6 +55,11 @@ function runStatusLabel(status: AgentRunRecord['status']): string {
     interrupted: '执行中断',
     result_unknown: '结果未知',
   }[status];
+}
+
+function stoppedNotice(run: AgentRunRecord): string {
+  const duration = elapsedLabel(run);
+  return duration ? `你在 ${duration} 后停止了` : '你停止了当前任务';
 }
 
 function activityTime(at: string): string {
@@ -86,10 +97,13 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function maxRightPanelWidth(panelWidth: number, listOpen: boolean): number {
+function rightPanelSpace(panelWidth: number, listOpen: boolean): number {
   const leftPanelWidth = listOpen && window.innerWidth > 780 ? window.innerWidth <= 1100 ? 240 : 260 : 0;
-  const available = panelWidth - leftPanelWidth;
-  return Math.max(260, Math.floor(available * 0.7));
+  return Math.max(1, panelWidth - leftPanelWidth);
+}
+
+function maxRightPanelWidth(panelWidth: number, listOpen: boolean): number {
+  return Math.floor(rightPanelSpace(panelWidth, listOpen) * 0.7);
 }
 
 export function ChatPanel({
@@ -127,9 +141,14 @@ export function ChatPanel({
   const [activeRunId, setActiveRunId] = useState<string>();
   const [activeRunStatus, setActiveRunStatus] = useState<AgentRunRecord['status']>();
   const [cancelBusy, setCancelBusy] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(false);
+  const cancelInFlight = useRef(false);
+  const requestedStops = useRef(new Set<string>());
+  const stoppedRuns = useRef(new Set<string>());
+  const nextNoticeId = useRef(-1);
+  const [activityOpen, setActivityOpen] = useState(surface === 'assistant');
   const [listOpen, setListOpen] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(() => {
+    if (surface === 'assistant') return (window.innerWidth - 50) / 2;
     try {
       const stored = Number(window.localStorage.getItem('yuanpu:right-panel-width'));
       return stored >= 260 && stored <= 1600 ? stored : 320;
@@ -141,6 +160,7 @@ export function ChatPanel({
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const activityEventsRef = useRef<ActivityEvent[]>([]);
   const [lastRun, setLastRun] = useState<AgentRunRecord>();
+  const [submittedTask, setSubmittedTask] = useState<{ runId: string; text: string }>();
   const [runRecovery, setRunRecovery] = useState<{ runId: string; text: string }>();
   const [bridgeError, setBridgeError] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -156,6 +176,8 @@ export function ChatPanel({
   const activityDialog = useRef<HTMLDialogElement>(null);
   const chatPanel = useRef<HTMLElement>(null);
   const rightPanelDragCleanup = useRef<(() => void) | null>(null);
+  const rightPanelGesture = useRef({ startedAtLimit: false, stopped: false });
+  const assistantPanelRatio = useRef(0.5);
   const activityToggle = useRef<HTMLButtonElement>(null);
   const restoreActivityFocus = useRef(false);
   const nextActivityId = useRef(1);
@@ -176,6 +198,11 @@ export function ChatPanel({
     if (surface !== 'work' || !workConversationsQuery.data || workConversationId) return;
     setWorkConversationId(workConversationsQuery.data.find((item) => item.current)?.id);
   }, [surface, workConversationsQuery.data, workConversationId]);
+  const hotkeyQuery = useQuery({
+    queryKey: ['settings', 'hotkeys'],
+    queryFn: () => desktop!.getHotkeySettings(),
+    enabled: active && Boolean(desktop),
+  });
   const transcriptQuery = useQuery({
     queryKey: ['assistant', 'transcript', surface, workConversationId],
     queryFn: () => desktop!.getDesktopTranscript(surface, surface === 'work' ? workConversationId : undefined),
@@ -207,16 +234,26 @@ export function ChatPanel({
     if (key === appliedTranscript.current) return;
     appliedTranscript.current = key;
     nextId.current = transcriptQuery.data.length + 1;
-    setMessages((current) => transcriptQuery.data!.length
+    setMessages((current) => {
+      const notices = current.filter((message) => message.role === 'notice');
+      const regular = current.filter((message) => message.role !== 'notice');
+      const refreshed: ChatMessage[] = transcriptQuery.data!.length
       ? transcriptQuery.data!.map((item, index) => {
-        const previous = current[index];
+        const previous = regular[index];
         const sameMessage = previous?.role === item.role && previous.text === item.text;
-        const run = item.role === 'assistant' ? (sameMessage ? previous?.run : undefined) ?? findReplyRun(surface, item.id, item.text, item.at) : undefined;
+        const run = item.role === 'assistant' ? (sameMessage ? previous?.run : undefined) ?? findReplyRun(surface, item.id, item.text, item.at) ?? item.run : undefined;
         return sameMessage ? { ...previous, at: item.at, run } : { id: index + 1, role: item.role, text: item.text, at: item.at, run };
       })
       : workArchived ? [] : surface === 'assistant'
         ? [{ ...initialMessages[0]!, text: assistantGreeting }]
-        : initialMessages);
+        : initialMessages;
+      for (const notice of notices) {
+        const at = new Date(notice.at ?? '').getTime();
+        const index = refreshed.findIndex((message) => Boolean(message.at) && new Date(message.at!).getTime() > at);
+        refreshed.splice(index < 0 ? refreshed.length : index, 0, notice);
+      }
+      return refreshed;
+    });
   }, [busy, transcriptQuery.data, assistantLinkQuery.data?.contactId, surface, workConversationId, workArchived]);
 
   useEffect(() => {
@@ -225,19 +262,26 @@ export function ChatPanel({
   }, [input, surface]);
 
   useEffect(() => {
+    if (surface === 'assistant') return;
     try { window.localStorage.setItem('yuanpu:right-panel-width', String(rightPanelWidth)); }
     catch { /* Storage can be unavailable in a restricted preview. */ }
-  }, [rightPanelWidth]);
+  }, [rightPanelWidth, surface]);
 
   useEffect(() => {
     if (!active || !chatPanel.current) return;
     const panel = chatPanel.current;
-    const fit = () => setRightPanelWidth((current) => Math.min(current, maxRightPanelWidth(panel.getBoundingClientRect().width, listOpen)));
+    const fit = () => {
+      const width = panel.getBoundingClientRect().width;
+      if (surface === 'assistant') {
+        // Preserve the split ratio when the window or left list changes size.
+        setRightPanelWidth(rightPanelSpace(width, listOpen) * assistantPanelRatio.current);
+      } else setRightPanelWidth((current) => Math.min(current, maxRightPanelWidth(width, listOpen)));
+    };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(panel);
     return () => observer.disconnect();
-  }, [active, listOpen]);
+  }, [active, listOpen, surface]);
 
   useEffect(() => () => rightPanelDragCleanup.current?.(), []);
 
@@ -268,7 +312,7 @@ export function ChatPanel({
   useEffect(() => {
     const dialog = activityDialog.current;
     if (activityOpen && active && dialog) {
-      if (window.matchMedia('(max-width: 560px)').matches) dialog.showModal();
+      if (surface === 'work' && window.matchMedia('(max-width: 560px)').matches) dialog.showModal();
       else dialog.open = true;
       return () => dialog.close();
     }
@@ -276,12 +320,32 @@ export function ChatPanel({
       activityToggle.current?.focus();
       restoreActivityFocus.current = false;
     }
-  }, [activityOpen, active]);
+  }, [activityOpen, active, surface]);
 
   function recordActivity(runId: string, title: string, tone: ActivityEvent['tone'], detail?: string, at = new Date().toISOString()) {
     const event = { id: nextActivityId.current++, runId, title, tone, detail, at };
     activityEventsRef.current = [...activityEventsRef.current, event];
     setActivityEvents((current) => [...current, event]);
+  }
+
+  function showStoppedNotice(run: AgentRunRecord) {
+    if (stoppedRuns.current.has(run.runId)) return;
+    stoppedRuns.current.add(run.runId);
+    requestedStops.current.delete(run.runId);
+    setMessages((current) => [...current, {
+      id: nextNoticeId.current--,
+      role: 'notice',
+      text: stoppedNotice(run),
+      at: run.updatedAt,
+      run: {
+        runId: run.runId,
+        status: run.status,
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+        events: activityEventsRef.current.filter((event) => event.runId === run.runId),
+        tools: run.output?.tools ?? [],
+      },
+    }]);
   }
 
   async function refreshApprovals() {
@@ -396,13 +460,16 @@ export function ChatPanel({
             : run.failure?.message ?? `任务结束：${runStatusLabel(run.status)}`;
           const replyRun = run.status === 'succeeded' ? cacheReplyRun(surface, replyText, run,
             activityEventsRef.current.filter((event) => event.runId === run.runId)) : undefined;
-          setMessages((current) => [...current, {
+          const stoppedByUser = run.status === 'cancelled'
+            && (requestedStops.current.has(run.runId) || stoppedRuns.current.has(run.runId));
+          if (stoppedByUser) showStoppedNotice(run);
+          else setMessages((current) => [...current, {
             id: nextId.current++, role: run.status === 'succeeded' ? 'assistant' : 'error',
             text: replyText,
             tools: run.output?.tools.map((tool) => ({ name: tool.name, status: tool.status })),
             run: replyRun,
           }]);
-          if (run.status !== 'succeeded') setInput((current) => current || text);
+          if (run.status !== 'succeeded' && !stoppedByUser) setInput((current) => current || text);
           setRunRecovery(undefined);
           setActiveRunId(undefined);
           setActiveRunStatus(undefined);
@@ -483,6 +550,8 @@ export function ChatPanel({
     setAttachments([]);
     setBusy(true);
     setLastRun(undefined);
+    setActiveRunId(undefined);
+    setSubmittedTask(undefined);
     setActiveRunStatus(undefined);
     try {
       if (!desktop) {
@@ -517,6 +586,7 @@ export function ChatPanel({
           pendingAssistantMessage.current = undefined;
           try { window.localStorage.removeItem('yuanpu:assistant-pending-message'); } catch { /* optional retry cache */ }
         }
+        setSubmittedTask({ runId: receipt.runId, text: draft || '请阅读附件' });
         setActiveRunId(receipt.runId);
         setActiveRunStatus(receipt.status);
         recordActivity(receipt.runId, '已提交任务', 'done');
@@ -560,24 +630,53 @@ export function ChatPanel({
     } catch { setCopiedUserMessageId(undefined); }
   }
 
-  async function cancelRun(runId: string) {
-    if (!desktop || cancelBusy || !window.confirm('取消这个正在执行的任务？已经发生的外部操作无法撤销。')) return;
+  async function cancelRun(runId: string, needsConfirmation = true) {
+    if (!desktop || cancelInFlight.current || (needsConfirmation && !window.confirm('取消这个正在执行的任务？已经发生的外部操作无法撤销。'))) return;
+    cancelInFlight.current = true;
+    requestedStops.current.add(runId);
     setCancelBusy(true);
     try {
       const receipt = await desktop.cancelAgentRun(runId);
       if (receipt.result === 'not_found') throw new Error('任务不可用或无权取消。');
+      if (receipt.result === 'already_terminal') requestedStops.current.delete(runId);
       const run = await desktop.getAgentRun(runId);
       if (['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(run.status)) {
         settledRuns.current.set(runId, run);
       }
       if (navigationTarget?.runId === runId) setLocatedRun(run);
+      if (run.status === 'cancelled' && requestedStops.current.has(runId)) showStoppedNotice(run);
       if (runRecovery?.runId === runId) await resumeRun();
     } catch (error) {
+      requestedStops.current.delete(runId);
       setMessages((current) => [...current, { id: nextId.current++, role: 'error', text: `取消失败：${formatError(error)}` }]);
     } finally {
+      cancelInFlight.current = false;
       setCancelBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!active || !desktop) return;
+    const shortcut = effectiveHotkeyBinding(hotkeyQuery.data, 'conversation.interrupt');
+    if (!shortcut) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.repeat || event.isComposing || event.defaultPrevented || bindingFromKeyEvent(event) !== shortcut
+        || document.querySelector('dialog:modal')
+        || (event.target instanceof Element && event.target.closest('[data-hotkey-recording]'))) return;
+      const locatedIsRunning = locatedRun && typeof locatedRun !== 'string'
+        && ['queued', 'running', 'waiting_approval'].includes(locatedRun.status);
+      const runId = navigationTarget?.runId
+        ? (locatedIsRunning ? locatedRun.runId : undefined)
+        : activeRunId && (!activeRunStatus || ['queued', 'running', 'waiting_approval'].includes(activeRunStatus))
+          ? activeRunId : runRecovery?.runId;
+      if (!runId || cancelInFlight.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void cancelRun(runId, false);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [active, desktop, hotkeyQuery.data, activeRunId, activeRunStatus, locatedRun, navigationTarget?.runId, runRecovery?.runId]);
 
   async function decideApproval(
     approval: CapabilityApprovalSummary,
@@ -643,21 +742,18 @@ export function ChatPanel({
 
   function resizeRightPanel(clientX: number, panel: HTMLElement) {
     const bounds = panel.getBoundingClientRect();
-    const max = maxRightPanelWidth(bounds.width, listOpen);
-    const requested = bounds.right - clientX;
-    if (requested >= max) {
-      setRightPanelWidth(max);
-      setRightPanelMaximized(true);
-      return;
-    }
-    setRightPanelMaximized(false);
-    setRightPanelWidth(Math.round(Math.max(260, Math.min(max, requested))));
+    const result = resizePanel(bounds.right - clientX, maxRightPanelWidth(bounds.width, listOpen),
+      rightPanelGesture.current.startedAtLimit, rightPanelGesture.current.stopped);
+    rightPanelGesture.current.stopped = result.stopped;
+    if (surface === 'assistant') assistantPanelRatio.current = result.width / rightPanelSpace(bounds.width, listOpen);
+    setRightPanelWidth(result.width);
+    setRightPanelMaximized(result.maximized);
   }
 
   return (
-    <section ref={chatPanel} className={`chat-panel ${surface}-mode ${emptyConversation ? 'is-empty' : ''} ${listOpen ? 'list-open' : 'list-closed'} ${activityOpen ? 'activity-open' : 'activity-closed'} ${rightPanelMaximized ? 'right-panel-maximized' : ''} ${rightPanelResizing ? 'right-panel-resizing' : ''} ${active ? '' : 'view-hidden'}`}
+    <section ref={chatPanel} className={`chat-panel ${surface}-mode ${emptyConversation && surface === 'work' ? 'is-empty' : ''} ${listOpen ? 'list-open' : 'list-closed'} ${activityOpen ? 'activity-open' : 'activity-closed'} ${rightPanelMaximized ? 'right-panel-maximized' : ''} ${rightPanelResizing ? 'right-panel-resizing' : ''} ${active ? '' : 'view-hidden'}`}
       style={{ '--yp-right-panel-width': `${rightPanelWidth}px` } as CSSProperties} aria-hidden={!active}>
-      <header className="chat-header">
+      <PageToolbar active={active}><header className="chat-header">
           <div className="chat-heading">
             <button type="button" className="chat-list-toggle" title={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`}
               aria-label={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`} aria-expanded={listOpen}
@@ -691,9 +787,9 @@ export function ChatPanel({
             {activityOpen && <button type="button" className="panel-maximize-toggle" title={rightPanelMaximized ? '还原右侧面板' : '铺满右侧面板'}
               aria-label={rightPanelMaximized ? '还原右侧面板' : '铺满右侧面板'} aria-pressed={rightPanelMaximized}
               onClick={() => setRightPanelMaximized((value) => !value)}><AppIcon name={rightPanelMaximized ? 'collapse' : 'expand'} /></button>}
-            <button ref={activityToggle} type="button" className="panel-toggle" title={`${activityOpen ? '收起' : '打开'}运行详情`}
-              aria-label={`${activityOpen ? '收起' : '打开'}运行详情`} aria-expanded={activityOpen}
-              onClick={() => { restoreActivityFocus.current = true; if (activityOpen) setRightPanelMaximized(false); setActivityOpen((value) => !value); }}><AppIcon name="panel" /><span className="panel-toggle-label">运行详情</span></button>
+            <button ref={activityToggle} type="button" className="panel-toggle" title={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '运行详情'}`}
+              aria-label={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '运行详情'}`} aria-expanded={activityOpen}
+              onClick={() => { restoreActivityFocus.current = true; if (activityOpen) setRightPanelMaximized(false); setActivityOpen((value) => !value); }}><AppIcon name="panel" /><span className="panel-toggle-label">{surface === 'assistant' ? '助理面板' : '运行详情'}</span></button>
           </div>
           {surface === 'assistant' && <div className="assistant-channel-state" role="status">
             {archiveOpen ? '旧助理会话归档 · 只读' : assistantLinkQuery.data?.linked
@@ -703,7 +799,7 @@ export function ChatPanel({
               {archiveOpen ? '返回助理对话' : '查看旧助理会话'}
             </button>
           </div>}
-      </header>
+      </header></PageToolbar>
       {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表' : '会话列表预览'}>
         <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong>
           {surface === 'work' && <button type="button" className="work-new-button" disabled={busy || Boolean(runRecovery) || Boolean(approvalBusy) || !desktop}
@@ -740,7 +836,7 @@ export function ChatPanel({
                 <strong>元朴思联</strong><span>MindLink</span>
               </div>
               <div className="empty-chat-heading">
-                <div className="empty-chat-mark" aria-hidden="true"><AvatarMark /></div>
+                <div className="empty-chat-mark" aria-hidden="true">{surface === 'assistant' ? <AppIcon name="assistant" /> : <AvatarMark />}</div>
                 <h1>{surface === 'work' ? '开始一项工作' : '你的桌面助理'}</h1>
               </div>
               <p>{messages[0]?.text}</p>
@@ -768,8 +864,10 @@ export function ChatPanel({
                 </dl>
               </article>
             )}
-            {(archiveOpen ? (archiveQuery.data ?? []).map((item, index): ChatMessage => ({ id: index + 1, role: item.role, text: item.text, at: item.at })) : emptyConversation ? [] : messages).map((message) => (
-              <article key={message.id} className={`message ${message.role}`}>
+            {(archiveOpen ? (archiveQuery.data ?? []).map((item, index): ChatMessage => ({ id: index + 1, role: item.role, text: item.text, at: item.at, run: item.run })) : emptyConversation ? [] : messages).map((message) => message.role === 'notice'
+              ? <div key={message.id} className="conversation-stop-run" role="status"><ReplyRunDetails run={message.run} summary={message.text} /></div>
+              : <article key={message.id} className={`message ${message.role}`}>
+                {surface === 'assistant' && message.role === 'assistant' && <span className="assistant-message-avatar" role="img" aria-label="助理标识"><img src={new URL('../assets/assistant/portrait-resting.png', import.meta.url).href} alt="" /></span>}
                 <div className="message-label">
                   {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
                 </div>
@@ -790,7 +888,7 @@ export function ChatPanel({
                     onClick={() => void copyUserMessage(message)}><AppIcon name={copiedUserMessageId === message.id ? 'check' : 'copy'} /></button>
                 </div>}
               </article>
-            ))}
+            )}
             {archiveOpen && archiveQuery.isLoading && <p className="archive-notice">正在读取原桌面会话…</p>}
             {archiveOpen && archiveQuery.error && <p className="archive-notice" role="alert">原桌面会话读取失败：{formatError(archiveQuery.error)}</p>}
             {archiveOpen && archiveQuery.data?.length === 0 && <p className="archive-notice">原桌面会话还没有消息。</p>}
@@ -823,6 +921,7 @@ export function ChatPanel({
             ))}
             {!archiveOpen && !workArchived && busy && (
               <article className="message assistant pending">
+                {surface === 'assistant' && <span className="assistant-message-avatar" aria-hidden="true"><img src={new URL('../assets/assistant/portrait-resting.png', import.meta.url).href} alt="" /></span>}
                 <div className="message-label">YuanpuAgent</div>
                 <div className="thinking"><span /><span /><span /> {activeRunStatus === 'waiting_approval' ? '等待授权' : '正在处理'}{activeRunId && <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(activeRunId)}>取消任务</button>}</div>
               </article>
@@ -870,8 +969,8 @@ export function ChatPanel({
           {attachmentError && <p className="composer-attachment-error" role="alert">{attachmentError}</p>}
         </div>
       </div>
-      {activityOpen && (
-        <dialog ref={activityDialog} className="activity-panel" aria-label="当前会话动态" onCancel={() => { setActivityOpen(false); setRightPanelMaximized(false); }}>
+      {(activityOpen || surface === 'assistant') && (
+        <dialog ref={activityDialog} className={`activity-panel ${surface === 'assistant' ? 'assistant-home-panel' : ''}`} aria-label={surface === 'assistant' ? '助理面板' : '当前会话动态'} onCancel={() => { setActivityOpen(false); setRightPanelMaximized(false); }}>
           <div className="activity-resize-handle" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" aria-valuemin={260}
             aria-valuemax={maxRightPanelWidth(chatPanel.current?.clientWidth ?? window.innerWidth - 50, listOpen)} aria-valuenow={rightPanelWidth} tabIndex={0}
             onPointerDown={(event) => {
@@ -880,6 +979,10 @@ export function ChatPanel({
               if (!panel) return;
               event.preventDefault();
               rightPanelDragCleanup.current?.();
+              rightPanelGesture.current = {
+                startedAtLimit: rightPanelWidth >= maxRightPanelWidth(panel.getBoundingClientRect().width, listOpen) - 1,
+                stopped: false,
+              };
               const pointerId = event.pointerId;
               const move = (moveEvent: PointerEvent) => {
                 if (moveEvent.pointerId === pointerId) resizeRightPanel(moveEvent.clientX, panel);
@@ -906,8 +1009,19 @@ export function ChatPanel({
               const panel = event.currentTarget.closest<HTMLElement>('.chat-panel');
               if (!panel) return;
               const bounds = panel.getBoundingClientRect();
-              resizeRightPanel(bounds.right - rightPanelWidth + (event.key === 'ArrowLeft' ? -16 : 16), panel);
+              rightPanelGesture.current = { startedAtLimit: rightPanelWidth >= maxRightPanelWidth(bounds.width, listOpen) - 1, stopped: false };
+              resizeRightPanel(bounds.right - rightPanelWidth + (event.key === 'ArrowLeft' ? -24 : 24), panel);
             }} />
+          {surface === 'assistant' ? <AssistantHome active={active && activityOpen} link={assistantLinkQuery.data}
+            linkLoading={assistantLinkQuery.isLoading} linkError={assistantLinkQuery.error} retryLink={() => void assistantLinkQuery.refetch()}
+            activity={{
+              runId: visibleRun?.runId ?? (navigationTarget?.runId ? undefined : activeRunId),
+              status: currentStatus,
+              task: submittedTask?.runId === (visibleRun?.runId ?? activeRunId) && !navigationTarget?.runId ? submittedTask?.text : undefined,
+              entryPoint: visibleRun?.owner.entryPoint,
+              disconnected: Boolean(runRecovery) || locatedRun === 'error',
+            }}
+            run={visibleRun} archiveOpen={archiveOpen} onToggleArchive={() => setArchiveOpen((value) => !value)} /> : <>
           <div className="activity-panel-heading"><strong>运行详情</strong><span>{surface === 'work' ? '当前工作' : '助理会话'}</span></div>
           <div className="activity-tabs" role="group" aria-label="会话信息">
             <button type="button" aria-pressed={activityTab === 'activity'} onClick={() => setActivityTab('activity')}>动态</button>
@@ -950,6 +1064,7 @@ export function ChatPanel({
               </dl> : <div className="activity-empty"><strong>还没有运行记录</strong><span>任务提交后可在这里查看状态与时间。</span></div>}
             </div>
           )}
+          </>}
         </dialog>
       )}
     </section>

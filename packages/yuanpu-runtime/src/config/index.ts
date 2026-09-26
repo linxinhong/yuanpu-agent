@@ -9,6 +9,7 @@ export function greeting(name = 'world'): string {
 }
 
 export { deleteModelSettings, getModelCatalog, getModelSettings, saveModelSettings } from './model-settings.js';
+export { getHotkeySettings, saveHotkeySetting } from './hotkeys.js';
 
 export interface YuanpuConfig {
   schemaVersion: 1;
@@ -21,10 +22,12 @@ export interface YuanpuConfig {
   baseUrl?: string;
   api?: 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
   notifications?: { enabled: boolean };
+  hotkeys?: Record<string, string | null>;
 }
 
 export interface YuanpuHome {
   root: string;
+  workspacePath: string;
   appPath: string;
   agentPath: string;
   packagesPath: string;
@@ -63,6 +66,10 @@ function validateConfig(value: unknown, configPath: string): YuanpuConfig {
       !config.notifications
       || typeof config.notifications !== 'object'
       || typeof config.notifications.enabled !== 'boolean'
+    ))
+    || (config.hotkeys !== undefined && (
+      !config.hotkeys || typeof config.hotkeys !== 'object' || Array.isArray(config.hotkeys)
+      || Object.values(config.hotkeys).some((binding) => binding !== null && typeof binding !== 'string')
     ))
   ) {
     throw new Error(`Invalid Yuanpu config: ${configPath}`);
@@ -220,6 +227,7 @@ export async function ensureYuanpuHome(root = join(homedir(), '.yuanpu')): Promi
   const agentPath = join(resolvedRoot, 'agent');
   const packagesPath = join(resolvedRoot, 'packages');
   const workflowsPath = join(resolvedRoot, 'workflows');
+  const workspacePath = join(resolvedRoot, 'workspace');
   const configPath = join(appPath, 'config.json');
   const skillsPath = join(agentPath, 'skills');
   const memoryPath = join(agentPath, 'memory');
@@ -250,8 +258,12 @@ export async function ensureYuanpuHome(root = join(homedir(), '.yuanpu')): Promi
     mkdir(packagesPath, { recursive: true }),
     mkdir(sessionsPath, { recursive: true }),
     mkdir(workflowsPath, { recursive: true }),
+    mkdir(workspacePath, { recursive: true, mode: 0o700 }),
   ]);
-  if (process.platform !== 'win32') await chmod(workflowsPath, 0o700);
+  if (process.platform !== 'win32') {
+    await chmod(workflowsPath, 0o700);
+    await chmod(workspacePath, 0o700);
+  }
   await rewriteMigratedPackagePaths(agentPath, packagesPath, legacyPackagesPath);
 
   let config: YuanpuConfig;
@@ -259,7 +271,7 @@ export async function ensureYuanpuHome(root = join(homedir(), '.yuanpu')): Promi
     config = validateConfig(JSON.parse(await readFile(configPath, 'utf8')), configPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    config = { ...DEFAULT_CONFIG, workingDirectory: homedir() };
+    config = { ...DEFAULT_CONFIG, workingDirectory: workspacePath };
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   }
   config = await migrateLegacyModelConfig(configPath, appPath, config);
@@ -279,6 +291,7 @@ export async function ensureYuanpuHome(root = join(homedir(), '.yuanpu')): Promi
 
   return {
     root: resolvedRoot,
+    workspacePath,
     appPath,
     agentPath,
     packagesPath,

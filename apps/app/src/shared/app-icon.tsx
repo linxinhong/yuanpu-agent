@@ -6,7 +6,7 @@ type AppView = UiDestination;
 export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' }) {
   const paths = {
     work: <path d="M20 11.5c0 4.2-3.8 7.5-8.5 7.5-1.4 0-2.7-.3-3.8-.8L3 20l1.4-4.1A7.2 7.2 0 0 1 3 11.5C3 7.4 6.8 4 11.5 4S20 7.4 20 11.5Z" />,
-    assistant: <><circle cx="12" cy="7" r="3" /><path d="M5 20v-2a7 7 0 0 1 14 0v2M8 14h8" /></>,
+    assistant: <><path d="m9 5 2.2 6.3L17.5 14l-6.3 2.7L9 23l-2.2-6.3L.5 14l6.3-2.7Z" transform="translate(2 -2) scale(.9)" /><path d="M18 2v6m-3-3h6" /></>,
     skills: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><path d="M17 13.5v7m-3.5-3.5h7" /></>,
     knowledge: <><path d="M12 5.5c-2.5-1.5-5.5-1.5-8 0v14c2.5-1.5 5.5-1.5 8 0m0-14c2.5-1.5 5.5-1.5 8 0v14c-2.5-1.5-5.5-1.5-8 0m0-14v14" /></>,
     settings: <><path d="M10 2.5h4l.4 2.2 1.7.7L18 4.2 20.8 7l-1.2 1.9.7 1.7 2.2.4v4l-2.2.4-.7 1.7 1.2 1.9-2.8 2.8-1.9-1.2-1.7.7-.4 2.2h-4l-.4-2.2-1.7-.7L6 21.8 3.2 19l1.2-1.9-.7-1.7-2.2-.4v-4l2.2-.4.7-1.7L3.2 7 6 4.2l1.9 1.2 1.7-.7z" /><circle cx="12" cy="13" r="3" /></>,

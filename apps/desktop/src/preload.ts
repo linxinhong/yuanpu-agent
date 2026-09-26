@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 const bridge: DesktopBridge = {
   runtimeInfo: () => ipcRenderer.invoke('runtime:info'),
+  getHotkeySettings: () => ipcRenderer.invoke('settings:hotkeys:get'),
+  saveHotkeySetting: (input) => ipcRenderer.invoke('settings:hotkeys:save', input),
   getModelSettings: () => ipcRenderer.invoke('settings:models:get'),
   getModelCatalog: (provider) => ipcRenderer.invoke('settings:models:catalog', provider),
   saveModelSettings: (input) => ipcRenderer.invoke('settings:models:save', input),
@@ -14,7 +16,7 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke('runtime:chat:submit', message, surface, conversationId, clientMessageId),
   getDesktopTranscript: (surface, conversationId) => ipcRenderer.invoke('desktop:transcript', surface, conversationId),
   listWorkConversations: () => ipcRenderer.invoke('work:conversations:list'),
-  createWorkConversation: () => ipcRenderer.invoke('work:conversations:create'),
+  createWorkConversation: (workingDirectory) => ipcRenderer.invoke('work:conversations:create', workingDirectory),
   selectWorkConversation: (conversationId) => ipcRenderer.invoke('work:conversations:select', conversationId),
   getAssistantLink: () => ipcRenderer.invoke('assistant:link:get'),
   bindAssistantContact: (contactId) => ipcRenderer.invoke('assistant:link:bind', contactId),

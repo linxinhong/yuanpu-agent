@@ -1,0 +1,46 @@
+/* The title bar owns the full first row; navigation and pages start below it. */
+:root .app-shell { grid-template-rows: 50px minmax(0, 1fr); }
+.shell-topbar {
+  position: relative;
+  z-index: 15;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  background: var(--yp-surface-subtle);
+  border-bottom: 1px solid var(--yp-border-subtle);
+  -webkit-app-region: drag;
+}
+.shell-toolbar-host { height: 100%; min-width: 0; }
+.shell-topbar .window-controls-space {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
+  width: 100px;
+  height: 50px;
+  pointer-events: none;
+}
+:root .app-shell .shell-topbar .chat-header {
+  position: relative;
+  top: auto;
+  right: auto;
+  left: auto;
+  height: 50px;
+  min-height: 50px;
+  padding: 0 18px 0 112px;
+}
+:root .app-shell > .sidebar { grid-column: 1; grid-row: 2; }
+:root .app-shell > .page-host { grid-row: 2; }
+:root .app-shell > .brand-rail { grid-row: 2; }
+:root .app-shell .chat-panel {
+  --yp-chat-content-row: 1;
+  grid-template-rows: minmax(0, 1fr);
+}
+:root[data-yuanpu-theme='mindlink'] .app-shell > .page-host { padding-top: 0; }
+:root[data-yuanpu-theme='mindlink'] .shell-topbar { background: var(--yp-app-backdrop); }
+@media (max-width: 780px) {
+  :root .app-shell { grid-template-rows: 50px minmax(0, 1fr) 58px; }
+  :root .app-shell > .sidebar { grid-row: 3; }
+  :root .app-shell > .page-host { grid-column: 1; grid-row: 2; }
+  :root .app-shell .chat-panel.list-open .conversation-list-preview { top: 0; }
+}
