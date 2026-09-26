@@ -1728,7 +1728,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-048
     title: "实现助理主动回顾与建议投递"
-    status: ready
+    status: in_progress
     goal: "助理根据工作评估与用户目标主动跟进，在合适的入口提供有依据的建议。"
     scope:
       in: ["skills/reflect-and-suggest/SKILL.md 消费助理内部每日/每周检查，形成独立回顾会话、漏触发合并和预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
@@ -1754,15 +1754,14 @@ tasks:
     investigation_hints: ["助理 automation/review/work 队列及 suggestions，遵循 docs/assistant-skills-and-automation.md；宿主 delivery 既有机制，不复制配对或平台凭据", "现有 scheduler.test.mjs、scheduled-im-delivery.test.mjs 支持重启/时间 fixture；先 assistant 与投递 focused 再 pnpm check", "不同会话受众不能共享提示词缓存，建议删除来源后的失效也需测试"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-assistant-suggestions-048-10414-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T21:51:16.718Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-048-assistant-suggestions"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-049
     title: "接通助理记忆工作评估与任务界面"
     status: pending
