@@ -38,10 +38,12 @@ test('Runtime exits after its Electron parent is force-killed', async (context) 
   });
   assert.equal(started.ready.event, 'ready');
   assert.equal(typeof started.runtimePid, 'number');
+  assert.equal(typeof started.ready.assistantWorkerPid, 'number');
 
   parent.kill('SIGKILL');
   await new Promise((resolveExit) => parent.once('exit', resolveExit));
   await waitForExit(started.runtimePid);
+  await waitForExit(started.ready.assistantWorkerPid);
 });
 
 test('Runtime cannot become orphaned when its parent exits before readiness', async (context) => {

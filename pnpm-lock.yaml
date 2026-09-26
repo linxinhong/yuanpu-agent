@@ -96,6 +96,15 @@ importers:
 
   apps/runtime:
     dependencies:
+      '@earendil-works/pi-ai':
+        specifier: 0.86.1
+        version: link:../../packages/ai
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.86.1
+        version: link:../../packages/coding-agent
+      '@yuanpu-agent/assistant':
+        specifier: workspace:*
+        version: link:../../packages/yuanpu-assistant
       '@yuanpu-agent/protocol':
         specifier: workspace:*
         version: link:../../packages/yuanpu-protocol

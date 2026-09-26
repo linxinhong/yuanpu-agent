@@ -17,16 +17,19 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "node scripts/generate-assistant-skills.mjs && tsdown",
     "build:native": "pnpm run build && node scripts/native/build.mjs",
     "package:native": "node scripts/native/package.mjs",
     "release:manifest": "node scripts/native/produce-manifest.mjs",
     "smoke:native": "node scripts/native/smoke.mjs",
     "start": "node dist/index.cjs",
     "test": "node --test test/*.test.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "node scripts/generate-assistant-skills.mjs && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@yuanpu-agent/assistant": "workspace:*",
     "@yuanpu-agent/runtime-kit": "workspace:*",
     "@yuanpu-agent/protocol": "workspace:*"
   },

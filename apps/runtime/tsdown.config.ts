@@ -25,10 +25,7 @@ export default defineConfig({
     PI_BUNDLED_NODE: 'true',
   },
   deps: {
-    alwaysBundle: [
-      '@yuanpu-agent/runtime-kit',
-      '@yuanpu-agent/protocol',
-    ],
+    alwaysBundle: [/^@earendil-works\//, /^@yuanpu-agent\//, 'yaml'],
     onlyBundle: false,
   },
 });

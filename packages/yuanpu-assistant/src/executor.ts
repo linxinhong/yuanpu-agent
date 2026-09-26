@@ -16,6 +16,7 @@ import {
   initializeAssistantHome,
   readAssistantHomeFile,
   type AssistantHomePaths,
+  type BundledAssistantSkillFile,
 } from './home.js';
 import { loadAssistantSkills } from './skills.js';
 
@@ -33,14 +34,14 @@ export interface AssistantTurnResult {
 export interface AssistantSession {
   readonly sessionId: string;
   readonly skillNames: readonly string[];
-  prompt(message: string): Promise<AssistantTurnResult>;
-  invokeSkill(name: string, instructions?: string): Promise<AssistantTurnResult>;
+  prompt(message: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
+  invokeSkill(name: string, instructions?: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
   close(): Promise<void>;
 }
 
 export interface AssistantExecutor {
   readonly paths: AssistantHomePaths;
-  openSession(sessionId?: string): Promise<AssistantSession>;
+  openSession(sessionId?: string, options?: { createIfMissing?: boolean }): Promise<AssistantSession>;
   close(): Promise<void>;
 }
 
@@ -89,9 +90,12 @@ export async function createAssistantExecutor(options: {
   assistantHome: string;
   host: AssistantHost;
   bundledSkillsRoot?: string;
+  bundledSkillFiles?: readonly BundledAssistantSkillFile[];
 }): Promise<AssistantExecutor> {
-  const paths = await initializeAssistantHome(options.assistantHome,
-    options.bundledSkillsRoot ? { bundledSkillsRoot: options.bundledSkillsRoot } : {});
+  const paths = await initializeAssistantHome(options.assistantHome, {
+    ...(options.bundledSkillsRoot ? { bundledSkillsRoot: options.bundledSkillsRoot } : {}),
+    ...(options.bundledSkillFiles ? { bundledSkillFiles: options.bundledSkillFiles } : {}),
+  });
   const repo = new JsonlSessionRepo({
     fileSystem: new NodeExecutionEnv({ cwd: paths.root }),
     sessionsRoot: 'sessions/pi',
@@ -99,7 +103,7 @@ export async function createAssistantExecutor(options: {
   const openSessions = new Map<string, Promise<AssistantSession>>();
   let closed = false;
 
-  const openSession = async (selectedId?: string): Promise<AssistantSession> => {
+  const openSession = async (selectedId?: string, openOptions: { createIfMissing?: boolean } = {}): Promise<AssistantSession> => {
     if (closed) throw new Error('Assistant executor is closed.');
     const sessionId = selectedId ?? randomUUID();
     const existing = openSessions.get(sessionId);
@@ -110,7 +114,9 @@ export async function createAssistantExecutor(options: {
       const metadata = selectedId
         ? (await repo.list({ cwd: paths.root }, BACKGROUND_CONTEXT)).find((item) => item.id === selectedId)
         : undefined;
-      if (selectedId && !metadata) throw new Error(`Unknown assistant Session: ${selectedId}`);
+      if (selectedId && !metadata && !openOptions.createIfMissing) {
+        throw new Error(`Unknown assistant Session: ${selectedId}`);
+      }
       const session = metadata
         ? await repo.open(metadata, BACKGROUND_CONTEXT)
         : await repo.create({ id: sessionId, cwd: paths.root }, BACKGROUND_CONTEXT);
@@ -141,24 +147,30 @@ export async function createAssistantExecutor(options: {
         const lane = await harness.lane('main', BACKGROUND_CONTEXT);
         let tail: Promise<unknown> = Promise.resolve();
         let sessionClosed = false;
-        const serialize = (operation: () => Promise<AssistantTurnResult>): Promise<AssistantTurnResult> => {
+        const serialize = (operation: () => Promise<AssistantTurnResult>, signal?: AbortSignal): Promise<AssistantTurnResult> => {
           if (sessionClosed) return Promise.reject(new Error('Assistant Session is closed.'));
-          const next = tail.then(operation);
+          const next = tail.then(async () => {
+            if (signal?.aborted) throw new Error('Assistant turn was cancelled before execution.');
+            const onAbort = () => { void lane.abort(BACKGROUND_CONTEXT); };
+            signal?.addEventListener('abort', onAbort, { once: true });
+            try { return await operation(); }
+            finally { signal?.removeEventListener('abort', onAbort); }
+          });
           tail = next.catch(() => undefined);
           return next;
         };
         const assistantSession: AssistantSession = {
           sessionId,
           skillNames: Object.freeze(skills.map((skill) => skill.name)),
-          prompt(message) {
+          prompt(message, signal) {
             if (!message.trim()) return Promise.reject(new TypeError('Assistant message must not be empty.'));
-            return serialize(() => completeTurn(lane, sessionId, lane.prompt(message, undefined, BACKGROUND_CONTEXT)));
+            return serialize(() => completeTurn(lane, sessionId, lane.prompt(message, undefined, BACKGROUND_CONTEXT)), signal);
           },
-          invokeSkill(name, instructions) {
+          invokeSkill(name, instructions, signal) {
             if (!skills.some((skill) => skill.name === name)) {
               return Promise.reject(new Error(`Unknown assistant skill: ${name}`));
             }
-            return serialize(() => completeTurn(lane, sessionId, lane.skill(name, instructions, BACKGROUND_CONTEXT)));
+            return serialize(() => completeTurn(lane, sessionId, lane.skill(name, instructions, BACKGROUND_CONTEXT)), signal);
           },
           async close() {
             if (sessionClosed) return;

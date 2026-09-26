@@ -59,6 +59,9 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { RuntimeAgentExecutor } from './agent-runtime.js';
+import { AssistantWorkerManager } from './assistant-worker-manager.js';
+export { AssistantWorkerManager } from './assistant-worker-manager.js';
+import { runAssistantWorker } from './assistant-worker.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
@@ -533,6 +536,16 @@ async function serve(): Promise<void> {
       provider: home.config.provider,
       model: home.config.model,
     },
+  });
+  const assistantWorker = new AssistantWorkerManager({
+    home: join(home.root, 'assistant'),
+    model: {
+      appPath: home.appPath,
+      agentPath: home.agentPath,
+      provider: home.config.provider,
+      model: home.config.model,
+    },
+    onError: (error) => console.warn(`[assistant-worker] ${error.message}`),
   });
   let onAssistantRunChanged: (run: AgentRunRecord) => void = () => undefined;
   const agentService = await PersistentAgentService.open({
@@ -1725,6 +1738,7 @@ async function serve(): Promise<void> {
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
     cleanupPromise ??= cleanupRuntimeResources({
+      closeAssistantWorker: () => assistantWorker.stop(),
       closeChannels: () => closeWecomChannels(wecomChannels),
       closeScheduler: () => scheduler.close(),
       closeNotificationRouter: () => notificationRouter.close(),
@@ -1794,6 +1808,7 @@ async function serve(): Promise<void> {
 
   try {
     parentMonitor = installParentProcessMonitor(parentPid, shutdown);
+    await assistantWorker.start();
     try {
       await reloadWecomChannels();
       void processAssistantMirrors().catch(() => undefined);
@@ -1825,6 +1840,7 @@ async function serve(): Promise<void> {
           protocolVersion: PROTOCOL_VERSION,
           piVersion: PI_UPSTREAM_VERSION,
           mcpTools: piCapabilityTools.map((tool) => tool.name),
+          assistantWorkerPid: assistantWorker.workerPid,
           configRoot: home.root,
           notificationsEnabled: home.config.notifications?.enabled ?? true,
         }),
@@ -1844,6 +1860,11 @@ if (args.includes('--version') || args.includes('-v')) {
 } else if (args.includes('--serve')) {
   void serve().catch((error) => {
     console.error(error);
+    process.exitCode = 1;
+  });
+} else if (args.includes('--assistant-worker')) {
+  void runAssistantWorker().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });
 } else if (args.includes('--capability-smoke')) {

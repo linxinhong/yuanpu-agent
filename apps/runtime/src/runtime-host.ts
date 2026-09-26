@@ -58,6 +58,7 @@ export function getDesktopPrivateImRunSummary(
 }
 
 export interface RuntimeCleanupResources {
+  closeAssistantWorker?(): Promise<void>;
   closeChannels?(): Promise<void>;
   closeScheduler(): Promise<void>;
   closeNotificationRouter(): void;
@@ -84,6 +85,9 @@ export async function cleanupRuntimeResources(resources: RuntimeCleanupResources
     .map((result) => result.reason));
 
   const closeResults = await Promise.allSettled([
+    ...(resources.closeAssistantWorker
+      ? [Promise.resolve().then(() => resources.closeAssistantWorker!())]
+      : []),
     Promise.resolve().then(() => resources.closeNotificationRouter()),
     Promise.resolve().then(() => resources.closeAgentService()),
     ...(resources.closePythonSource

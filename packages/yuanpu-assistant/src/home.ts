@@ -14,6 +14,11 @@ export interface AssistantHomePaths {
   snapshots: string;
 }
 
+export interface BundledAssistantSkillFile {
+  path: string;
+  bytes: Uint8Array;
+}
+
 const defaultSoul = '# Assistant identity\n\nYou are the user’s personal assistant. Work from evidence, respect source scope, and distinguish facts from uncertainty. Do not invent facts about the user.\n';
 const defaultUser = '# About the user\n\n';
 const defaultMemory = '# Current memory\n\n';
@@ -96,9 +101,35 @@ export async function seedBundledAssistantSkills(
   }
 }
 
+export async function seedBundledAssistantSkillFiles(
+  paths: AssistantHomePaths,
+  files: readonly BundledAssistantSkillFile[],
+): Promise<void> {
+  await assertSafeDirectory(paths.skills);
+  for (const file of files) {
+    const segments = file.path.split('/');
+    if (segments.length < 2 || segments.some((segment) => !segment || segment === '.' || segment === '..'
+      || segment.startsWith('.') || segment.includes('\\'))) {
+      throw new Error(`Invalid bundled assistant skill path: ${file.path}`);
+    }
+    const target = join(paths.skills, ...segments);
+    const child = relative(paths.skills, target);
+    if (child.startsWith(`..${sep}`) || child === '..' || isAbsolute(child)) {
+      throw new Error(`Bundled assistant skill escapes Home: ${file.path}`);
+    }
+    const directories = segments.slice(0, -1);
+    let current = paths.skills;
+    for (const directory of directories) {
+      current = join(current, directory);
+      await assertSafeDirectory(current);
+    }
+    await ensureFile(target, file.bytes);
+  }
+}
+
 export async function initializeAssistantHome(
   assistantHome: string,
-  options: { bundledSkillsRoot?: string } = {},
+  options: { bundledSkillsRoot?: string; bundledSkillFiles?: readonly BundledAssistantSkillFile[] } = {},
 ): Promise<AssistantHomePaths> {
   const paths = resolveAssistantHome(assistantHome);
   await assertSafeDirectory(paths.root);
@@ -110,7 +141,8 @@ export async function initializeAssistantHome(
   await ensureFile(paths.soul, defaultSoul);
   await ensureFile(paths.user, defaultUser);
   await ensureFile(paths.memory, defaultMemory);
-  await seedBundledAssistantSkills(paths, options.bundledSkillsRoot);
+  if (options.bundledSkillFiles) await seedBundledAssistantSkillFiles(paths, options.bundledSkillFiles);
+  else await seedBundledAssistantSkills(paths, options.bundledSkillsRoot);
   return paths;
 }
 
