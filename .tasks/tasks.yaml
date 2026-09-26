@@ -1437,7 +1437,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-042
     title: "独立助理与双入口阶段验证"
-    status: ready
+    status: in_progress
     goal: "在真实服务与持久层证明隔离、迁移、双入口和进程退出成立，为记忆系统提供可信来源。"
     scope:
       in: ["独立 Worker 与双入口的 API/IPC/存储业务场景", "真实企业微信一位已授权用户私聊；本地服务调用", "迁移、重启、拒绝身份和 SEA 退出验证"]
@@ -1461,15 +1461,14 @@ tasks:
     investigation_hints: ["复用 TASK-019/TASK-021 历史 probe 与 apps/runtime/test/runtime-parent-exit.test.mjs，仅重跑本轮影响路径", "按 docs/assistant-memory-proposal.md 的双入口验收；先 API/进程再真实 IM，不能仅截图", "pnpm check 后当前平台 pnpm build:native && pnpm smoke:native；其他平台证据缺失保持未验证"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-contract-review-verify-20260926-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T15:22:25.617Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
+      branch: "task/task-042-assistant-verification"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-043
     title: "实现来源与可修订记忆存储"
     status: pending
