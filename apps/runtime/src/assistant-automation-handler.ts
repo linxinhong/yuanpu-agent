@@ -20,6 +20,8 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
       return { costUsd: 0, value: { kind: job.kind, sourceCount: sources.total,
         availableSourceCount: sources.available ?? 0, activeMemoryCount: memories.total } };
     },
-    async apply(job, proposal) { store.recordCheckpoint(job, proposal.value); },
+    async apply(job, proposal, commit) {
+      commit(() => store.recordCheckpoint(job, proposal.value));
+    },
   };
 }

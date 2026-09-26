@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -107,8 +107,11 @@ export async function runAssistantWorker(): Promise<void> {
   let automation: AssistantAutomationStore | undefined;
   let automationEngine: AssistantAutomationEngine | undefined;
   let automationRun: Promise<unknown> | undefined;
+  const pendingDelegationEvents = new Map<string, AssistantDelegationRecord>();
+  let delegationScanOffset = 0;
   let sourceTimer: NodeJS.Timeout | undefined;
   let sourcePump: Promise<void> | undefined;
+  const unsupportedSourceFeeds = new Set<string>();
   const sourceRequest = (method: string, args: unknown[]): Promise<unknown> => new Promise((resolve, reject) => {
     const id = randomUUID();
     const timeout = setTimeout(() => {
@@ -144,6 +147,56 @@ export async function runAssistantWorker(): Promise<void> {
     cancel: (taskId, sessionId) => delegationRequest('cancel', [taskId, sessionId]) as
       ReturnType<AssistantDelegationHost['cancel']>,
   };
+  const queueDelegation = (record: AssistantDelegationRecord): void => {
+    if (!automation || !validId(record.taskId) || !validId(record.assistantSessionId)) return;
+    const version = createHash('sha256').update(JSON.stringify({ status: record.status,
+      updatedAt: record.updatedAt, followUps: record.followUps,
+      resultRef: record.result?.resultRef, approvalRequestId: record.result?.approvalRequestId,
+    })).digest('hex');
+    const existed = automation.byKey(`delegation:${record.taskId}:${version}`);
+    automation.enqueueDelegation(record.taskId, version, { kind: 'personal', id: 'local-user' },
+      record.updatedAt, record.status);
+    if (!existed) automationEngine?.preemptFor('verify-delegation');
+  };
+  const queueCurrentDelegation = async (taskId: string): Promise<void> => {
+    const current = await delegationHost.status(taskId);
+    if (current?.taskId === taskId) queueDelegation(current);
+  };
+  const reconcileDelegations = async (): Promise<void> => {
+    const directory = join(paths.root, 'delegations');
+    try {
+      const info = await lstat(directory);
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Unsafe delegation archive directory.');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    let names: string[];
+    try { names = (await readdir(directory)).filter((name) => name.endsWith('.json')).sort(); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    if (!names.length) return;
+    const count = Math.min(names.length, 20);
+    await Promise.allSettled(Array.from({ length: count }, async (_, index) => {
+      if (closed) return;
+      const name = names[(delegationScanOffset + index) % names.length]!;
+      const taskId = name.slice(0, -5);
+      if (!validId(taskId)) return;
+      try {
+        const path = join(directory, name);
+        const info = await lstat(path);
+        if (!info.isFile() || info.isSymbolicLink()) return;
+        const archive = JSON.parse(await readFile(path, 'utf8')) as { assistantSessionId?: unknown };
+        const record = await delegationHost.status(taskId);
+        if (record && record.taskId === taskId && archive.assistantSessionId === record.assistantSessionId) {
+          queueDelegation(record);
+        }
+      } catch (error) { send({ kind: 'delegation-error', error: String(error) }); }
+    }));
+    delegationScanOffset = (delegationScanOffset + count) % names.length;
+  };
   const pumpSources = (): void => {
     if (closed || sourcePump) return;
     sourcePump = (async () => {
@@ -153,10 +206,19 @@ export async function runAssistantWorker(): Promise<void> {
         assistantAutomationHandler(memory, automation));
       automationEngine.setForeground(active.size > 0);
       automation.scheduleActivePeriods();
+      for (const record of pendingDelegationEvents.values()) await queueCurrentDelegation(record.taskId);
+      pendingDelegationEvents.clear();
       try {
         await memory.reconcileDeletedSources();
-        for (const feed of ['work', 'assistant', 'work-deletions', 'assistant-deletions', 'legacy-memory']) {
-          await memory.sources.sync(sourceHost, feed, 100);
+        for (const feed of ['work', 'work-evidence', 'assistant', 'work-deletions',
+          'assistant-deletions', 'legacy-memory']) {
+          if (unsupportedSourceFeeds.has(feed)) continue;
+          try { await memory.sources.sync(sourceHost, feed, 100); }
+          catch (error) {
+            if (feed === 'work-evidence' && String(error).includes('Invalid source feed request')) {
+              unsupportedSourceFeeds.add(feed);
+            } else throw error;
+          }
         }
         for (let count = 0; count < 50; count++) {
           if (closed) break;
@@ -175,6 +237,10 @@ export async function runAssistantWorker(): Promise<void> {
       } catch (error) { send({ kind: 'source-error', error: String(error) }); }
       if (closed) return;
       automation.reconcileProcessedSources(100);
+      await reconcileDelegations();
+      automationEngine.preemptInvalidated();
+      const ready = automation.next();
+      if (ready) automationEngine.preemptFor(ready.kind);
       if (!automationRun) {
         automationRun = automationEngine.tick().catch((error) => send({ kind: 'automation-error',
           error: String(error) })).finally(() => { automationRun = undefined; });
@@ -272,10 +338,11 @@ export async function runAssistantWorker(): Promise<void> {
       }
       if (message.kind === 'delegation-event') {
         const record = message.record;
-        if (!record || !validId(record.assistantSessionId)) return;
-        void executor.openSession(record.assistantSessionId).then((session) => session.prompt(
-          `Delegated task ${record.taskId} changed to ${record.status}. Query its existing task ID and review returned evidence before reporting completion.`,
-        )).catch((error) => send({ kind: 'delegation-error', error: String(error) }));
+        if (!record || !validId(record.taskId) || !validId(record.assistantSessionId)) return;
+        if (automation) void queueCurrentDelegation(record.taskId).catch((error) => send({
+          kind: 'delegation-error', error: String(error),
+        }));
+        else { pendingDelegationEvents.set(record.taskId, record); pumpSources(); }
         return;
       }
       if (message.kind === 'shutdown') { void shutdown(); return; }

@@ -40,8 +40,11 @@ test('source jobs dedupe versions, supersede stale work, and never ingest review
   assert.equal(store.get(second.jobId).status, 'cancelled',
     'a running stale proposal cannot apply after a newer source version');
   assert.equal(store.enqueueSource(source('3', 'v3', 'assistant')).kind, 'understand-user');
-  assert.equal(store.enqueueSource(source('4', 'v4', 'work-deletions', 'deleted')).kind,
+  const deletedSource = { ...source('4', 'v4', 'work-deletions', 'deleted'),
+    change: { ...source('4', 'v4', 'work-deletions', 'deleted').change, sourceId: 'work-turn:one' } };
+  assert.equal(store.enqueueSource(deletedSource).kind,
     'maintain-memory');
+  assert.equal(store.get(store.byKey('source:review-work:work-turn:one:v7').jobId).status, 'cancelled');
   assert.equal(store.enqueueSource({ ...source('5', 'v5'), feedId: 'reviews' }), undefined);
   assert.equal(store.enqueueSource({ ...source('6', 'v6'), status: 'obsolete' }), undefined);
   assert.throws(() => store.enqueue({ kind: 'review-work', dedupeKey: first.dedupeKey,
@@ -74,6 +77,54 @@ test('processed source left by a Worker crash is enrolled exactly once after res
   assert.equal(store.next().jobId, job.jobId);
 });
 
+test('out-of-order delegation status cannot supersede a newer or terminal job', async (t) => {
+  const context = await fixture(t);
+  let store = new AssistantAutomationStore(context.sources.database, context.clock.now);
+  const running = store.enqueueDelegation('task-1', 'running-hash', audience,
+    '2026-09-27T00:00:00.000Z', 'running');
+  const completed = store.enqueueDelegation('task-1', 'completed-hash', audience,
+    '2026-09-27T00:01:00.000Z', 'completed');
+  assert.equal(store.get(running.jobId).status, 'cancelled');
+  assert.equal(store.enqueueDelegation('task-1', 'late-running', audience,
+    '2026-09-27T00:00:00.000Z', 'running').jobId, completed.jobId);
+  assert.equal(store.enqueueDelegation('task-1', 'same-millisecond-running', audience,
+    '2026-09-27T00:01:00.000Z', 'running').jobId, completed.jobId);
+  await context.reopen();
+  store = new AssistantAutomationStore(context.sources.database, context.clock.now);
+  assert.equal(store.enqueueDelegation('task-1', 'late-running', audience,
+    '2026-09-27T00:00:00.000Z', 'running').jobId, completed.jobId);
+  assert.equal(context.sources.database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+    WHERE kind='verify-delegation'`).get().n, 2);
+});
+
+test('work evidence and its work deletion share one canonical source owner', async (t) => {
+  const { sources, clock } = await fixture(t);
+  const store = new AssistantAutomationStore(sources.database, clock.now);
+  const sourceId = 'work-evidence:run-1';
+  const created = { ...source('1', 'evidence-v1', 'work-evidence'),
+    change: { ...source('1', 'evidence-v1', 'work-evidence').change, sourceId } };
+  sources.enqueuePage('work-evidence', '0', { nextCursor: '1',
+    events: [{ eventId: '1', change: created.change }] });
+  let current = { status: 'available', sourceVersion: 'evidence-v1' };
+  const host = { currentSource: async () => current,
+    readSource: async () => ({ status: 'available', sourceVersion: 'evidence-v1',
+      text: '工具结果与产物的授权摘要。' }) };
+  assert.equal((await sources.processNext(host)).status, 'processed');
+  assert.equal(store.reconcileProcessedSources(), 1);
+  const review = store.byKey(`source:review-work:${sourceId}:evidence-v1`);
+  assert.equal(review.kind, 'review-work');
+  const deleted = { ...source('2', 'deleted-v1', 'work-deletions', 'deleted'),
+    change: { ...source('2', 'deleted-v1', 'work-deletions', 'deleted').change, sourceId } };
+  sources.enqueuePage('work-deletions', '0', { nextCursor: '2',
+    events: [{ eventId: '2', change: deleted.change }] });
+  current = { status: 'deleted', sourceVersion: 'deleted-v1' };
+  assert.equal((await sources.processNext(host)).status, 'processed');
+  assert.equal(sources.source(sourceId).availability, 'deleted');
+  assert.equal(store.reconcileProcessedSources(), 1);
+  assert.equal(store.get(review.jobId).status, 'cancelled');
+  assert.equal(store.byKey(`source:maintain-memory:${sourceId}:deleted-v1`).kind, 'maintain-memory');
+});
+
 test('daily and weekly checks use current local period and collapse missed downtime', async (t) => {
   const context = await fixture(t, new Date(2026, 8, 27, 12));
   let store = new AssistantAutomationStore(context.sources.database, context.clock.now);
@@ -86,6 +137,9 @@ test('daily and weekly checks use current local period and collapse missed downt
   const resumed = store.scheduleActivePeriods();
   assert.notEqual(resumed[0].jobId, first[0].jobId);
   assert.notEqual(resumed[1].jobId, first[1].jobId);
+  assert.deepEqual(first.map((job) => store.get(job.jobId).status), ['cancelled', 'cancelled']);
+  assert.equal(store.next().jobId, resumed[0].jobId,
+    'a missed old daily check must not execute before the current period');
   assert.equal(context.sources.database.prepare('SELECT COUNT(*) AS n FROM automation_checks').get().n,
     4, 'downtime does not enqueue every missed local day or week');
 });
@@ -100,7 +154,7 @@ test('foreground and cancellation discard late model proposals before any write'
   const engine = new AssistantAutomationEngine(store, {
     lookup: async () => 'absent',
     prepare: async () => prepared,
-    apply: async (item) => { effects.push(item.effectId); },
+    apply: async (item, _proposal, commit) => { commit(() => effects.push(item.effectId)); },
   }, clock.now);
   engine.setForeground(true);
   assert.equal(await engine.tick(), undefined);
@@ -128,7 +182,9 @@ test('budget, restart and unknown result never replay an external effect blindly
   const costly = store.enqueue({ kind: 'review-work', dedupeKey: 'costly', audience, maxCostUsd: 0.01 });
   let applied = 0;
   let engine = new AssistantAutomationEngine(store, { lookup: async () => 'absent',
-    prepare: async () => ({ costUsd: 0.02 }), apply: async () => { applied++; } }, context.clock.now);
+    prepare: async () => ({ costUsd: 0.02 }), apply: async (_item, _proposal, commit) => {
+      commit(() => { applied++; });
+    } }, context.clock.now);
   await engine.tick();
   assert.equal(store.get(costly.jobId).status, 'failed');
   assert.equal(applied, 0);
@@ -142,7 +198,7 @@ test('budget, restart and unknown result never replay an external effect blindly
   let prepared = 0;
   engine = new AssistantAutomationEngine(store, { lookup: async () => lookup,
     prepare: async () => { prepared++; return { costUsd: 0 }; },
-    apply: async () => { applied++; } }, context.clock.now);
+    apply: async (_item, _proposal, commit) => { commit(() => { applied++; }); } }, context.clock.now);
   await engine.tick();
   assert.equal(store.get(interrupted.jobId).status, 'waiting');
   assert.equal(prepared, 0);
@@ -162,7 +218,9 @@ test('unimplemented skill jobs stay durable while a periodic checkpoint recovers
     lookup: async (job) => job.kind === 'review-work' ? 'deferred'
       : store.hasCheckpoint(job.effectId) ? 'applied' : 'absent',
     prepare: async () => ({ costUsd: 0, value: { sourceCount: 0 } }),
-    apply: async (job, proposal) => { store.recordCheckpoint(job, proposal.value); applied++; },
+    apply: async (job, proposal, commit) => { commit(() => {
+      store.recordCheckpoint(job, proposal.value); applied++;
+    }); },
   }, context.clock.now);
   await engine.tick();
   assert.equal(store.get(pending.jobId).status, 'waiting');
@@ -177,9 +235,38 @@ test('unimplemented skill jobs stay durable while a periodic checkpoint recovers
   engine = new AssistantAutomationEngine(store, {
     lookup: async (job) => store.hasCheckpoint(job.effectId) ? 'applied' : 'unknown',
     prepare: async () => { throw new Error('Checkpoint must prevent rerun'); },
-    apply: async () => { applied++; },
+    apply: async (_job, _proposal, commit) => { commit(() => { applied++; }); },
   }, context.clock.now);
   await engine.tick();
   assert.equal(store.get(daily.jobId).status, 'completed');
   assert.equal(applied, 1);
 });
+
+for (const interruption of ['cancel', 'stop', 'foreground']) {
+  test(`late async apply cannot commit after ${interruption}`, async (t) => {
+    const { sources, clock } = await fixture(t);
+    const store = new AssistantAutomationStore(sources.database, clock.now);
+    const job = store.enqueue({ kind: 'review-work', dedupeKey: `late-${interruption}`, audience });
+    let entered;
+    const applying = new Promise((resolve) => { entered = resolve; });
+    let release;
+    const hold = new Promise((resolve) => { release = resolve; });
+    let effects = 0;
+    const engine = new AssistantAutomationEngine(store, { lookup: async () => 'absent',
+      prepare: async () => ({ costUsd: 0 }),
+      apply: async (_item, _proposal, commit) => {
+        entered();
+        await hold;
+        assert.equal(commit(() => { effects++; }), false);
+      } }, clock.now);
+    const running = engine.tick();
+    await applying;
+    if (interruption === 'cancel') engine.cancel(job.jobId);
+    else if (interruption === 'stop') engine.stop();
+    else engine.setForeground(true);
+    release();
+    await running;
+    assert.equal(effects, 0);
+    assert.equal(store.get(job.jobId).status, interruption === 'cancel' ? 'cancelled' : 'waiting');
+  });
+}

@@ -14,6 +14,8 @@ export interface AutomationJob {
   sourceId?: string;
   sourceVersion?: string;
   delegationId?: string;
+  eventAt?: string;
+  eventRank?: number;
   audience: AssistantAudience;
   status: AutomationStatus;
   priority: number;
@@ -35,14 +37,16 @@ export interface AutomationHandler {
   lookup(job: AutomationJob): Promise<AutomationOutcome>;
   /** Produce a proposal only. Model output must not write durable state here. */
   prepare(job: AutomationJob, signal: AbortSignal): Promise<AutomationProposal>;
-  /** Apply with job.effectId as an idempotency key (e.g. a memory revision ID). */
-  apply(job: AutomationJob, proposal: AutomationProposal): Promise<void>;
+  /** Commit durable effects only inside commit(). It rejects a cancelled or obsolete job. */
+  apply(job: AutomationJob, proposal: AutomationProposal,
+    commit: (write: () => void) => boolean, signal: AbortSignal): Promise<void>;
 }
 
 const schema = `
   CREATE TABLE IF NOT EXISTS automation_jobs (
     job_id TEXT PRIMARY KEY, kind TEXT NOT NULL, dedupe_key TEXT NOT NULL UNIQUE,
     source_id TEXT, source_version TEXT, delegation_id TEXT,
+    event_at TEXT, event_rank INTEGER,
     audience_kind TEXT NOT NULL, audience_id TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('queued','running','waiting','completed','failed','cancelled')),
     priority INTEGER NOT NULL, created_at TEXT NOT NULL, due_at TEXT NOT NULL,
@@ -78,6 +82,8 @@ function rowJob(row: Record<string, unknown>): AutomationJob {
     ...(row.source_id === null ? {} : { sourceId: String(row.source_id) }),
     ...(row.source_version === null ? {} : { sourceVersion: String(row.source_version) }),
     ...(row.delegation_id === null ? {} : { delegationId: String(row.delegation_id) }),
+    ...(row.event_at === null ? {} : { eventAt: String(row.event_at) }),
+    ...(row.event_rank === null ? {} : { eventRank: Number(row.event_rank) }),
     audience: { kind: row.audience_kind as AssistantAudience['kind'], id: String(row.audience_id) },
     status: row.status as AutomationStatus, priority: Number(row.priority),
     createdAt: String(row.created_at), dueAt: String(row.due_at),
@@ -132,12 +138,15 @@ export class AssistantAutomationStore {
 
   enqueue(input: { kind: AutomationKind; dedupeKey: string; audience: AssistantAudience;
     sourceId?: string; sourceVersion?: string; delegationId?: string; dueAt?: Date;
-    durationMs?: number; maxCostUsd?: number }): AutomationJob {
+    durationMs?: number; maxCostUsd?: number; eventAt?: string; eventRank?: number }): AutomationJob {
     safeKey(input.dedupeKey, 'automation dedupe key');
     safeKey(input.audience.id, 'automation audience');
     if (input.sourceId) safeKey(input.sourceId, 'automation source ID');
     if (input.sourceVersion) safeKey(input.sourceVersion, 'automation source version');
     if (input.delegationId) safeKey(input.delegationId, 'automation delegation ID');
+    if (input.eventAt && !Number.isFinite(Date.parse(input.eventAt))) throw new Error('Invalid event time.');
+    if (input.eventRank !== undefined && (!Number.isSafeInteger(input.eventRank)
+      || input.eventRank < 0)) throw new Error('Invalid event rank.');
     const durationMs = input.durationMs ?? 60_000;
     const maxCostUsd = input.maxCostUsd ?? 0.05;
     if (!Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 3_600_000
@@ -164,11 +173,19 @@ export class AssistantAutomationStore {
           retry_at=NULL WHERE kind=? AND source_id=? AND source_version!=?
           AND status IN ('queued','waiting','running')`).run(input.kind, input.sourceId, input.sourceVersion);
       }
+      if (input.kind === 'maintain-memory' && input.sourceId) {
+        this.database.prepare(`UPDATE automation_jobs SET status='cancelled',
+          failure='Source was deleted',retry_at=NULL
+          WHERE source_id=? AND kind!='maintain-memory'
+            AND status IN ('queued','waiting','running')`).run(input.sourceId);
+      }
       this.database.prepare(`INSERT INTO automation_jobs(job_id,kind,dedupe_key,source_id,source_version,
-        delegation_id,audience_kind,audience_id,status,priority,created_at,due_at,deadline_at,
-        max_duration_ms,max_cost_usd,effect_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(jobId, input.kind,
+        delegation_id,event_at,event_rank,audience_kind,audience_id,status,priority,created_at,due_at,
+        deadline_at,max_duration_ms,max_cost_usd,effect_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(jobId, input.kind,
           input.dedupeKey, input.sourceId ?? null, input.sourceVersion ?? null,
-          input.delegationId ?? null, input.audience.kind, input.audience.id, 'queued',
+          input.delegationId ?? null, input.eventAt ?? null, input.eventRank ?? null,
+          input.audience.kind, input.audience.id, 'queued',
           priorities[input.kind], now.toISOString(), dueAt.toISOString(),
           new Date(Math.max(now.getTime(), dueAt.getTime()) + durationMs).toISOString(),
           durationMs, maxCostUsd, `automation:${jobId}`);
@@ -179,7 +196,8 @@ export class AssistantAutomationStore {
 
   enqueueSource(event: QueuedSource): AutomationJob | undefined {
     if (event.status !== 'processed' || event.feedId === 'legacy-memory') return undefined;
-    const origin = event.feedId.replace(/-deletions$/u, '');
+    const origin = event.feedId === 'work-evidence' ? 'work'
+      : event.feedId.replace(/-deletions$/u, '');
     if (origin !== 'work' && origin !== 'assistant') return undefined;
     const kind: AutomationKind = event.change.kind === 'deleted' ? 'maintain-memory'
       : origin === 'work' ? 'review-work' : 'understand-user';
@@ -193,7 +211,8 @@ export class AssistantAutomationStore {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Invalid scan limit.');
     const rows = this.database.prepare(`SELECT e.* FROM source_events e
       LEFT JOIN automation_source_links l ON l.feed_id=e.feed_id AND l.event_id=e.event_id
-      WHERE e.status='processed' AND e.feed_id IN ('work','assistant','work-deletions','assistant-deletions')
+      WHERE e.status='processed' AND e.feed_id IN
+        ('work','work-evidence','assistant','work-deletions','assistant-deletions')
         AND l.event_id IS NULL ORDER BY e.rowid LIMIT ?`).all(limit) as Array<Record<string, unknown>>;
     for (const row of rows) {
       const event: QueuedSource = { feedId: String(row.feed_id), eventId: String(row.event_id),
@@ -210,11 +229,32 @@ export class AssistantAutomationStore {
     return rows.length;
   }
 
-  enqueueDelegation(delegationId: string, version: string, audience: AssistantAudience): AutomationJob {
+  enqueueDelegation(delegationId: string, version: string, audience: AssistantAudience,
+    eventAt: string, status: string): AutomationJob {
     safeKey(delegationId, 'delegation ID');
     safeKey(version, 'delegation version');
-    return this.enqueue({ kind: 'verify-delegation',
-      dedupeKey: `delegation:${delegationId}:${version}`, delegationId, sourceVersion: version, audience });
+    if (!Number.isFinite(Date.parse(eventAt))) throw new Error('Invalid delegation updatedAt.');
+    const ranks: Record<string, number> = { accepted: 1, running: 2, unknown: 2,
+      waiting_approval: 3, completed: 4, failed: 4, cancelled: 4 };
+    const rank = ranks[status];
+    if (!rank) throw new Error('Invalid delegation status.');
+    const latest = this.database.prepare(`SELECT * FROM automation_jobs
+      WHERE kind='verify-delegation' AND delegation_id=?
+      ORDER BY event_at DESC,event_rank DESC,created_at DESC LIMIT 1`)
+      .get(delegationId) as Record<string, unknown> | undefined;
+    if (latest && (String(latest.event_at) > eventAt
+      || (String(latest.event_at) === eventAt && Number(latest.event_rank) > rank))) {
+      return rowJob(latest);
+    }
+    const job = this.enqueue({ kind: 'verify-delegation',
+      dedupeKey: `delegation:${delegationId}:${version}`, delegationId, sourceVersion: version,
+      audience, eventAt, eventRank: rank });
+    this.database.prepare(`UPDATE automation_jobs SET status='cancelled',
+      failure='Superseded by newer delegation state',retry_at=NULL
+      WHERE kind='verify-delegation' AND delegation_id=? AND job_id!=?
+      AND (event_at < ? OR (event_at = ? AND event_rank < ?))
+      AND status IN ('queued','waiting','running')`).run(delegationId, job.jobId, eventAt, eventAt, rank);
+    return job;
   }
 
   /** Current local period only: downtime never creates a backlog of missed checks. */
@@ -224,6 +264,9 @@ export class AssistantAutomationStore {
     return ([['daily-check', daily], ['weekly-check', weekly]] as const).map(([kind, period]) => {
       const job = this.enqueue({ kind, dedupeKey: `period:${kind}:${period}`, audience,
         durationMs: 120_000, maxCostUsd: 0.1 });
+      this.database.prepare(`UPDATE automation_jobs SET status='cancelled',
+        failure='Missed local period was merged into current check',retry_at=NULL
+        WHERE kind=? AND job_id!=? AND status IN ('queued','waiting','running')`).run(kind, job.jobId);
       this.database.prepare(`INSERT OR IGNORE INTO automation_checks(kind,period_key,job_id)
         VALUES (?,?,?)`).run(kind, period, job.jobId);
       return job;
@@ -252,6 +295,21 @@ export class AssistantAutomationStore {
     this.database.prepare(`UPDATE automation_jobs SET status=?,failure=?,retry_at=?
       WHERE job_id=? AND status='running'`).run(status, reason ?? null,
         retryAt?.toISOString() ?? null, jobId);
+  }
+
+  /** The proposal's synchronous DB write and completion status share one transaction. */
+  commit(jobId: string, write: () => void): boolean {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.database.prepare('SELECT status FROM automation_jobs WHERE job_id=?')
+        .get(jobId) as { status: AutomationStatus } | undefined;
+      if (row?.status !== 'running') { this.database.exec('ROLLBACK'); return false; }
+      write();
+      this.database.prepare("UPDATE automation_jobs SET status='completed',retry_at=NULL WHERE job_id=?")
+        .run(jobId);
+      this.database.exec('COMMIT');
+      return true;
+    } catch (error) { this.database.exec('ROLLBACK'); throw error; }
   }
 
   cancel(jobId: string): void {
@@ -304,6 +362,12 @@ export class AssistantAutomationEngine {
     }
   }
 
+  preemptInvalidated(): void {
+    if (this.active && this.store.get(this.active.jobId)?.status !== 'running') {
+      this.active.controller.abort();
+    }
+  }
+
   stop(): void { this.stopped = true; this.active?.controller.abort(); }
 
   async tick(): Promise<AutomationJob | undefined> {
@@ -338,8 +402,17 @@ export class AssistantAutomationEngine {
         this.store.finish(job.jobId, 'failed', 'Automation budget exceeded');
         return this.store.get(job.jobId);
       }
-      await this.handler.apply(job, proposal);
-      this.store.finish(job.jobId, 'completed');
+      const commit = (write: () => void): boolean => {
+        if (controller.signal.aborted || this.foreground || this.paused || this.stopped
+          || this.active?.jobId !== job.jobId
+          || this.now().getTime() > Date.parse(job.deadlineAt)) return false;
+        return this.store.commit(job.jobId, write);
+      };
+      await this.handler.apply(job, proposal, commit, controller.signal);
+      if (this.store.get(job.jobId)?.status === 'running') {
+        this.store.finish(job.jobId, 'waiting', 'Handler returned without committing an effect',
+          new Date(this.now().getTime() + 60_000));
+      }
       return this.store.get(job.jobId);
     } catch (error) {
       if (!controller.signal.aborted) this.store.finish(job.jobId, 'waiting', String(error),
