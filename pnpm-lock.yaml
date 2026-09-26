@@ -7,6 +7,8 @@ settings:
 overrides:
   '@electron/get@3.0.0': 3.1.0
 
+pnpmfileChecksum: sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+
 importers:
 
   .:
@@ -432,6 +434,21 @@ importers:
       chalk:
         specifier: 6.0.0
         version: 6.0.0
+
+  packages/yuanpu-assistant:
+    dependencies:
+      '@earendil-works/pi-agent-core':
+        specifier: 0.86.1
+        version: link:../agent
+      '@earendil-works/pi-ai':
+        specifier: 0.86.1
+        version: link:../ai
+      '@yuanpu-agent/protocol':
+        specifier: workspace:*
+        version: link:../yuanpu-protocol
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
 
   packages/yuanpu-protocol: {}
 
