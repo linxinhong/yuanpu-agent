@@ -1810,7 +1810,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-050
     title: "独立助理完整业务验收"
-    status: ready
+    status: in_progress
     goal: "验证本地与企业微信个人助理从工作材料到评估、记忆、执行和主动跟进的完整闭环。"
     scope:
       in: ["真实桌面与企业微信单人私聊，记忆和工作评估生命周期", "子任务审批/取消/恢复、迁移和打包 App 生命周期", "本轮回归、未验证平台清单与最终交付证据"]
@@ -1836,15 +1836,14 @@ tasks:
     investigation_hints: ["先复用两个阶段验证的有效证据，再执行新增 UI/主动建议组合；历史 .tasks/verification/TASK-021 可参考但不能替代新版本", "pnpm check、pnpm build:native && pnpm smoke:native、pnpm package:desktop；仅对可用平台运行，其他保持 unverified", "真人企微外发仅使用明确授权的测试目标；无需第二名真人、真实群聊或其他 IM 平台"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-task050-verifier-10414-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T23:58:32.844Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-e2e-verification"
+      branch: "task/task-050-assistant-full-acceptance"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-052
     title: "工作对话右侧栏文件预览"
     status: done
