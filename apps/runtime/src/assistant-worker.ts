@@ -1,0 +1,215 @@
+import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { assertSafeDirectory, createAssistantExecutor, resolveAssistantHome, type AssistantSession } from '@yuanpu-agent/assistant';
+import { assistantModelHost, type AssistantModelConfig } from './assistant-model.js';
+import { bundledAssistantSkillFiles } from './assistant-skill-assets.generated.js';
+import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
+
+interface TaskRecord {
+  id: string;
+  sessionId?: string;
+  status: 'running' | 'completed' | 'cancelled' | 'interrupted' | 'failed';
+  message?: string;
+  error?: string;
+  updatedAt: string;
+}
+
+type HostMessage =
+  | { kind: 'bootstrap'; home: string; parentPid: number }
+  | { kind: 'model'; id: string; config?: AssistantModelConfig; error?: string }
+  | { kind: 'prompt'; id: string; correlationId: string; sessionId?: string; text: string; deadlineAt: number }
+  | { kind: 'cancel'; id: string }
+  | { kind: 'task'; id: string; correlationId: string }
+  | { kind: 'shutdown' };
+
+function send(message: Record<string, unknown>): void {
+  if (process.connected) process.send?.(message);
+}
+
+function validId(id: string): boolean { return /^[a-zA-Z0-9_-]{1,128}$/.test(id); }
+
+async function saveTask(directory: string, record: TaskRecord): Promise<void> {
+  const path = join(directory, `${record.id}.json`);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function readTask(directory: string, id: string): Promise<TaskRecord | undefined> {
+  if (!validId(id)) throw new Error('Invalid assistant task ID.');
+  try { return JSON.parse(await readFile(join(directory, `${id}.json`), 'utf8')) as TaskRecord; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+async function acquireHomeLock(home: string): Promise<DatabaseSync> {
+  const paths = resolveAssistantHome(home);
+  await assertSafeDirectory(paths.root);
+  const path = join(paths.root, '.writer-lock.sqlite');
+  try {
+    const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Assistant Home lock path is not a real file.');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const db = new DatabaseSync(path);
+  try {
+    db.exec('BEGIN EXCLUSIVE');
+    return db;
+  } catch (error) {
+    db.close();
+    throw new Error('Assistant Home already has a writer.', { cause: error });
+  }
+}
+
+/** Private process mode: the Runtime host remains the only source of model credentials. */
+export async function runAssistantWorker(): Promise<void> {
+  const bootstrap = await new Promise<Extract<HostMessage, { kind: 'bootstrap' }>>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Assistant Worker bootstrap timed out.')), 10_000);
+    process.once('message', (value: unknown) => {
+      clearTimeout(timeout);
+      if (!value || typeof value !== 'object' || (value as { kind?: unknown }).kind !== 'bootstrap') {
+        reject(new Error('Invalid Assistant Worker bootstrap.'));
+      } else resolve(value as Extract<HostMessage, { kind: 'bootstrap' }>);
+    });
+  });
+  if (!Number.isSafeInteger(bootstrap.parentPid) || bootstrap.parentPid <= 1
+    || typeof bootstrap.home !== 'string') {
+    throw new Error('Invalid Assistant Worker bootstrap.');
+  }
+  const paths = resolveAssistantHome(bootstrap.home);
+  const lock = await acquireHomeLock(paths.root);
+  let monitor: ParentProcessMonitor | undefined;
+  let closed = false;
+  const pendingModels = new Map<string, { resolve(value: AssistantModelConfig): void; reject(error: Error): void }>();
+  const active = new Map<string, { cancel(): Promise<void>; result: Promise<TaskRecord> }>();
+  const tasks = join(paths.root, 'tasks');
+  let executor;
+  try { executor = await createAssistantExecutor({
+    assistantHome: paths.root,
+    bundledSkillFiles: bundledAssistantSkillFiles.map((file) => ({
+      path: file.path,
+      bytes: Buffer.from(file.base64, 'base64'),
+    })),
+    host: assistantModelHost(() => new Promise<AssistantModelConfig>((resolve, reject) => {
+      const id = randomUUID();
+      pendingModels.set(id, { resolve, reject });
+      send({ kind: 'model-request', id });
+    })),
+  }); } catch (error) {
+    lock.exec('ROLLBACK');
+    lock.close();
+    throw error;
+  }
+  try {
+    await assertSafeDirectory(tasks);
+    for (const name of await readdir(tasks)) {
+      if (!name.endsWith('.json')) continue;
+      const record = await readTask(tasks, name.slice(0, -5));
+      if (record?.status === 'running') {
+        await saveTask(tasks, { ...record, status: 'interrupted', updatedAt: new Date().toISOString() });
+      }
+    }
+    const shutdown = async () => {
+      if (closed) return;
+      closed = true;
+      monitor?.dispose();
+      for (const pending of pendingModels.values()) pending.reject(new Error('Assistant Worker is stopping.'));
+      pendingModels.clear();
+      for (const task of active.values()) await task.cancel().catch(() => undefined);
+      await Promise.allSettled([...active.values()].map((task) => task.result));
+      await executor.close();
+      lock.exec('ROLLBACK');
+      lock.close();
+      process.exit(0);
+    };
+    monitor = installParentProcessMonitor(bootstrap.parentPid, () => { void shutdown(); });
+    process.once('disconnect', () => { void shutdown(); });
+    process.once('SIGTERM', () => { void shutdown(); });
+    process.once('SIGINT', () => { void shutdown(); });
+    process.on('message', (value: unknown) => {
+      const message = value as HostMessage;
+      if (!message || typeof message !== 'object' || closed) return;
+      if (message.kind === 'model') {
+        const pending = pendingModels.get(message.id);
+        if (!pending) return;
+        pendingModels.delete(message.id);
+        if (message.config) pending.resolve(message.config);
+        else pending.reject(new Error(message.error ?? 'Assistant model unavailable.'));
+        return;
+      }
+      if (message.kind === 'shutdown') { void shutdown(); return; }
+      if (message.kind === 'cancel') {
+        void active.get(message.id)?.cancel();
+        return;
+      }
+      if (message.kind === 'task') {
+        void readTask(tasks, message.id).then((record) => send({ kind: 'task', id: message.id,
+          correlationId: message.correlationId, record }),
+          (error) => send({ kind: 'task', id: message.id,
+            correlationId: message.correlationId, error: String(error) }));
+        return;
+      }
+      if (message.kind !== 'prompt') return;
+      const reply = (result: Promise<TaskRecord>) => {
+        void result.then((record) => send({ kind: 'result', id: message.id,
+          correlationId: message.correlationId, record }),
+        (error) => send({ kind: 'result', id: message.id,
+          correlationId: message.correlationId, error: String(error) }));
+      };
+      const running = active.get(message.id);
+      if (running) { reply(running.result); return; }
+      let session: AssistantSession | undefined;
+      let cancelled = false;
+      const controller = new AbortController();
+      const cancel = async () => { cancelled = true; controller.abort(); };
+      const result = (async (): Promise<TaskRecord> => {
+        if (!validId(message.id) || typeof message.text !== 'string' || !message.text.trim()
+          || message.text.length > 64_000 || !Number.isSafeInteger(message.deadlineAt)) {
+          throw new Error('Invalid assistant prompt request.');
+        }
+        const existing = await readTask(tasks, message.id);
+        if (existing) return existing;
+        if (message.deadlineAt <= Date.now()) throw new Error('Assistant prompt deadline expired.');
+        let record: TaskRecord = { id: message.id, status: 'running', updatedAt: new Date().toISOString() };
+        await saveTask(tasks, record);
+        const timer = setTimeout(() => { void cancel(); }, Math.max(1, message.deadlineAt - Date.now()));
+        try {
+          session = await executor.openSession(message.sessionId, { createIfMissing: Boolean(message.sessionId) });
+          if (!cancelled) {
+            const result = await session.prompt(message.text, controller.signal);
+            record = cancelled
+              ? { ...record, sessionId: result.sessionId, status: 'cancelled', updatedAt: new Date().toISOString() }
+              : { ...record, sessionId: result.sessionId, status: 'completed', message: result.message,
+                updatedAt: new Date().toISOString() };
+          } else record = { ...record, status: 'cancelled', updatedAt: new Date().toISOString() };
+        } catch (error) {
+          record = { ...record, status: cancelled ? 'cancelled' : 'failed',
+            error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() };
+        } finally {
+          clearTimeout(timer);
+        }
+        await saveTask(tasks, record);
+        return record;
+      })();
+      active.set(message.id, { cancel, result });
+      void result.finally(() => active.delete(message.id)).catch(() => undefined);
+      reply(result);
+    });
+    send({ kind: 'ready', pid: process.pid });
+  } catch (error) {
+    monitor?.dispose();
+    await executor.close().catch(() => undefined);
+    lock.exec('ROLLBACK');
+    lock.close();
+    throw error;
+  }
+}

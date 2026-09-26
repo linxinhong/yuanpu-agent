@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -37,6 +37,7 @@ const sqliteRoot = await mkdtemp(join(tmpdir(), 'yuanpu-sea-sqlite-'));
 let firstSqliteSmoke;
 let secondSqliteSmoke;
 let schedulerSmoke;
+let assistantWorkerSmoke;
 try {
   const sqlitePath = join(sqliteRoot, 'automation.sqlite');
   firstSqliteSmoke = JSON.parse(execFileSync(binary, ['--sqlite-smoke', sqlitePath], {
@@ -50,6 +51,42 @@ try {
     ['--scheduler-smoke', join(sqliteRoot, 'scheduler.sqlite')],
     { encoding: 'utf8' },
   ).trim());
+  const assistantHome = join(sqliteRoot, 'assistant');
+  const worker = spawn(binary, ['--assistant-worker'], {
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    env: { ...process.env, PATH: '' },
+  });
+  let stderr = '';
+  worker.stderr.setEncoding('utf8');
+  worker.stderr.on('data', (chunk) => { stderr += chunk; });
+  const receive = (predicate) => new Promise((resolveMessage, rejectMessage) => {
+    const timeout = setTimeout(() => rejectMessage(new Error(`SEA Assistant Worker timed out: ${stderr}`)), 8_000);
+    const onMessage = (message) => {
+      if (!predicate(message)) return;
+      clearTimeout(timeout);
+      worker.off('message', onMessage);
+      resolveMessage(message);
+    };
+    worker.on('message', onMessage);
+    worker.once('exit', (code) => {
+      clearTimeout(timeout);
+      worker.off('message', onMessage);
+      rejectMessage(new Error(`SEA Assistant Worker exited ${code}: ${stderr}`));
+    });
+  });
+  try {
+    const ready = receive((message) => message.kind === 'ready');
+    worker.send({ kind: 'bootstrap', home: assistantHome, parentPid: process.pid });
+    const started = await ready;
+    const queried = receive((message) => message.kind === 'task' && message.correlationId === 'sea-query');
+    worker.send({ kind: 'task', id: 'absent', correlationId: 'sea-query' });
+    assistantWorkerSmoke = { readyPid: started.pid, missingTask: (await queried).record };
+  } finally {
+    if (worker.exitCode === null && worker.signalCode === null) {
+      worker.send({ kind: 'shutdown' });
+      await new Promise((resolveExit) => worker.once('exit', resolveExit));
+    }
+  }
 } finally {
   await rm(sqliteRoot, { recursive: true, force: true });
 }
@@ -65,19 +102,21 @@ assert.equal(capabilitySmoke.errorResult.isError, true);
 assert.match(capabilitySmoke.errorResult.content[0].text, /diagnostic error/i);
 assert.deepEqual(firstSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 6,
+  schemaVersion: 7,
   persistedCount: 1,
 });
 assert.deepEqual(secondSqliteSmoke, {
   driver: 'node:sqlite',
-  schemaVersion: 6,
+  schemaVersion: 7,
   persistedCount: 2,
 });
 assert.deepEqual(schedulerSmoke, {
-  schemaVersion: 6,
+  schemaVersion: 7,
   historyCount: 1,
   runStatus: 'succeeded',
   output: 'SEA scheduler persisted output',
   deliveryStatus: 'delivered',
 });
+assert.ok(Number.isSafeInteger(assistantWorkerSmoke.readyPid));
+assert.equal(assistantWorkerSmoke.missingTask, undefined);
 console.log(`Smoke test passed for ${target}`);
