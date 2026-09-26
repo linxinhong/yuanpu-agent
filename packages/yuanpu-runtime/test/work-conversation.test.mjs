@@ -94,6 +94,10 @@ test('only saved complete turns produce stable source events on repeated scans',
   assert.deepEqual(JSON.parse(JSON.stringify(sourceChanges)), sourceChanges);
   assert.deepEqual(sourceChanges[0].audience, { kind: 'personal', id: 'local-user' });
   assert.equal(sourceChanges[0].sourceId, sources[0].sourceId);
+  const page = database.workConversations.sourcePage(0, 1);
+  assert.equal(page.length, 1);
+  assert.deepEqual(page[0].change, sourceChanges[0]);
+  assert.deepEqual(database.workConversations.sourcePage(page[0].eventId, 1), []);
   assert.equal(database.workConversations.resolveContentRef(sourceChanges[0].contentRef).runId, 'run-one');
   fixture.close();
   database.close();
@@ -106,5 +110,6 @@ test('only saved complete turns produce stable source events on repeated scans',
   assert.equal(reopened.workConversations.recordSavedTurns(conversation.id, messages), 0);
   assert.deepEqual(reopened.workConversations.sources(conversation.id), sources);
   assert.deepEqual(reopened.workConversations.sourceChanges(conversation.id), sourceChanges);
+  assert.deepEqual(reopened.workConversations.sourcePage(0, 1), page);
   reopened.close();
 });
