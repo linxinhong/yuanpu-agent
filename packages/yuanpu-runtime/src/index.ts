@@ -9,6 +9,8 @@ export * from './scheduler/index.js';
 export * from './pi/index.js';
 
 export * from './builtin/web/source.js';
+export * from './builtin/browser/source.js';
+export * from './builtin/browser/client.js';
 export * from './builtin/web/http.js';
 export * from './builtin/goals/index.js';
 export * from './builtin/workflows/index.js';

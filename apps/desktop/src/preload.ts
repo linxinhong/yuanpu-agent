@@ -70,6 +70,22 @@ const bridge: DesktopBridge = {
   decideCapabilityApproval: (requestId, decision) => (
     ipcRenderer.invoke('capabilities:approvals:decide', requestId, decision)
   ),
+  browserAttachGuest: async (payload) => {
+    const result = await ipcRenderer.invoke('browser:attach-guest', payload) as { ok: boolean; error?: string };
+    if (!result?.ok) throw new Error(result?.error ?? 'Browser guest registration failed.');
+  },
+  browserDetachGuest: (key) => ipcRenderer.invoke('browser:detach-guest', key),
+  openInSystemBrowser: (url) => ipcRenderer.invoke('browser:open-external', url),
+  onBrowserGuestCrashed: (listener) => {
+    const handler = (_event: IpcRendererEvent, guestKey: Parameters<typeof listener>[0]) => listener(guestKey);
+    ipcRenderer.on('browser:guest-crashed', handler);
+    return () => ipcRenderer.removeListener('browser:guest-crashed', handler);
+  },
+  onBrowserSessionRequest: (listener) => {
+    const handler = (_event: IpcRendererEvent, conversationId: Parameters<typeof listener>[0]) => listener(conversationId);
+    ipcRenderer.on('browser:session-request', handler);
+    return () => ipcRenderer.removeListener('browser:session-request', handler);
+  },
   onNotificationNavigation: (listener) => {
     const handler = (_event: IpcRendererEvent, target: Parameters<typeof listener>[0]) => listener(target);
     ipcRenderer.on('notifications:navigate', handler);

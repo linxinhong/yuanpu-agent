@@ -1,9 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
-import { app, BrowserWindow, dialog, ipcMain, Notification, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import type { NotificationNavigationTarget, RuntimeRecoveryNotice } from '@yuanpu-agent/protocol';
 
+import { BrowserGuestManager } from './browser-guest-manager.js';
+import { startBrowserControlService } from './browser-control-service.js';
 import { RuntimeManager } from './runtime-manager.js';
 import { ElectronNotificationHost, type NativeNotification } from './notification-host.js';
 import { isTrustedRendererUrl, packagedRendererUrl } from './renderer-security.js';
@@ -50,6 +53,13 @@ function trustedHandler(listener: (...args: any[]) => unknown) {
   };
 }
 
+function trustedHandlerWithEvent(listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) {
+  return (event: IpcMainInvokeEvent, ...args: any[]) => {
+    assertTrustedRenderer(event);
+    return listener(event, ...args);
+  };
+}
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1120,
@@ -64,6 +74,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webviewTag: true,
     },
   });
   mainWindow = window;
@@ -72,7 +83,20 @@ function createWindow(): void {
     if (mainWindow === window) mainWindow = undefined;
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  // Embedded-browser guests are hardened here instead of banned outright:
+  // force the guest sandbox, strip privileged attributes and only allow
+  // http(s) sources (zcode's will-attach-webview hardening).
+  window.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    delete webPreferences.preload;
+    delete (params as Record<string, unknown>).nodeintegration;
+    delete (params as Record<string, unknown>).disablewebsecurity;
+    if (!/^https?:\/\//i.test(params.src ?? '') && params.src !== 'about:blank') {
+      event.preventDefault();
+    }
+  });
   window.webContents.on('will-navigate', (event, targetUrl) => {
     if (!isTrustedRendererUrl(targetUrl, trustedRendererEntry)) event.preventDefault();
   });
@@ -98,6 +122,20 @@ app.on('second-instance', () => {
 });
 
 if (hasSingleInstanceLock) void app.whenReady().then(async () => {
+  const browserGuestManager = new BrowserGuestManager({
+    onGuestCrashed: (windowId, guestKey) => {
+      BrowserWindow.fromId(windowId)?.webContents.send('browser:guest-crashed', guestKey);
+    },
+    onSessionRequest: (windowId, conversationId) => {
+      BrowserWindow.fromId(windowId)?.webContents.send('browser:session-request', conversationId);
+    },
+    getMainWindowId: () => mainWindow?.id,
+  });
+  const browserControlToken = randomBytes(32).toString('hex');
+  const browserControlService = await startBrowserControlService({
+    manager: browserGuestManager,
+    token: browserControlToken,
+  });
   runtime = new RuntimeManager(
     app.getAppPath(),
     process.resourcesPath,
@@ -106,6 +144,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
     app.getVersion(),
     {
       onUpdateRecovery: (kind) => { runtimeRecoveryNotice = { kind }; },
+      browserControl: { port: browserControlService.port, token: browserControlToken },
     },
   );
 
@@ -135,6 +174,16 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('work:order', trustedHandler((kind: 'folder' | 'conversation', parentId: string | null, ids: string[]) => runtime.reorderWorkSiblings(kind, parentId, ids)));
   ipcMain.handle('work:files:list', trustedHandler((conversationId: string, dirPath?: string, options?: { recursive?: boolean }) => runtime.listWorkFiles(conversationId, dirPath, options)));
   ipcMain.handle('work:files:read', trustedHandler((conversationId: string, filePath: string) => runtime.readWorkFile(conversationId, filePath)));
+  ipcMain.handle('browser:attach-guest', trustedHandlerWithEvent((event, payload: { key: string; webContentsId: number; conversationId: string }) => {
+    const windowId = BrowserWindow.fromWebContents(event.sender)?.id;
+    if (windowId === undefined) throw new Error('Browser guest attach requires a known window.');
+    return browserGuestManager.attachGuest({ ...payload, windowId, hostWebContentsId: event.sender.id });
+  }));
+  ipcMain.handle('browser:detach-guest', trustedHandler((key: string) => browserGuestManager.detachGuest(key)));
+  ipcMain.handle('browser:open-external', trustedHandler((url: string) => {
+    if (!/^https?:\/\//i.test(url)) throw new Error('Only http(s) URLs can be opened externally.');
+    return shell.openExternal(url);
+  }));
   ipcMain.handle('assistant:link:get', trustedHandler(() => runtime.getAssistantLink()));
   ipcMain.handle('assistant:link:bind', trustedHandler((contactId: string) => runtime.bindAssistantContact(contactId)));
   ipcMain.handle('assistant:link:unbind', trustedHandler(() => runtime.unbindAssistantContact()));
@@ -190,6 +239,22 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
     if (!app.isPackaged) throw new Error('Desktop updates are only available in packaged builds');
     await autoUpdater.checkForUpdates();
   }));
+
+  app.on('web-contents-created', (event, contents) => {
+    if (contents.getType() !== 'webview') return;
+    const allowBrowserUrl = (url: string) => /^https?:\/\//i.test(url) || url === 'about:blank';
+    contents.on('will-navigate', (navigationEvent, url) => {
+      if (!allowBrowserUrl(url)) navigationEvent.preventDefault();
+    });
+    contents.on('will-redirect', (redirectEvent, url) => {
+      if (!allowBrowserUrl(url)) redirectEvent.preventDefault();
+    });
+    contents.setWindowOpenHandler(({ url }) => {
+      // Guest popups are denied; http(s) targets hand off to the system browser.
+      if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(() => undefined);
+      return { action: 'deny' };
+    });
+  });
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
