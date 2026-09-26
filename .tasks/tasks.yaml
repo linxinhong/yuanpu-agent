@@ -1977,7 +1977,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-056
     title: "安全搬迁工作会话及文件夹的磁盘目录"
-    status: ready
+    status: in_progress
     goal: "用户把会话或文件夹移到树中其他位置时，实际工作目录随之搬迁，Pi 历史、下一轮运行和文件预览继续指向正确目录。"
     scope:
       in: ["单会话与文件夹子树移动的受控磁盘迁移", "受影响会话的 cwd、绑定、Pi JSONL header 关联更新与迁移恢复", "运行中冲突、目标占用、根外目录、符号链接与中途失败处理"]
@@ -2001,15 +2001,14 @@ tasks:
     investigation_hints: ["Runtime 工作目录与执行绑定 apps/runtime/src/index.ts、agent-runtime.ts；Pi 适配 packages/yuanpu-runtime/src/pi/index.ts；上游 SessionManager.findById/open 只读核对 header cwd 过滤", "先在临时 Home 下用真实 JSONL/SQLite 做单会话与子树失败注入，再做 Runtime 路由和重启验收；工作对话右侧栏文件预览（TASK-052）按 conversationId 取 cwd，移动后必须复测", "历史 run 的旧 cwd 是历史事实，来源 ID/版本不能因整理目录而重算；对当前路径引用给出可见提示"]
     escalation_conditions: ["若无法在不损坏 Pi JSONL 的前提下安全更新 cwd 关联，记录失败窗口并收窄为显式导入/复制流程，不以半迁移上线", "若发现跨卷或外部目录是必须支持的真实业务场景，另立导入契约，不把危险 fallback 塞入拖放"]
     result:
-      owner: null
+      owner: "conversation-move-astra-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T18:50:23.054Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-move-astra"
+      branch: "task/task-056-work-directory-move"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-057
     title: "实现工作文件夹与会话内容搜索"
     status: ready
