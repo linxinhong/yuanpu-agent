@@ -1394,7 +1394,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-041
     title: "接通本地与企业微信独立助理"
-    status: in_progress
+    status: done
     goal: "已配对用户从本地和企业微信访问同一助理，保持独立会话及可靠原路回复。"
     scope:
       in: ["按选定通信契约接入本地和已有企微长连接", "身份/会话/回复路由持久映射、幂等与重连", "旧 assistant/企微共享 session 绑定迁移、来源事件、宿主服务 API"]
@@ -1425,14 +1425,19 @@ tasks:
       owner: "work-conversations-sol1-10414"
       attempts: 0
       claimed_at: "2026-09-26T14:39:09.284Z"
-      completed_at: null
+      completed_at: "2026-09-26T15:22:02.642Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/work-conversations"
       branch: "task/task-041-assistant-channel"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-041 owner implementation 2a32dc9 and handoff 692f6bf are ancestors of integrated main a58a1bf; concurrent TASK-052 claim preserved."}
+        - {type: "test", check: "dual-entry behavior and independent review", status: "passed", summary: "Real Runtime HTTP and Assistant Worker test uses two independent clients after lost response and executes once; fixture WeCom ChannelRouter uses the same Worker with a distinct Session and original reply route. Independent reviewer confirmed unlink/relink delivery fence, API namespace guard, and removal of obsolete retry UI."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 and pnpm 11.22.0; full build, typechecks, and tests pass on main a58a1bf with pre-existing dirty working-directory and UI changes preserved; apps/runtime 41/41 and runtime-kit 173/173."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native on clean integration revision", status: "passed", summary: "On clean integration revision 77b1e32, darwin-arm64 SEA build and native smoke passed, including Worker and staged Runtime update; subsequent a58a1bf changed only TASK-052 registry claim."}
+        - {type: "boundary", check: "stage verification limits", status: "unverified", summary: "Real WeCom account roundtrip, packaged App two-entry business journey, and Windows/Linux native packages remain TASK-042 verification. Legacy archive deletion/unavailable source events and bounded large-session scanning remain TASK-043."}
       follow_up_candidates: []
   - id: TASK-042
     title: "独立助理与双入口阶段验证"
-    status: pending
+    status: ready
     goal: "在真实服务与持久层证明隔离、迁移、双入口和进程退出成立，为记忆系统提供可信来源。"
     scope:
       in: ["独立 Worker 与双入口的 API/IPC/存储业务场景", "真实企业微信一位已授权用户私聊；本地服务调用", "迁移、重启、拒绝身份和 SEA 退出验证"]
