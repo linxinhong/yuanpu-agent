@@ -19,7 +19,7 @@ import {
 } from '../capabilities/contracts.js';
 import { Type } from 'typebox';
 import { readFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { join, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { GoalManager, createGoalTool, auditWithSubagent } from '../builtin/goals/index.js';
 import { WorkflowManager, createWorkflowTools } from '../builtin/workflows/index.js';
@@ -47,6 +47,33 @@ export function readYuanpuChatTranscript(
   if (!path) return [];
   const session = SessionManager.open(path, directory, cwd);
   return summarizeTranscript(session.getBranch(), { limit, completedOnly });
+}
+
+export interface SavedWorkToolResult {
+  entryId: string;
+  toolCallId: string;
+  name: string;
+  status: 'completed' | 'failed';
+  text: string;
+  truncated: boolean;
+  at: string;
+}
+
+/** Read only persisted Pi tool results; never infer an artifact from result prose. */
+export function readYuanpuSavedToolResults(cwd: string, piSessionId: string,
+  directory: string): SavedWorkToolResult[] {
+  const path = SessionManager.findById(cwd, piSessionId, directory);
+  if (!path) return [];
+  const session = SessionManager.open(path, directory, cwd);
+  return session.getBranch().flatMap((entry) => {
+    if (entry.type !== 'message' || entry.message.role !== 'toolResult') return [];
+    const text = entry.message.content.filter((block) => block.type === 'text')
+      .map((block) => block.text).join('\n');
+    if (!text) return [];
+    return [{ entryId: entry.id, toolCallId: entry.message.toolCallId,
+      name: entry.message.toolName, status: entry.message.isError ? 'failed' as const : 'completed' as const,
+      text: text.slice(0, 4_000), truncated: text.length > 4_000, at: entry.timestamp }];
+  });
 }
 
 const searchParameters = Type.Object({
@@ -182,6 +209,9 @@ export function createYuanpuAgentSession(
 export interface YuanpuChatResult {
   message: string;
   tools: Array<{ name: string; status: 'completed' | 'failed' }>;
+  toolResults?: Array<{ entryId: string; toolCallId: string; name: string; status: 'completed' | 'failed';
+    text: string; truncated: boolean }>;
+  artifactCandidates?: Array<{ toolCallId: string; relativePath: string }>;
   pendingApprovalRequestId?: string;
 }
 
@@ -364,6 +394,9 @@ export async function createYuanpuChatSession(
     let text = '';
     let modelFailed = false;
     const toolStates = new Map<string, 'completed' | 'failed'>();
+    const toolStarts = new Map<string, { name: string; path?: string }>();
+    const existingEntryIds = new Set(sessionManager.getBranch().map((entry) => entry.id));
+    const artifactCandidates: NonNullable<YuanpuChatResult['artifactCandidates']> = [];
     let pendingApprovalRequestId: string | undefined;
     const unsubscribe = session.subscribe((event) => {
       if (event.type === 'message_end' && event.message.role === 'assistant') {
@@ -372,11 +405,29 @@ export async function createYuanpuChatSession(
       if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
         text += event.assistantMessageEvent.delta;
       }
+      if (event.type === 'tool_execution_start') {
+        const path = event.args && typeof event.args === 'object' && typeof event.args.path === 'string'
+          ? event.args.path : undefined;
+        toolStarts.set(event.toolCallId, { name: event.toolName, path });
+      }
       if (event.type === 'tool_execution_end') {
         const details = event.result?.details as {
           capabilityError?: { error?: unknown; approvalRequestId?: unknown };
         } | undefined;
-        toolStates.set(event.toolName, event.isError || details?.capabilityError ? 'failed' : 'completed');
+        const status = event.isError || details?.capabilityError ? 'failed' : 'completed';
+        toolStates.set(event.toolName, status);
+        const start = toolStarts.get(event.toolCallId);
+        const workspace = options.context?.workspaceId;
+        if (status === 'completed' && start?.path && workspace
+          && (start.name === 'write' || start.name === 'edit')) {
+          const path = resolve(workspace, start.path);
+          const relativePath = relative(workspace, path);
+          if (relativePath && relativePath !== '..' && !relativePath.startsWith(`..${sep}`)
+            && !isAbsolute(relativePath)) {
+            artifactCandidates.push({ toolCallId: event.toolCallId, relativePath });
+          }
+        }
+        toolStarts.delete(event.toolCallId);
         if (
           details?.capabilityError?.error === 'needs_approval'
           && typeof details.capabilityError.approvalRequestId === 'string'
@@ -402,9 +453,22 @@ export async function createYuanpuChatSession(
       }
       if (options.signal?.aborted) throw new DOMException('Agent run was cancelled.', 'AbortError');
       if (modelFailed) throw new Error('模型请求失败，请检查模型配置或稍后重试。');
+      const toolResults: NonNullable<YuanpuChatResult['toolResults']> = [];
+      for (const entry of sessionManager.getBranch()) {
+        if (existingEntryIds.has(entry.id) || entry.type !== 'message' || entry.message.role !== 'toolResult') continue;
+        const resultText = entry.message.content.filter((block) => block.type === 'text')
+          .map((block) => block.text).join('\n');
+        if (!resultText) continue;
+        toolResults.push({ entryId: entry.id, toolCallId: entry.message.toolCallId,
+          name: entry.message.toolName, status: entry.message.isError ? 'failed' : 'completed',
+          text: resultText.slice(0, 4_000), truncated: resultText.length > 4_000 });
+        if (toolResults.length === 16) break;
+      }
       return {
         message: text.trim() || '完成。',
         tools: [...toolStates].map(([name, status]) => ({ name, status })),
+        ...(toolResults.length ? { toolResults } : {}),
+        ...(artifactCandidates.length ? { artifactCandidates } : {}),
         ...(pendingApprovalRequestId ? { pendingApprovalRequestId } : {}),
       };
     } catch (error) {

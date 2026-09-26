@@ -60,6 +60,11 @@ export interface AgentRunRequest {
 export interface AgentRunOutput {
   message: string;
   tools: Array<{ name: string; status: 'completed' | 'failed' }>;
+  /** Bounded text returned by executed tools. Call IDs are stable within the Pi session. */
+  toolResults?: Array<{ entryId: string; toolCallId: string; name: string; status: 'completed' | 'failed';
+    text: string; truncated: boolean }>;
+  /** Verified at Work execution settlement; reverified by the Host on each source read. */
+  artifacts?: Array<{ entryId: string; relativePath: string; sha256: string; size: number }>;
 }
 
 export interface AgentRunRecord {

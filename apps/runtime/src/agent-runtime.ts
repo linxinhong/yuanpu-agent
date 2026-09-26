@@ -8,6 +8,7 @@ import {
   type CreateYuanpuChatOptions,
   type YuanpuChatSession,
 } from '@yuanpu-agent/runtime-kit';
+import { inspectWorkArtifact } from './work-artifact.js';
 
 interface RuntimeAgentExecutorOptions {
   getCapabilityClient(): CapabilityToolClient;
@@ -82,6 +83,22 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
           userId: input.run.owner.identity.subjectId,
         },
       });
+      const artifacts = [];
+      if (input.run.owner.entryPoint === 'desktop'
+        && input.run.context.conversation.conversationId.startsWith('work:')) {
+        for (const candidate of result.artifactCandidates ?? []) {
+          const toolResult = result.toolResults?.find((item) =>
+            item.toolCallId === candidate.toolCallId && item.status === 'completed');
+          if (!toolResult) continue;
+          const artifact = await inspectWorkArtifact(input.run.context.workspaceId,
+            candidate.relativePath, toolResult.entryId);
+          if (artifact) artifacts.push({ entryId: artifact.entryId, relativePath: artifact.relativePath,
+            sha256: artifact.sha256, size: artifact.size });
+        }
+      }
+      const output = { message: result.message, tools: result.tools,
+        ...(result.toolResults ? { toolResults: result.toolResults } : {}),
+        ...(artifacts.length ? { artifacts } : {}) };
       if (result.pendingApprovalRequestId) {
         const approval = this.#options.approvals.get(result.pendingApprovalRequestId);
         if (
@@ -101,10 +118,10 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
             workspaceId: approval.workspaceId,
             expiresAt: approval.expiresAt,
           },
-          output: { message: result.message, tools: result.tools },
+          output,
         };
       }
-      return { kind: 'completed', output: { message: result.message, tools: result.tools } };
+      return { kind: 'completed', output };
     } finally {
       pooled.active -= 1;
       this.#disposeIfRetired(pooled);

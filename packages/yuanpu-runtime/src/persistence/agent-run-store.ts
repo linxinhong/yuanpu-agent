@@ -386,7 +386,7 @@ export class AgentRunStore {
       const owner = this.database.prepare(
         'SELECT entry_point FROM yp_agent_runs WHERE run_id = ?',
       ).get(input.runId) as { entry_point: string };
-      if (owner.entry_point === 'scheduler' && input.output) {
+      if ((owner.entry_point === 'scheduler' || owner.entry_point === 'desktop') && input.output) {
         this.database.prepare(`
           INSERT INTO yp_agent_run_outputs(run_id, output_json, created_at)
           VALUES (?, ?, ?)

@@ -5,10 +5,13 @@ import { dirname } from 'node:path';
 import type { AssistantSourceHost, AssistantSourcePage, AssistantSourceRead,
   AssistantSourceState } from '@yuanpu-agent/assistant';
 import type { AssistantHostStore, AssistantSourceLifecycleStore,
-  WorkConversationStore } from '@yuanpu-agent/runtime-kit';
+  WorkConversationStore, WorkEvidenceStore } from '@yuanpu-agent/runtime-kit';
+import { readYuanpuSavedToolResults } from '@yuanpu-agent/runtime-kit';
 import type { AssistantAudience, AssistantSourceChange } from '@yuanpu-agent/protocol';
+import { inspectWorkArtifact } from './work-artifact.js';
 
-const feeds = ['work', 'assistant', 'work-deletions', 'assistant-deletions', 'legacy-memory'] as const;
+const feeds = ['work', 'work-evidence', 'assistant', 'work-deletions',
+  'assistant-deletions', 'legacy-memory'] as const;
 const legacySourceId = 'legacy-memory:MEMORY';
 
 function cursorNumber(cursor: string): number {
@@ -26,7 +29,8 @@ function personal(audience: AssistantAudience): void {
 /** Runtime is the only resolver of host-owned content references. */
 export class RuntimeAssistantSourceHost implements AssistantSourceHost {
   constructor(private readonly work: WorkConversationStore, private readonly assistant: AssistantHostStore,
-    private readonly lifecycle: AssistantSourceLifecycleStore, private readonly legacyMemoryPath?: string) {}
+    private readonly lifecycle: AssistantSourceLifecycleStore, private readonly legacyMemoryPath?: string,
+    private readonly workEvidence?: WorkEvidenceStore, private readonly sessionsDirectory?: string) {}
 
   private async legacy(): Promise<{ sourceVersion: string; contentRef: string;
     text: string } | undefined> {
@@ -65,7 +69,7 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
 
   /** Called only after the host has authoritative confirmation of source deletion. */
   markDeleted(feedId: 'work' | 'assistant', sourceId: string): AssistantSourceChange {
-    const original = feedId === 'work' ? this.work.sourceById(sourceId)
+    const original = feedId === 'work' ? this.work.sourceById(sourceId) ?? this.workEvidence?.sourceById(sourceId)
       : this.assistant.currentSourceChange(sourceId);
     if (!original) throw new Error('Cannot delete an unknown source.');
     const audienceId = feedId === 'work' ? 'local-user' : (original as AssistantSourceChange).audience.id;
@@ -96,9 +100,9 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
       return { events: rows.map((row) => ({ eventId: String(row.eventId), change: row.change })),
       nextCursor: rows.length ? String(rows.at(-1)!.eventId) : afterCursor };
     }
-    const rows = feedId === 'work'
-      ? this.work.sourcePage(after, limit)
-      : this.assistant.sourcePage(after, limit);
+    const rows = feedId === 'work' ? this.work.sourcePage(after, limit)
+      : feedId === 'work-evidence' ? this.workEvidence?.sourcePage(after, limit) ?? []
+        : this.assistant.sourcePage(after, limit);
     return { events: rows.map((row) => ({ eventId: String(row.eventId), change: row.change })),
       nextCursor: rows.length ? String(rows.at(-1)!.eventId) : afterCursor };
   }
@@ -118,6 +122,15 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
         audience: { kind: 'personal', id: 'local-user' }, occurredAt: source.committedAt,
         contentRef: source.contentRef, workId: source.conversationId };
     }
+    if (sourceId.startsWith('work-tool:') || sourceId.startsWith('work-artifact:')) {
+      const deleted = this.lifecycle.deletion('work', sourceId);
+      if (deleted) return deleted;
+      const source = this.workEvidence?.sourceById(sourceId);
+      if (!source || !this.workEvidence?.workspaceForSource(source)) return undefined;
+      return { sourceId, sourceVersion: source.sourceVersion, kind: 'created',
+        audience: { kind: 'personal', id: 'local-user' }, occurredAt: source.committedAt,
+        contentRef: source.contentRef, workId: source.conversationId };
+    }
     const deleted = this.lifecycle.deletion('assistant', sourceId);
     if (deleted) return deleted;
     return this.assistant.currentSourceChange(sourceId);
@@ -128,6 +141,12 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
     const current = await this.latest(sourceId);
     if (!current || current.audience.kind !== audience.kind || current.audience.id !== audience.id) {
       return { status: 'temporarily_unavailable' };
+    }
+    if (sourceId.startsWith('work-artifact:') && current.kind !== 'deleted') {
+      const artifact = this.workEvidence?.sourceById(sourceId);
+      if (!artifact?.fileSha256 || artifact.fileSize === undefined || !artifact.relativePath) {
+        return { status: 'temporarily_unavailable', sourceVersion: current.sourceVersion };
+      }
     }
     return current.kind === 'deleted'
       ? { status: 'deleted', sourceVersion: current.sourceVersion }
@@ -161,6 +180,37 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
       }
       return { status: 'available', sourceVersion,
         text: `User:\n${source.userText}\n\nAssistant:\n${source.assistantText}`.slice(0, maxCharacters) };
+    }
+    if (sourceId.startsWith('work-tool:') || sourceId.startsWith('work-artifact:')) {
+      const source = this.workEvidence?.resolveContentRef(contentRef);
+      if (!source || source.sourceId !== sourceId || source.sourceVersion !== sourceVersion) {
+        return { status: 'temporarily_unavailable' };
+      }
+      const workspace = this.workEvidence?.workspaceForSource(source);
+      if (!workspace) return { status: 'temporarily_unavailable' };
+      if (source.kind === 'tool_result') {
+        if (this.sessionsDirectory) {
+          try {
+            const saved = readYuanpuSavedToolResults(workspace, source.piSessionId, this.sessionsDirectory)
+              .find((item) => item.entryId === source.entryId);
+            if (!saved || saved.name !== source.toolName || saved.status !== source.resultStatus
+              || saved.text !== source.text) return { status: 'temporarily_unavailable' };
+          } catch { return { status: 'temporarily_unavailable' }; }
+        }
+        return { status: 'available', sourceVersion,
+          text: `Tool ${source.toolName} (${source.resultStatus})${source.runId ? `, run ${source.runId}` : ', historical run unbound'}:\n${source.text ?? ''}`
+            .slice(0, maxCharacters) };
+      }
+      if (!source.relativePath || !source.fileSha256 || source.fileSize === undefined) {
+        return { status: 'temporarily_unavailable' };
+      }
+      const artifact = await inspectWorkArtifact(workspace, source.relativePath, source.entryId);
+      if (!artifact || artifact.sha256 !== source.fileSha256 || artifact.size !== source.fileSize) {
+        return { status: 'temporarily_unavailable' };
+      }
+      return { status: 'available', sourceVersion,
+        text: `Verified Work artifact ${source.relativePath}, run ${source.runId ?? 'unknown'}:\n${artifact.text}`
+          .slice(0, maxCharacters) };
     }
     const source = this.assistant.resolveContentRef(contentRef, audience.id);
     if (!source) return { status: 'temporarily_unavailable' };

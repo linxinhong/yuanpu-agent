@@ -64,6 +64,7 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_schedules',
     'yp_schema_migrations',
     'yp_work_conversations',
+    'yp_work_evidence_sources',
     'yp_work_source_event_sequence',
     'yp_work_turn_sources',
   ]);
@@ -88,7 +89,9 @@ test('v11 metadata gains deletion and legacy source ledgers without rewriting sa
   const path = join(root, 'automation.sqlite');
   openYuanpuMetadataDatabase(path).close();
   const old = new DatabaseSync(path);
-  old.exec(`DROP TABLE yp_assistant_source_deletions;
+  old.exec(`DROP TABLE yp_work_evidence_sources;
+    DELETE FROM yp_schema_migrations WHERE version=14;
+    DROP TABLE yp_assistant_source_deletions;
     DROP TABLE yp_assistant_legacy_memory_events;
     DELETE FROM yp_schema_migrations WHERE version=12;
     PRAGMA user_version=11;`);

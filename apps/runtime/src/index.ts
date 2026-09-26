@@ -24,6 +24,7 @@ import {
   capabilityManifestDigest,
   openYuanpuMetadataDatabase,
   readYuanpuChatTranscript,
+  readYuanpuSavedToolResults,
   PersistentAgentService,
   HostNotificationRouter,
   requestRecordedTerminalRunNotification,
@@ -564,6 +565,10 @@ async function serve(): Promise<void> {
       if (!piSessionId) continue;
       workConversations.recordSavedTurns(item.id,
         readYuanpuChatTranscript(item.workingDirectory, piSessionId, home.sessionsPath, Number.MAX_SAFE_INTEGER, true));
+      const savedTools = readYuanpuSavedToolResults(item.workingDirectory, piSessionId, home.sessionsPath);
+      metadata.workEvidence.recordToolResults(item.id, piSessionId, savedTools);
+      metadata.workEvidence.recordArtifacts(item.id, piSessionId);
+      metadata.workEvidence.recordUnverifiedArtifacts(item.id, piSessionId, savedTools);
     }
   };
   scanSavedWorkTurns();
@@ -588,7 +593,8 @@ async function serve(): Promise<void> {
   const assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
     sources: new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
-      metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md')),
+      metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md'),
+      metadata.workEvidence, home.sessionsPath),
     model: {
       appPath: home.appPath,
       agentPath: home.agentPath,
