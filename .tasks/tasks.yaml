@@ -1987,7 +1987,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-056
     title: "安全搬迁工作会话及文件夹的磁盘目录"
-    status: in_progress
+    status: done
     goal: "用户把会话或文件夹移到树中其他位置时，实际工作目录随之搬迁，Pi 历史、下一轮运行和文件预览继续指向正确目录。"
     scope:
       in: ["单会话与文件夹子树移动的受控磁盘迁移", "受影响会话的 cwd、绑定、Pi JSONL header 关联更新与迁移恢复", "运行中冲突、目标占用、根外目录、符号链接与中途失败处理"]
@@ -2014,10 +2014,18 @@ tasks:
       owner: "conversation-move-astra-10677"
       attempts: 0
       claimed_at: "2026-09-26T18:50:23.054Z"
-      completed_at: null
+      completed_at: "2026-09-26T19:51:25.185Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-move-astra"
       branch: "task/task-056-work-directory-move"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "implementation and tested tree", status: "passed", summary: "TASK-056 implementation 85aebbb; merged main 3930afb into tested HEAD 4a5ab7e, only task ledger changed. Main integration remains for orchestrator."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0 full build, Yuanpu type checks and tests passed for implementation tree retained by 85aebbb/4a5ab7e. Runner 1790450371414911000; 73.41s. Prior failure limited to stale v5 Desktop fixtures, fixed and separately verified."}
+        - {type: "assertion", check: "real disk, SQLite, Pi and recovery", status: "passed", summary: "24 focused tests passed at clean 4a5ab7e (runner 1790450478757655000): model tool writes at new cwd after cache drain; transcript append/source IDs stable; subtree archive/empty leaves; preview/read leases; 5 SIGKILL recovery boundaries; partial JSONL and SQLite failure rollback; approvals, queued/running, malformed state, paths, links, Git worktrees and permissions."}
+        - {type: "assertion", check: "Runtime route and preview", status: "passed", summary: "Authenticated HTTP move, Work list current cwd, file preview and requestId replay passed; protocol v6 with Desktop IPC/bridge. Runner 1790450098413913000 plus final full suite."}
+        - {type: "review", check: "independent move failure and concurrency review", status: "passed", summary: "review_move independently reviewed migration order/path containment/source ledger/preview/permissions. Fixed 3 P2 findings (uncached checkpoint, Git worktree registration, umask mode). Incremental review found no new blocking P1/P2; unknown state hardening also applied."}
+        - {type: "memory", check: ".tasks/memory/TASK-056.md", status: "passed", summary: "Task memory records implementation/tested revisions, environment, test logs, reviewer findings, integration handoff and limitations."}
+        - {type: "manual", check: "platform and malicious external process limits", status: "unverified", summary: "Windows/Linux/native/real user Home not exercised. Node rename has residual same-user external path-swap TOCTOU; linked Git worktrees are rejected pending a Git-aware migration flow. No Pi upstream edits or real user data touched."}
+        - {type: "test", check: "integrated main pnpm check", status: "passed", summary: "Integrated main 88d76b4 on Node 24.15.0/pnpm 11.22.0; pnpm check completed with exit 0, including 114 Runtime tests. Only unrelated .zcode plan remained unstaged; no source changes during run."}
       follow_up_candidates: []
   - id: TASK-057
     title: "实现工作文件夹与会话内容搜索"
