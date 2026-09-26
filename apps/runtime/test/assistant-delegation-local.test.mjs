@@ -139,6 +139,25 @@ test('local Pi adapter follows up in one isolated task session without leaking A
     goal: 'Check only the supplied source.', completionCriteria: ['Return a finding.'],
     contextRefs: ['source:one'], authorizedCapabilities: [], readOnly: true,
     deadlineAt: new Date(Date.now() + 60_000).toISOString() };
+  let releaseAuthorization;
+  let authorizationStarted;
+  const started = new Promise((resolve) => { authorizationStarted = resolve; });
+  const authorizationGate = new Promise((resolve) => { releaseAuthorization = resolve; });
+  const delayed = new LocalProfessionalAdapter({ root: join(root, 'delegations'), assistantHome,
+    skillsRoot, model, modelRuntime, host: { async authorizeTask() {
+      authorizationStarted();
+      await authorizationGate;
+      return { async readSource() { return 'bounded source'; },
+        async executeCapability() { throw new Error('No capability grant.'); } };
+    } } });
+  const cancelBeforeOpen = new AbortController();
+  const pending = delayed.run({ ...brief, taskId: 'task_cancelled_before_open' }, undefined,
+    cancelBeforeOpen.signal);
+  await started;
+  cancelBeforeOpen.abort();
+  releaseAuthorization();
+  await assert.rejects(pending, /abort/i);
+  assert.equal(requests.length, 0);
   await assert.rejects(adapter.run({ ...brief, taskId: 'task_denied', readOnly: false }, undefined,
     new AbortController().signal), /No write grant/);
   assert.equal(requests.length, 0);

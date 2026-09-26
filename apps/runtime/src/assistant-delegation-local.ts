@@ -211,14 +211,21 @@ export class LocalProfessionalAdapter implements DelegationExecutionAdapter {
     if (this.active.has(brief.taskId)) throw new Error('Professional task is already running.');
     signal.throwIfAborted();
     const access = await this.options.host.authorizeTask(brief);
+    signal.throwIfAborted();
     const scope: ProfessionalTaskScope = {
       taskId: brief.taskId, skillName: brief.skillName,
       contextRefs: brief.contextRefs, authorizedCapabilities: brief.authorizedCapabilities,
     };
     const opened = await createProfessionalSession({ ...this.options, scope, access });
     const { session } = opened;
+    if (signal.aborted) {
+      await session.abort();
+      session.dispose();
+      signal.throwIfAborted();
+    }
     const stop = () => { void session.abort(); };
     signal.addEventListener('abort', stop, { once: true });
+    if (signal.aborted) stop();
     const done = (async (): Promise<DelegationResult> => {
       let reply = '';
       let modelFailed = false;
