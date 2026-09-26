@@ -3,7 +3,7 @@ import type { UiDestination } from '../ui-registry.js';
 
 type AppView = UiDestination;
 
-export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' }) {
+export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate' }) {
   const paths = {
     work: <path d="M20 11.5c0 4.2-3.8 7.5-8.5 7.5-1.4 0-2.7-.3-3.8-.8L3 20l1.4-4.1A7.2 7.2 0 0 1 3 11.5C3 7.4 6.8 4 11.5 4S20 7.4 20 11.5Z" />,
     assistant: <><path d="m9 5 2.2 6.3L17.5 14l-6.3 2.7L9 23l-2.2-6.3L.5 14l6.3-2.7Z" transform="translate(2 -2) scale(.9)" /><path d="M18 2v6m-3-3h6" /></>,
@@ -27,6 +27,8 @@ export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-le
     shield: <path d="M12 2.8 20 6v5.6c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V6z" />,
     'shield-filled': <><path d="M12 2.8 20 6v5.6c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V6z" fill="currentColor" stroke="none" /><path d="m8.5 12 2.3 2.3 4.7-4.7" stroke="var(--yp-surface)" strokeWidth="2" /></>,
     edit: <><path d="M12 20h8M4 16.5V20h3.5L18.8 8.7l-3.5-3.5L4 16.5Z" /><path d="m13.8 6.7 3.5 3.5" /></>,
-  } satisfies Record<AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit', ReactNode>;
+    refresh: <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4h-4" /></>,
+    locate: <><circle cx="12" cy="12" r="6.5" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /></>,
+  } satisfies Record<AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate', ReactNode>;
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
