@@ -1317,7 +1317,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-039
     title: "隔离工作会话并保留历史"
-    status: in_progress
+    status: done
     goal: "新建工作从独立上下文开始，历史可读且回合形成可靠来源。"
     scope:
       in: ["Work conversation/session 创建、列表与后续回合路由", "取消全局长期记忆注入；旧 default 只读历史", "落盘后来源事件与重复补扫支持；现有 Work 页接入新建与历史"]
@@ -1344,15 +1344,18 @@ tasks:
       owner: "work-conversations-sol1"
       attempts: 0
       claimed_at: "2026-09-26T13:19:56.043Z"
-      completed_at: null
+      completed_at: "2026-09-26T14:02:17.516Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/work-conversations"
       branch: "task/task-039-work-conversations"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "7231776 and handoff 694da6a are ancestors of main 37cc8f8; Work sessions, read-only legacy default, and source ledger are integrated."}
+        - {type: "test", check: "Work conversation and source behavior", status: "passed", summary: "Owner focused tests and independent review verified new/switch/restart isolation, stable source event ID and contentRef, and no automatic memory injection. Browser fixture exercised current work, legacy read-only archive and new work."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Integrated on main 37cc8f8 through 4002d9b/37cc8f8; clean combined integration worktree passed pnpm check with Node 24.15.0 and pnpm 11.22.0. Main working tree retained pre-existing unrelated changes; main pnpm check also passed after three conflict resolutions, with changes unstaged."}
+        - {type: "boundary", check: "later implementation", status: "unverified", summary: "Real Assistant Worker consumption of Work source events and cloud sync remain later cards."}
       follow_up_candidates: []
-
   - id: TASK-040
     title: "接入助理进程与 SEA 生命周期"
-    status: pending
+    status: ready
     goal: "助理在 App 内独立运行、可恢复，退出后无孤儿工作进程。"
     scope:
       in: ["apps/runtime 专用 Worker 启动与宿主装配", "IPC 就绪/取消/期限/异常恢复；Home 单写锁", "SEA Worker 分发、Desktop 启停和升级清理"]
