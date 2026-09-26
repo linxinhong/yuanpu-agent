@@ -508,6 +508,19 @@ async function serve(): Promise<void> {
   });
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
+  const workConversations = metadata.workConversations;
+  const scanSavedWorkTurns = (conversationId?: string) => {
+    for (const item of workConversations.listExisting(home.config.workingDirectory)) {
+      if (conversationId && item.id !== conversationId) continue;
+      const piSessionId = workConversations.sessionId(home.config.workingDirectory, item.id);
+      if (!piSessionId) continue;
+      workConversations.recordSavedTurns(item.id,
+        readYuanpuChatTranscript(home.config.workingDirectory, piSessionId, home.sessionsPath, Number.MAX_SAFE_INTEGER, true));
+    }
+  };
+  scanSavedWorkTurns();
+  const workScanTimer = setInterval(() => { try { scanSavedWorkTurns(); } catch (error) { console.warn('[work-source]', error); } }, 60_000);
+  workScanTimer.unref();
   metadata.assistantLink.markInterruptedMirrorsUnknown();
   const agentExecutor = new RuntimeAgentExecutor({
     getCapabilityClient: () => mcp,
@@ -531,6 +544,13 @@ async function serve(): Promise<void> {
     onRunStateChanged: (run) => {
       requestRecordedTerminalRunNotification(notificationRouter, metadata.schedules, run);
       onAssistantRunChanged(run);
+      if (run.owner.entryPoint === 'desktop' && run.status === 'succeeded'
+        && run.context.conversation.conversationId.startsWith('work:')) {
+        try {
+          workConversations.touch(home.config.workingDirectory, run.context.conversation.conversationId, run.updatedAt);
+          scanSavedWorkTurns(run.context.conversation.conversationId);
+        } catch (error) { console.warn('[work-source]', error); }
+      }
     },
   });
   const desktopCaller: AuthenticatedAgentCaller = {
@@ -542,7 +562,8 @@ async function serve(): Promise<void> {
       authenticatedBy: 'electron',
     },
     authorizeWorkspace: (workspaceId) => workspaceId === home.config.workingDirectory,
-    authorizeConversation: (conversation) => conversation.namespace === 'desktop',
+    authorizeConversation: (conversation) => conversation.namespace === 'desktop'
+      && conversation.conversationId !== 'default',
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
   const wecomChannels: ChannelRouter[] = [];
@@ -722,6 +743,12 @@ async function serve(): Promise<void> {
     if (body.surface !== undefined && body.surface !== 'work' && body.surface !== 'assistant') {
       return { error: 'Unknown desktop conversation surface.' } as const;
     }
+    const workConversationId = body.surface === 'assistant' ? undefined
+      : body.conversationId === undefined ? workConversations.current(home.config.workingDirectory).id
+        : typeof body.conversationId === 'string' ? body.conversationId : undefined;
+    if (body.surface !== 'assistant' && (!workConversationId || !workConversations.row(home.config.workingDirectory, workConversationId))) {
+      return { error: 'Unknown or archived Work conversation.' } as const;
+    }
     let assistantLink;
     try {
       assistantLink = body.surface === 'assistant' ? metadata.assistantLink.current() : undefined;
@@ -733,7 +760,7 @@ async function serve(): Promise<void> {
       entryPoint: 'desktop',
       identity: desktopCaller.identity,
       workspaceId: home.config.workingDirectory,
-      conversation: { namespace: 'desktop', conversationId: body.surface === 'assistant' ? 'assistant' : 'default' },
+      conversation: { namespace: 'desktop', conversationId: body.surface === 'assistant' ? 'assistant' : workConversationId! },
       input: { type: 'text', text: body.message.trim() },
       idempotencyKey: randomUUID(),
       delivery: { kind: 'desktop' },
@@ -1020,6 +1047,29 @@ async function serve(): Promise<void> {
         return;
       }
 
+      if (url.pathname === RUNTIME_ROUTES.workConversations) {
+        if (request.method === 'GET') {
+          response.end(JSON.stringify(workConversations.list(home.config.workingDirectory)));
+          return;
+        }
+        if (request.method === 'POST') {
+          response.statusCode = 201;
+          response.end(JSON.stringify(workConversations.create(home.config.workingDirectory)));
+          return;
+        }
+        if (request.method === 'PUT') {
+          const body = await readJsonBody(request);
+          if (!isRecord(body) || typeof body.conversationId !== 'string') {
+            response.statusCode = 400;
+            response.end(JSON.stringify({ error: 'A Work conversation id is required.' }));
+            return;
+          }
+          try { response.end(JSON.stringify(workConversations.select(home.config.workingDirectory, body.conversationId))); }
+          catch { response.statusCode = 404; response.end(JSON.stringify({ error: 'Unknown Work conversation.' })); }
+          return;
+        }
+      }
+
       if (url.pathname === RUNTIME_ROUTES.desktopTranscript && request.method === 'GET') {
         const surface = url.searchParams.get('surface');
         if (surface !== 'work' && surface !== 'assistant' && surface !== 'assistantArchive') {
@@ -1037,9 +1087,17 @@ async function serve(): Promise<void> {
             return;
           }
         }
-        const piSessionId = surface === 'assistantArchive'
+        const workId = url.searchParams.get('conversationId') ?? workConversations.current(home.config.workingDirectory).id;
+        const piSessionId = surface === 'work'
+          ? workConversations.sessionId(home.config.workingDirectory, workId)
+          : surface === 'assistantArchive'
           ? metadata.assistantLink.archivedAssistantSessionId()
-          : metadata.assistantLink.sessionId(surface === 'work' ? 'default' : 'assistant');
+          : metadata.assistantLink.sessionId('assistant');
+        if (surface === 'work' && !piSessionId) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
         response.end(JSON.stringify(piSessionId
           ? readYuanpuChatTranscript(home.config.workingDirectory, piSessionId, home.sessionsPath)
           : []));
@@ -1672,7 +1730,7 @@ async function serve(): Promise<void> {
       closeNotificationRouter: () => notificationRouter.close(),
       closeAgentService: () => agentService.close(),
       ...(pythonSource ? { closePythonSource: () => pythonSource!.close() } : {}),
-      closeMetadata: () => metadata.close(),
+      closeMetadata: () => { clearInterval(workScanTimer); metadata.close(); },
     });
     return cleanupPromise;
   };

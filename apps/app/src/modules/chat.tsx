@@ -11,6 +11,7 @@ import type {
   NotificationNavigationTarget,
   AgentRunRecord,
   PrivateImRunSummary,
+  WorkConversation,
 } from '@yuanpu-agent/protocol';
 import mindlinkSeal from '../../themes/assets/mindlink-seal.png';
 
@@ -142,6 +143,12 @@ export function ChatPanel({
   const [runRecovery, setRunRecovery] = useState<{ runId: string; text: string }>();
   const [bridgeError, setBridgeError] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [workConversationId, setWorkConversationId] = useState<string>();
+  const [workListError, setWorkListError] = useState('');
+  const approvalContext = `${surface}:${workConversationId ?? ''}:${navigationTarget?.runId ?? ''}`;
+  const approvalContextRef = useRef(approvalContext);
+  const readyApprovalContextRef = useRef('');
+  approvalContextRef.current = approvalContext;
   const [copiedUserMessageId, setCopiedUserMessageId] = useState<number>();
   const sending = useRef(false);
   const settledRuns = useRef(new Map<string, AgentRunRecord>());
@@ -158,10 +165,20 @@ export function ChatPanel({
   const [watermarkCount, setWatermarkCount] = useState(1);
   const desktop = window.yuanpu;
   const queryClient = useQueryClient();
+  const workConversationsQuery = useQuery({
+    queryKey: ['work', 'conversations'],
+    queryFn: () => desktop!.listWorkConversations(),
+    enabled: active && surface === 'work' && Boolean(desktop),
+  });
+  const workArchived = surface === 'work' && workConversationId === 'default';
+  useEffect(() => {
+    if (surface !== 'work' || !workConversationsQuery.data || workConversationId) return;
+    setWorkConversationId(workConversationsQuery.data.find((item) => item.current)?.id);
+  }, [surface, workConversationsQuery.data, workConversationId]);
   const transcriptQuery = useQuery({
-    queryKey: ['assistant', 'transcript', surface],
-    queryFn: () => desktop!.getDesktopTranscript(surface),
-    enabled: active && Boolean(desktop),
+    queryKey: ['assistant', 'transcript', surface, workConversationId],
+    queryFn: () => desktop!.getDesktopTranscript(surface, surface === 'work' ? workConversationId : undefined),
+    enabled: active && Boolean(desktop) && (surface !== 'work' || Boolean(workConversationId)),
     refetchInterval: active ? 3000 : false,
   });
   const assistantLinkQuery = useQuery({
@@ -193,7 +210,7 @@ export function ChatPanel({
 
   useEffect(() => {
     if (busy || !transcriptQuery.data) return;
-    const key = `${assistantLinkQuery.data?.contactId ?? 'local'}:${JSON.stringify(transcriptQuery.data)}`;
+    const key = `${workConversationId ?? surface}:${assistantLinkQuery.data?.contactId ?? 'local'}:${JSON.stringify(transcriptQuery.data)}`;
     if (key === appliedTranscript.current) return;
     appliedTranscript.current = key;
     nextId.current = transcriptQuery.data.length + 1;
@@ -204,10 +221,10 @@ export function ChatPanel({
         const run = item.role === 'assistant' ? (sameMessage ? previous?.run : undefined) ?? findReplyRun(surface, item.id, item.text, item.at) : undefined;
         return sameMessage ? { ...previous, at: item.at, run } : { id: index + 1, role: item.role, text: item.text, at: item.at, run };
       })
-      : surface === 'assistant'
+      : workArchived ? [] : surface === 'assistant'
         ? [{ ...initialMessages[0]!, text: assistantGreeting }]
         : initialMessages);
-  }, [busy, transcriptQuery.data, assistantLinkQuery.data?.contactId, surface]);
+  }, [busy, transcriptQuery.data, assistantLinkQuery.data?.contactId, surface, workConversationId, workArchived]);
 
   useEffect(() => {
     try { window.localStorage.setItem(`yuanpu:draft:${surface}`, input); }
@@ -276,17 +293,28 @@ export function ChatPanel({
 
   async function refreshApprovals() {
     if (!desktop) return [];
+    const requestedContext = approvalContext;
     const pendingApprovals = await desktop.listCapabilityApprovals();
     const ready = await Promise.all(pendingApprovals.map(async (approval) => {
-      if (!approval.runId) return approval.requestId;
-      const run = await desktop.getAgentRun(approval.runId);
-      return run.status === 'waiting_approval' && run.pendingApproval?.approvalRequestId === approval.requestId
+      if (!approval.runId) return undefined;
+      const run = await desktop.getAgentRun(approval.runId).catch(() => undefined);
+      if (!run) return undefined;
+      const visibleHere = navigationTarget?.runId === run.runId || (
+        run.owner.entryPoint === 'desktop'
+        && run.context.conversation.conversationId === (surface === 'work' ? workConversationId : 'assistant')
+      );
+      return visibleHere && run.status === 'waiting_approval' && run.pendingApproval?.approvalRequestId === approval.requestId
         ? approval.requestId : undefined;
     }));
+    if (requestedContext !== approvalContextRef.current) return [];
+    const visibleIds = new Set(ready.filter((id): id is string => Boolean(id)));
+    readyApprovalContextRef.current = requestedContext;
     setBridgeError(false);
-    setReadyApprovals(new Set(ready.filter((id): id is string => Boolean(id))));
-    setApprovals(pendingApprovals.filter((approval) => !resolvedApprovals.current.has(approval.requestId)));
-    return pendingApprovals;
+    setReadyApprovals(visibleIds);
+    const visible = pendingApprovals.filter((approval) => visibleIds.has(approval.requestId)
+      && !resolvedApprovals.current.has(approval.requestId));
+    setApprovals(visible);
+    return visible;
   }
 
   useEffect(() => {
@@ -295,7 +323,7 @@ export function ChatPanel({
     refresh();
     const timer = window.setInterval(refresh, 1_500);
     return () => window.clearInterval(timer);
-  }, [desktop, active]);
+  }, [desktop, active, surface, workConversationId, navigationTarget?.runId]);
 
   useEffect(() => {
     const runId = navigationTarget?.runId;
@@ -404,10 +432,55 @@ export function ChatPanel({
     finally { sending.current = false; setBusy(false); }
   }
 
+  async function openWorkConversation(item: WorkConversation) {
+    if (!desktop || busy || runRecovery || approvalBusy || item.id === workConversationId) return;
+    setWorkListError('');
+    try {
+      if (!item.archived) await desktop.selectWorkConversation(item.id);
+      setWorkConversationId(item.id);
+      setMessages([]);
+      setApprovals([]);
+      setReadyApprovals(new Set());
+      readyApprovalContextRef.current = '';
+      setInput('');
+      setAttachments([]);
+      setAttachmentError('');
+      setLastRun(undefined);
+      setActiveRunId(undefined);
+      setActivityEvents([]);
+      activityEventsRef.current = [];
+      appliedTranscript.current = '';
+      void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
+    } catch (error) { setWorkListError(formatError(error)); }
+  }
+
+  async function newWorkConversation() {
+    if (!desktop || busy || runRecovery || approvalBusy) return;
+    setWorkListError('');
+    try {
+      const item = await desktop.createWorkConversation();
+      setWorkConversationId(item.id);
+      setMessages([initialMessages[0]!]);
+      setApprovals([]);
+      setReadyApprovals(new Set());
+      readyApprovalContextRef.current = '';
+      setInput('');
+      setAttachments([]);
+      setAttachmentError('');
+      setLastRun(undefined);
+      setActiveRunId(undefined);
+      setActivityEvents([]);
+      activityEventsRef.current = [];
+      appliedTranscript.current = '';
+      void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
+    } catch (error) { setWorkListError(formatError(error)); }
+  }
+
   async function sendMessage() {
     const draft = input.trim();
     const includedAttachments = attachments;
-    if ((!draft && !includedAttachments.length) || sending.current || runRecovery) return;
+    if ((!draft && !includedAttachments.length) || sending.current || runRecovery || workArchived
+      || (surface === 'work' && desktop && !workConversationId)) return;
     const text = includedAttachments.length
       ? `${draft || '请阅读附件。'}\n\n${includedAttachments.map((file) => `附件 ${file.name}：\n${file.contents}`).join('\n\n')}`
       : draft;
@@ -423,7 +496,7 @@ export function ChatPanel({
         setMessages((current) => [...current, { id: nextId.current++, role: 'assistant',
           text: '这是浏览器预览回复。通过桌面应用启动后，消息会交给本地助理处理。' }]);
       } else {
-        const receipt = await desktop.submitDesktopMessage(text, surface);
+        const receipt = await desktop.submitDesktopMessage(text, surface, surface === 'work' ? workConversationId : undefined);
         setActiveRunId(receipt.runId);
         setActiveRunStatus(receipt.status);
         recordActivity(receipt.runId, '已提交任务', 'done');
@@ -437,7 +510,8 @@ export function ChatPanel({
     } finally {
       sending.current = false;
       setBusy(false);
-      void queryClient.invalidateQueries({ queryKey: ['assistant', 'transcript', surface] });
+      void queryClient.invalidateQueries({ queryKey: ['assistant', 'transcript', surface, workConversationId] });
+      if (surface === 'work') void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
       void refreshApprovals().catch(() => setBridgeError(true));
     }
   }
@@ -489,7 +563,8 @@ export function ChatPanel({
     approval: CapabilityApprovalSummary,
     decision: 'approved' | 'denied',
   ) {
-    if (!desktop || approvalBusy || !readyApprovals.has(approval.requestId)) return;
+    if (!desktop || approvalBusy || !readyApprovals.has(approval.requestId)
+      || readyApprovalContextRef.current !== approvalContextRef.current) return;
     setApprovalBusy(approval.requestId);
     try {
       const result = await desktop.decideCapabilityApproval(approval.requestId, decision);
@@ -564,13 +639,13 @@ export function ChatPanel({
       style={{ '--yp-right-panel-width': `${rightPanelWidth}px` } as CSSProperties} aria-hidden={!active}>
       <header className="chat-header">
           <div className="chat-heading">
-            <button type="button" className="chat-list-toggle" title={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}（界面预览）`}
-              aria-label={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}（界面预览）`} aria-expanded={listOpen}
+            <button type="button" className="chat-list-toggle" title={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`}
+              aria-label={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`} aria-expanded={listOpen}
               onClick={() => setListOpen((value) => !value)}><AppIcon name="panel-left" /></button>
             <span className="chat-toolbar-divider" aria-hidden="true" />
             <nav className="chat-breadcrumb" aria-label="会话位置">
               <span>{surface === 'work' ? '工作' : '助理'}</span><AppIcon name="chevron" />
-              <strong>{archiveOpen ? '原桌面会话' : scheduleOrigin ? '定时任务会话' : '当前会话'}</strong>
+              <strong>{workArchived ? '旧工作归档' : archiveOpen ? '原桌面会话' : scheduleOrigin ? '定时任务会话' : '当前会话'}</strong>
             </nav>
             <button type="button" className="chat-rename-preview" disabled title="重命名会话尚未接入（界面预览）" aria-label="重命名会话（界面预览）"><AppIcon name="edit" /></button>
           </div>
@@ -609,10 +684,22 @@ export function ChatPanel({
             </button>}
           </div>}
       </header>
-      {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表预览' : '会话列表预览'}>
-        <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong></div>
-        <div className="conversation-list-current"><span>{archiveOpen ? '原桌面会话' : '当前会话'}</span><small>当前</small></div>
-        <p>历史会话列表尚未接入，此处为界面预览。</p>
+      {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表' : '会话列表预览'}>
+        <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong>
+          {surface === 'work' && <button type="button" className="work-new-button" disabled={busy || Boolean(runRecovery) || Boolean(approvalBusy) || !desktop}
+            onClick={() => void newWorkConversation()}>新建工作</button>}</div>
+        {surface === 'work' ? <>
+          {workConversationsQuery.isLoading && <p>正在读取工作列表…</p>}
+          {workConversationsQuery.error && <p role="alert">工作列表读取失败：{formatError(workConversationsQuery.error)}</p>}
+          {workListError && <p role="alert">{workListError}</p>}
+          <div className="work-conversation-list">{workConversationsQuery.data?.map((item) =>
+            <button key={item.id} type="button" className="work-conversation-item" aria-current={item.id === workConversationId ? 'page' : undefined}
+              disabled={busy || Boolean(runRecovery) || Boolean(approvalBusy)} onClick={() => void openWorkConversation(item)}>
+              <span>{item.archived ? '旧工作归档' : `工作 · ${new Date(item.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`}</span>
+              <small>{item.archived ? '只读' : item.id === workConversationId ? '当前' : ''}</small>
+            </button>)}</div>
+        </> : <><div className="conversation-list-current"><span>{archiveOpen ? '原桌面会话' : '当前会话'}</span><small>当前</small></div>
+          <p>历史会话列表尚未接入，此处为界面预览。</p></>}
       </aside>}
       <div className="chat-main">
         {surface === 'work' && emptyConversation && <div className="mindlink-work-background" aria-hidden="true">
@@ -694,7 +781,7 @@ export function ChatPanel({
               </div>)}
               {retryMirror.error && <p role="alert">{formatError(retryMirror.error)}</p>}
             </div> : null}
-            {!archiveOpen && approvals.map((approval) => (
+            {!archiveOpen && !workArchived && readyApprovalContextRef.current === approvalContext && approvals.map((approval) => (
               <article className="approval-card" key={approval.requestId}>
                 <div className="approval-heading">
                   <span>待确认</span>
@@ -715,7 +802,7 @@ export function ChatPanel({
                 </div>
               </article>
             ))}
-            {!archiveOpen && busy && (
+            {!archiveOpen && !workArchived && busy && (
               <article className="message assistant pending">
                 <div className="message-label">YuanpuAgent</div>
                 <div className="thinking"><span /><span /><span /> {activeRunStatus === 'waiting_approval' ? '等待授权' : '正在处理'}{activeRunId && <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(activeRunId)}>取消任务</button>}</div>
@@ -740,8 +827,8 @@ export function ChatPanel({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={archiveOpen ? '归档只读，请返回已绑定会话继续对话' : '今天帮你做些什么？'}
-              disabled={archiveOpen}
+              placeholder={workArchived ? '旧工作归档只读，请选择或新建工作' : archiveOpen ? '归档只读，请返回已绑定会话继续对话' : '今天帮你做些什么？'}
+              disabled={archiveOpen || workArchived || (surface === 'work' && Boolean(desktop) && !workConversationId)}
               rows={2}
             />
             {attachments.length > 0 && <div className="composer-attachments" aria-label="待发送附件">
@@ -751,14 +838,14 @@ export function ChatPanel({
             </div>}
             <div className="composer-toolbar">
               <div className="composer-actions">
-                <button type="button" className="composer-utility" title="添加文本附件" aria-label="添加附件" disabled={archiveOpen || busy}
+                <button type="button" className="composer-utility" title="添加文本附件" aria-label="添加附件" disabled={archiveOpen || workArchived || busy}
                   onClick={() => attachmentInput.current?.click()}><AppIcon name="plus" /></button>
                 <button type="button" className="composer-redaction-preview" title={`脱敏${redactionPreviewEnabled ? '已选中' : '未选中'} · 界面预览，尚未生效`}
                   aria-label={`${redactionPreviewEnabled ? '关闭' : '启用'}脱敏（界面预览，尚未生效）`} aria-pressed={redactionPreviewEnabled}
                   onClick={() => setRedactionPreviewEnabled((value) => !value)}><AppIcon name={redactionPreviewEnabled ? 'shield-filled' : 'shield'} /></button>
               </div>
-              {(archiveOpen || busy) && <span className="composer-hint">{archiveOpen ? '原桌面会话归档只读' : '任务执行中'}</span>}
-              <button type="button" onClick={() => void sendMessage()} disabled={archiveOpen || (!input.trim() && attachments.length === 0) || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>
+              {(archiveOpen || workArchived || busy) && <span className="composer-hint">{workArchived ? '旧工作归档只读' : archiveOpen ? '原桌面会话归档只读' : '任务执行中'}</span>}
+              <button type="button" onClick={() => void sendMessage()} disabled={archiveOpen || workArchived || (surface === 'work' && Boolean(desktop) && !workConversationId) || (!input.trim() && attachments.length === 0) || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>
             </div>
           </div>
           {attachmentError && <p className="composer-attachment-error" role="alert">{attachmentError}</p>}
