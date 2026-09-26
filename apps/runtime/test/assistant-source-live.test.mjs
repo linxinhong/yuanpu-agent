@@ -66,6 +66,9 @@ test('real Runtime source adapter pages saved Work and Assistant turns into Work
     try {
       assert.equal(db.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status='processed'").get().n, 2);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_text').get().n, 2);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+        WHERE kind IN ('review-work','understand-user')`).get().n, 2,
+      'real saved turns must enter the durable assistant automation queue');
       assert.equal(db.prepare('SELECT cursor FROM source_feeds WHERE feed_id=?').get('work').cursor,
         workPage.nextCursor);
     } finally { db.close(); }
@@ -82,6 +85,8 @@ test('real Runtime source adapter pages saved Work and Assistant turns into Work
         .get(deleted.sourceId).availability, 'deleted');
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_text WHERE source_id=?')
         .get(deleted.sourceId).n, 0);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+        WHERE kind='maintain-memory' AND source_id=?`).get(deleted.sourceId).n, 1);
     } finally { db.close(); }
   });
   await first.stop();

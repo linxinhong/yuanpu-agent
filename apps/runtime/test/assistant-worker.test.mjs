@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
@@ -52,6 +53,96 @@ async function stopWorker(child) {
   child.send({ kind: 'shutdown' });
   await new Promise((resolveExit) => child.once('exit', resolveExit));
 }
+
+test('headless Worker performs local daily and weekly checks, then stops with the host', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-automation-worker-'));
+  const assistantHome = join(root, 'assistant');
+  const worker = startWorker(assistantHome);
+  t.after(async () => { await stopWorker(worker.child); await rm(root, { recursive: true, force: true }); });
+  worker.child.on('message', (message) => {
+    if (message.kind === 'source-request' && message.method === 'listChanges') {
+      worker.child.send({ kind: 'source-result', id: message.id,
+        value: { events: [], nextCursor: message.args[1] } });
+    }
+  });
+  await nextMessage(worker.child, (message) => message.kind === 'ready');
+  const state = join(assistantHome, 'state.sqlite');
+  const deadline = Date.now() + 12_000;
+  let completed = 0;
+  while (Date.now() < deadline && completed < 2) {
+    try {
+      const database = new DatabaseSync(state);
+      try { completed = database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+        WHERE kind IN ('daily-check','weekly-check') AND status='completed'`).get().n; }
+      finally { database.close(); }
+    } catch { /* first pump may still be creating the database */ }
+    if (completed < 2) await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+  }
+  assert.equal(completed, 2);
+  await stopWorker(worker.child);
+  const database = new DatabaseSync(state);
+  try {
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checkpoints').get().n, 2);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checks').get().n, 2);
+  } finally { database.close(); }
+});
+
+test('delegation change enters durable queue and restart reconciles the latest host status', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-delegation-automation-'));
+  const assistantHome = join(root, 'assistant');
+  const taskId = 'delegated-1';
+  const assistantSessionId = 'assistant-session-1';
+  await mkdir(join(assistantHome, 'delegations'), { recursive: true });
+  await writeFile(join(assistantHome, 'delegations', `${taskId}.json`),
+    JSON.stringify({ taskId, assistantSessionId }));
+  let record = { taskId, assistantSessionId, status: 'running', followUps: [],
+    updatedAt: '2026-09-27T00:00:00.000Z' };
+  let worker;
+  t.after(async () => { await stopWorker(worker?.child); await rm(root, { recursive: true, force: true }); });
+  const launch = async () => {
+    worker = startWorker(assistantHome);
+    worker.child.on('message', (message) => {
+      if (message.kind === 'source-request' && message.method === 'listChanges') {
+        worker.child.send({ kind: 'source-result', id: message.id,
+          value: { events: [], nextCursor: message.args[1] } });
+      }
+      if (message.kind === 'delegation-request' && message.method === 'status') {
+        worker.child.send({ kind: 'delegation-result', id: message.id, value: record });
+      }
+    });
+    await nextMessage(worker.child, (message) => message.kind === 'ready');
+  };
+  const count = () => {
+    const database = new DatabaseSync(join(assistantHome, 'state.sqlite'));
+    try { return database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+      WHERE kind='verify-delegation'`).get().n; }
+    finally { database.close(); }
+  };
+  const eventuallyCount = async (expected) => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try { if (count() === expected) return; } catch { /* Worker may still be initializing */ }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    }
+    assert.equal(count(), expected);
+  };
+  await launch();
+  worker.child.send({ kind: 'delegation-event', record });
+  await eventuallyCount(1);
+  await stopWorker(worker.child);
+  record = { ...record, status: 'completed', updatedAt: '2026-09-27T00:01:00.000Z',
+    result: { status: 'completed', resultRef: 'opaque:delegation-result' } };
+  await launch();
+  await eventuallyCount(2);
+  await stopWorker(worker.child);
+  const database = new DatabaseSync(join(assistantHome, 'state.sqlite'));
+  try {
+    assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+      WHERE kind='verify-delegation' AND status='cancelled'`).get().n, 1);
+    assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+      WHERE kind='verify-delegation' AND status IN ('queued','waiting')`).get().n, 1);
+  } finally { database.close(); }
+});
 
 test('one headless Worker owns Home and a second writer is rejected', async (t) => {
   const assistantHome = await home(t);
