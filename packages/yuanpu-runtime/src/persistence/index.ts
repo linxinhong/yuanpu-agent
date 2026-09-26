@@ -16,7 +16,7 @@ export * from './assistant-host-store.js';
 export * from './assistant-source-lifecycle-store.js';
 export * from './work-conversation-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 12;
+export const YUANPU_METADATA_SCHEMA_VERSION = 13;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -457,6 +457,65 @@ const migrations: readonly Migration[] = [{
       occurred_at TEXT NOT NULL
     ) STRICT;
   `,
+}, {
+  version: 13,
+  sql: '',
+  apply(database) {
+    const columns = new Set((database.prepare('PRAGMA table_info(yp_work_conversations)').all() as
+      Array<{ name: string }>).map((column) => column.name));
+    for (const [name, definition] of [
+      ['title', "TEXT NOT NULL DEFAULT ''"], ['icon_id', "TEXT NOT NULL DEFAULT 'chat'"],
+      ['folder_id', 'TEXT'], ['sort_order', 'INTEGER NOT NULL DEFAULT 0'], ['archived_at', 'TEXT'],
+      ['request_id', 'TEXT'],
+    ] as const) {
+      if (!columns.has(name)) database.exec(`ALTER TABLE yp_work_conversations ADD COLUMN ${name} ${definition}`);
+    }
+    database.exec(`
+    CREATE TABLE IF NOT EXISTS yp_work_folders (
+      folder_id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      parent_id TEXT,
+      name TEXT NOT NULL,
+      icon_id TEXT NOT NULL,
+      relative_directory TEXT NOT NULL,
+      sort_order INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      request_id TEXT,
+      UNIQUE(workspace_id, relative_directory),
+      FOREIGN KEY(parent_id) REFERENCES yp_work_folders(folder_id)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS yp_work_folders_siblings ON yp_work_folders(workspace_id,parent_id,sort_order);
+    CREATE TABLE IF NOT EXISTS yp_work_tags (
+      tag_id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      request_id TEXT,
+      UNIQUE(workspace_id,name)
+    ) STRICT;
+    CREATE TABLE IF NOT EXISTS yp_work_conversation_tags (
+      conversation_id TEXT NOT NULL REFERENCES yp_work_conversations(conversation_id) ON DELETE CASCADE,
+      tag_id TEXT NOT NULL REFERENCES yp_work_tags(tag_id) ON DELETE CASCADE,
+      PRIMARY KEY(conversation_id,tag_id)
+    ) STRICT;
+    UPDATE yp_work_conversations SET sort_order = rowid WHERE sort_order = 0;
+    CREATE UNIQUE INDEX IF NOT EXISTS yp_work_conversations_request ON yp_work_conversations(workspace_id,request_id)
+      WHERE request_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS yp_work_folders_request ON yp_work_folders(workspace_id,request_id)
+      WHERE request_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS yp_work_tags_request ON yp_work_tags(workspace_id,request_id)
+      WHERE request_id IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS yp_work_create_intents (
+      node_id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      relative_directory TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('folder','conversation'))
+    ) STRICT;
+    `);
+  },
 }];
 
 function assertWorkSourceEventSchema(database: DatabaseSync): void {
@@ -575,6 +634,16 @@ function applyMigrations(database: DatabaseSync): number {
     }
   }
   if (!workDirectoryColumn(database)) throw new Error('Missing Work working_directory column.');
+  const workColumns = new Set((database.prepare('PRAGMA table_info(yp_work_conversations)').all() as
+    Array<{ name: string }>).map((column) => column.name));
+  if (['title', 'icon_id', 'folder_id', 'sort_order', 'archived_at', 'request_id'].some((name) => !workColumns.has(name))) {
+    throw new Error('Missing Work tree metadata columns.');
+  }
+  for (const name of ['yp_work_folders', 'yp_work_tags', 'yp_work_conversation_tags', 'yp_work_create_intents']) {
+    const object = database.prepare('SELECT type FROM sqlite_master WHERE name=?').get(name) as
+      { type: string } | undefined;
+    if (object?.type !== 'table') throw new Error(`Missing Work tree metadata table: ${name}.`);
+  }
   assertCompatibleAssistantHostSchema(database, true);
   assertWorkSourceEventSchema(database);
   const deletions = database.prepare(`SELECT type FROM sqlite_master

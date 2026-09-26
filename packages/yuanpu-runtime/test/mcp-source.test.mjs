@@ -51,10 +51,10 @@ function pythonSource(overrides = {}) {
 
 test('real Python MCP discovery and execution preserve structured results and errors', async (context) => {
   await access(pythonExecutable);
-  const source = pythonSource({ initializationTimeoutMs: process.platform === 'win32' ? 90_000 : undefined });
+  const source = pythonSource({ initializationTimeoutMs: process.platform === 'win32' ? 90_000 : 20_000 });
   context.after(() => source.close());
   const server = createYuanpuMcpServer([source], undefined, {
-    discoveryTimeoutMs: process.platform === 'win32' ? 90_000 : undefined,
+    discoveryTimeoutMs: process.platform === 'win32' ? 90_000 : 20_000,
   });
   const search = await server.search({ query: 'echo' });
   const echo = search.matches.find((match) => match.originalName === 'yuanpu_echo_text');

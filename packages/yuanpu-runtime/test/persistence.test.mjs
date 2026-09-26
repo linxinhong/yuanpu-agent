@@ -63,8 +63,12 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_schedule_triggers',
     'yp_schedules',
     'yp_schema_migrations',
+    'yp_work_conversation_tags',
     'yp_work_conversations',
+    'yp_work_create_intents',
+    'yp_work_folders',
     'yp_work_source_event_sequence',
+    'yp_work_tags',
     'yp_work_turn_sources',
   ]);
   assert.equal(
@@ -90,7 +94,7 @@ test('v11 metadata gains deletion and legacy source ledgers without rewriting sa
   const old = new DatabaseSync(path);
   old.exec(`DROP TABLE yp_assistant_source_deletions;
     DROP TABLE yp_assistant_legacy_memory_events;
-    DELETE FROM yp_schema_migrations WHERE version=12;
+    DELETE FROM yp_schema_migrations WHERE version>=12;
     PRAGMA user_version=11;`);
   old.prepare(`INSERT INTO yp_work_turn_sources(conversation_id,turn_id,run_id,content_ref,
     source_version,committed_at,user_text,assistant_text) VALUES (?,?,?,?,?,?,?,?)`)
@@ -215,6 +219,7 @@ test('a historical Work directory shape without workspace_id is rejected without
   malformed.exec(`PRAGMA foreign_keys = OFF;
     DELETE FROM yp_schema_migrations WHERE version >= 9;
     PRAGMA user_version = 8;
+    DROP INDEX yp_work_conversations_request;
     ALTER TABLE yp_work_conversations DROP COLUMN workspace_id;`);
   malformed.close();
   assert.throws(() => openYuanpuMetadataDatabase(path), /Incompatible Work workspace_id column/);

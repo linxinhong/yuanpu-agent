@@ -170,6 +170,7 @@ export function ChatPanel({
   const [bridgeError, setBridgeError] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [workConversationId, setWorkConversationId] = useState<string>();
+  const pendingWorkCreateRequestId = useRef<string | undefined>(undefined);
   const [workListError, setWorkListError] = useState('');
   const approvalContext = `${surface}:${workConversationId ?? ''}:${navigationTarget?.runId ?? ''}`;
   const approvalContextRef = useRef(approvalContext);
@@ -524,7 +525,10 @@ export function ChatPanel({
     if (!desktop || busy || runRecovery || approvalBusy) return;
     setWorkListError('');
     try {
-      const item = await desktop.createWorkConversation();
+      const requestId = pendingWorkCreateRequestId.current ?? crypto.randomUUID();
+      pendingWorkCreateRequestId.current = requestId;
+      const item = await desktop.createWorkConversation(undefined, requestId);
+      pendingWorkCreateRequestId.current = undefined;
       setWorkConversationId(item.id);
       setMessages([initialMessages[0]!]);
       setApprovals([]);
