@@ -57,11 +57,25 @@ function change(source: WorkEvidenceSource): AssistantSourceChange {
 export class WorkEvidenceStore {
   constructor(private readonly database: DatabaseSync) {}
 
+  private boundWorkspace(conversationId: string, piSessionId: string): string | undefined {
+    const row = this.database.prepare(`SELECT b.workspace_id FROM yp_conversation_bindings b
+      LEFT JOIN yp_work_conversations w ON w.conversation_id=b.conversation_id
+      WHERE b.conversation_id=? AND b.pi_session_id=? AND b.entry_point='desktop'
+        AND b.authority_id='local-desktop' AND b.subject_id='local-user'
+        AND b.namespace='desktop' AND b.thread_id=''
+        AND ((b.conversation_id='default' AND w.conversation_id IS NULL)
+          OR (b.conversation_id<>'default' AND w.pi_session_id=b.pi_session_id
+            AND w.working_directory=b.workspace_id)) LIMIT 1`)
+      .get(conversationId, piSessionId) as { workspace_id: string } | undefined;
+    return row?.workspace_id;
+  }
+
   private runByEntry(conversationId: string, piSessionId: string): Map<string, string> {
     const rows = this.database.prepare(`SELECT r.run_id, o.output_json FROM yp_agent_runs r
       JOIN yp_conversation_bindings b ON b.binding_id=r.binding_id
       JOIN yp_agent_run_outputs o ON o.run_id=r.run_id
-      WHERE r.entry_point='desktop' AND r.status='succeeded'
+      WHERE r.entry_point='desktop' AND r.authority_id='local-desktop'
+        AND r.subject_id='local-user' AND r.status='succeeded'
         AND b.conversation_id=? AND b.pi_session_id=?`)
       .all(conversationId, piSessionId) as Array<{ run_id: string; output_json: string }>;
     const runs = new Map<string, string>();
@@ -81,12 +95,9 @@ export class WorkEvidenceStore {
 
   recordToolResults(conversationId: string, piSessionId: string,
     results: readonly SavedWorkToolResult[]): number {
-    const binding = this.database.prepare(`SELECT 1 FROM yp_conversation_bindings b
-      JOIN yp_work_conversations w ON w.conversation_id=b.conversation_id
-      WHERE b.conversation_id=? AND b.pi_session_id=? AND b.entry_point='desktop'
-        AND b.subject_id='local-user' LIMIT 1`)
-      .get(conversationId, piSessionId);
-    if (!binding) throw new Error('Work evidence is not bound to a local conversation.');
+    if (!this.boundWorkspace(conversationId, piSessionId)) {
+      throw new Error('Work evidence is not bound to a local conversation.');
+    }
     const runs = this.runByEntry(conversationId, piSessionId);
     let inserted = 0;
     this.database.exec('BEGIN IMMEDIATE');
@@ -121,10 +132,14 @@ export class WorkEvidenceStore {
 
   /** Only the host-verified descriptors durably settled with a successful Work run count. */
   recordArtifacts(conversationId: string, piSessionId: string): number {
+    if (!this.boundWorkspace(conversationId, piSessionId)) {
+      throw new Error('Work artifact is not bound to a local conversation.');
+    }
     const rows = this.database.prepare(`SELECT r.run_id,r.updated_at,o.output_json
       FROM yp_agent_runs r JOIN yp_conversation_bindings b ON b.binding_id=r.binding_id
       JOIN yp_agent_run_outputs o ON o.run_id=r.run_id
-      WHERE r.entry_point='desktop' AND r.status='succeeded' AND b.conversation_id=?
+      WHERE r.entry_point='desktop' AND r.authority_id='local-desktop'
+        AND r.subject_id='local-user' AND r.status='succeeded' AND b.conversation_id=?
         AND b.pi_session_id=? ORDER BY r.created_at,r.rowid`)
       .all(conversationId, piSessionId) as Array<{ run_id: string; updated_at: string; output_json: string }>;
     let inserted = 0;
@@ -184,11 +199,9 @@ export class WorkEvidenceStore {
   /** Historical file tools without a verified descriptor remain visible as unavailable, never guessed. */
   recordUnverifiedArtifacts(conversationId: string, piSessionId: string,
     results: readonly SavedWorkToolResult[]): number {
-    const workspace = this.database.prepare(`SELECT 1 FROM yp_work_conversations w
-      JOIN yp_conversation_bindings b ON b.conversation_id=w.conversation_id
-      WHERE w.conversation_id=? AND b.pi_session_id=? AND b.entry_point='desktop'
-        AND b.subject_id='local-user' LIMIT 1`).get(conversationId, piSessionId);
-    if (!workspace) throw new Error('Work artifact is not bound to a local conversation.');
+    if (!this.boundWorkspace(conversationId, piSessionId)) {
+      throw new Error('Work artifact is not bound to a local conversation.');
+    }
     let inserted = 0;
     this.database.exec('BEGIN IMMEDIATE');
     try {
@@ -260,12 +273,8 @@ export class WorkEvidenceStore {
 
   /** Recheck the local owner and run every time the host resolves a reference. */
   workspaceForSource(source: WorkEvidenceSource): string | undefined {
-    const row = this.database.prepare(`SELECT w.working_directory FROM yp_work_conversations w
-      JOIN yp_conversation_bindings b ON b.conversation_id=w.conversation_id
-      WHERE w.conversation_id=? AND b.pi_session_id=? AND b.entry_point='desktop'
-        AND b.subject_id='local-user' AND b.authority_id='local-desktop' LIMIT 1`)
-      .get(source.conversationId, source.piSessionId) as { working_directory: string } | undefined;
-    if (!row) return undefined;
+    const workspace = this.boundWorkspace(source.conversationId, source.piSessionId);
+    if (!workspace) return undefined;
     if (source.runId) {
       const run = this.database.prepare(`SELECT 1 FROM yp_agent_runs r
         JOIN yp_conversation_bindings b ON b.binding_id=r.binding_id
@@ -275,6 +284,6 @@ export class WorkEvidenceStore {
         .get(source.runId, source.conversationId, source.piSessionId);
       if (!run) return undefined;
     }
-    return row.working_directory;
+    return workspace;
   }
 }
