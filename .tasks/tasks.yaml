@@ -1279,7 +1279,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-038
     title: "创建独立助理包与专属执行环境"
-    status: in_progress
+    status: done
     goal: "助理可使用独立 Home、会话与专属技能执行一次真实 Agent 回合。"
     scope:
       in: ["packages/yuanpu-assistant 构建、类型检查、test 与独立执行器", "Home 路径解析、SOUL/USER/MEMORY 初始化及冻结摘要", "仅助理技能的显式加载与窄 host 接口"]
@@ -1306,12 +1306,15 @@ tasks:
       owner: "assistant-architecture-sol1"
       attempts: 0
       claimed_at: "2026-09-26T13:19:33.783Z"
-      completed_at: null
+      completed_at: "2026-09-26T14:02:11.887Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-architecture"
       branch: "task/task-038-assistant-core"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "c70dd7f and handoff a828d1d are ancestors of main 37cc8f8; independent assistant package, explicit Home and resource isolation present."}
+        - {type: "test", check: "focused assistant behavior", status: "passed", summary: "Five package tests exercised real Pi loopback, Home separation, skill loading and symlink escape rejection on owner branch; independent review found and prompted repair of sessions/pi symlink escape."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Integrated on main 37cc8f8 through 4002d9b/37cc8f8; clean combined integration worktree passed pnpm check with Node 24.15.0 and pnpm 11.22.0. Main working tree retained pre-existing unrelated changes; main pnpm check also passed after three conflict resolutions, with changes unstaged."}
+        - {type: "boundary", check: "later implementation", status: "unverified", summary: "Real Electron/SEA Assistant Worker, WeCom routing and cloud deployment remain later cards; this package uses a test host."}
       follow_up_candidates: []
-
   - id: TASK-039
     title: "隔离工作会话并保留历史"
     status: in_progress
