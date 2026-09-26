@@ -1623,7 +1623,7 @@ tasks:
 
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
-    status: ready
+    status: in_progress
     goal: "助理通过独立普通任务对话调用专业技能，持续跟进并回收可验证结果。"
     scope:
       in: ["skills/delegate-and-verify/SKILL.md 与宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
@@ -1651,15 +1651,14 @@ tasks:
     investigation_hints: ["已有 packages/yuanpu-runtime/src/pi/subagents/{manager,runner,tools}.ts 与 test/subagents.test.mjs，当前无恢复和自动父会话唤醒，不能直接复制默认资源加载", "实现置于宿主 Yuanpu 模块，通过协议服务暴露；助理仅持有委派接口，低层共享代码如需抽取不得引入业务循环依赖", "先子任务 follow-up/工具访问/授权一次性/取消/恢复行为测试，后 pnpm check 和子进程 cleanup probe"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-contract-review-20260927-046-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T16:28:00.683Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
+      branch: "task/task-046-assistant-delegation"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
     status: pending
