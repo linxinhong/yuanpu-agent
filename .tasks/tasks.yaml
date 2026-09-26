@@ -2066,7 +2066,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-058
     title: "工作会话文件树后端阶段验证"
-    status: ready
+    status: in_progress
     goal: "独立验证文件夹管理、真实磁盘移动、Pi 会话恢复与内容搜索在失败和重启后仍保持同一工作事实。"
     scope:
       in: ["独立验证者使用临时 Home 的真实 Runtime/SQLite/Pi JSONL 走新建、移动、重启、搜索和归档恢复", "注入目录冲突、迁移中断、无权路径与索引失效，核对权威状态", "记录 revision、环境、fixture/真实模式及 pass/fail/unverified"]
@@ -2088,15 +2088,14 @@ tasks:
     investigation_hints: ["复用隔离工作会话并保留历史（TASK-039）的 work-conversation.test.mjs 与 apps/runtime/test/runtime.test.mjs；重点核对工作对话右侧栏文件预览（TASK-052）在 cwd 迁移后指向新目录", "沿用 docs/work-conversation-tree.md 不变量；必要时做额外 native smoke，但单纯网页 fixture 不替代 Pi JSONL/SQLite 证据"]
     escalation_conditions: ["如目录迁移无法在故障窗口保持单一可读状态，退回安全搬迁工作会话及文件夹的磁盘目录（TASK-056）而不是放宽验收", "如果当前平台不能运行打包 Runtime，标记平台项 unverified 并保留可运行的临时 Home 证据"]
     result:
-      owner: null
+      owner: "conversation-verifier-sol-10677-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T19:59:17.440Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
+      branch: "task/task-058-work-tree-verification"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-059
     title: "接入工作会话文件夹树管理界面"
     status: pending
