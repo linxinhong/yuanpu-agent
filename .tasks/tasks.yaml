@@ -1686,7 +1686,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
-    status: ready
+    status: in_progress
     goal: "证明工作材料能够形成可靠审阅、记忆和台账，并可通过专业子任务完成核验。"
     scope:
       in: ["后端端到端业务验证与独立隔离审查", "纠正/遗忘、评估准确归类、预算抢占和失败恢复", "助理与专业子任务的工具/存储/身份边界"]
@@ -1714,15 +1714,14 @@ tasks:
     investigation_hints: ["使用新 assistant test 与宿主现有权限/子任务测试，按提案工作评估章构造多回合样例", "先 API+持久化验证，无需 UI；真实模型样例只用合成资料，失败不改阈值掩盖", "pnpm check；影响进程访问边界时追加对应 native smoke"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-stage-verifier-047-20260927-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T20:51:56.431Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-stage-verification"
+      branch: "task/task-047-assistant-stage-verification"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-048
     title: "实现助理主动回顾与建议投递"
     status: pending
