@@ -238,6 +238,26 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   });
 
   const headers = { authorization: `Bearer ${token}` };
+  const workEndpoint = `http://${ready.host}:${ready.port}/v1/work/conversations`;
+  const initialWork = await fetch(workEndpoint, { headers }).then((response) => response.json());
+  assert.equal(initialWork.length, 1);
+  assert.equal(initialWork[0].current, true);
+  const createdWork = await fetch(workEndpoint, { method: 'POST', headers }).then((response) => response.json());
+  assert.notEqual(createdWork.id, initialWork[0].id);
+  const switchedWork = await fetch(workEndpoint, { method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ conversationId: initialWork[0].id }),
+  }).then((response) => response.json());
+  assert.equal(switchedWork.id, initialWork[0].id);
+  assert.equal((await fetch(`${workEndpoint}?ignored=1`, { headers }).then((response) => response.json()))
+    .find((item) => item.current).id, initialWork[0].id);
+  const archivedSubmit = await fetch(`http://${ready.host}:${ready.port}/v1/chat/submit`, {
+    method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ message: 'must not enter legacy default', surface: 'work', conversationId: 'default' }),
+  });
+  assert.equal(archivedSubmit.status, 400);
+  assert.equal((await fetch(`http://${ready.host}:${ready.port}/v1/desktop/transcript?surface=work&conversationId=${createdWork.id}`,
+    { headers }).then((response) => response.json())).length, 0);
   const unauthorized = await fetch(`http://${ready.host}:${ready.port}/v1/health`);
   const badToken = await fetch(`http://${ready.host}:${ready.port}/v1/health`, {
     headers: { authorization: 'Bearer invalid-stage-verification-token' },
@@ -398,6 +418,12 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     body: JSON.stringify(agentRequest),
   });
   const agentSubmission = await agentSubmissionResponse.json();
+  const legacyAgentSubmission = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
+    method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ ...agentRequest, conversation: { namespace: 'desktop', conversationId: 'default' },
+      idempotencyKey: 'legacy-default-rejected' }),
+  });
+  assert.equal(legacyAgentSubmission.status, 403);
   const duplicateAgentSubmission = await fetch(`http://${ready.host}:${ready.port}/v1/agent/runs`, {
     method: 'POST',
     headers: { ...headers, 'content-type': 'application/json' },

@@ -4,13 +4,15 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { AgentRunStore } from './agent-run-store.js';
 import { AssistantLinkStore } from './assistant-link-store.js';
+import { WorkConversationStore } from './work-conversation-store.js';
 import { ChannelStore } from '../channels/store.js';
 import { SchedulerStore } from '../scheduler/store.js';
 
 export * from './agent-run-store.js';
 export * from './assistant-link-store.js';
+export * from './work-conversation-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 6;
+export const YUANPU_METADATA_SCHEMA_VERSION = 7;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -305,6 +307,28 @@ const migrations: readonly Migration[] = [{
       UNIQUE (run_id, part)
     ) STRICT;
   `,
+}, {
+  version: 7,
+  sql: `
+    CREATE TABLE yp_work_conversations (
+      conversation_id TEXT PRIMARY KEY,
+      pi_session_id TEXT NOT NULL UNIQUE,
+      workspace_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE yp_work_turn_sources (
+      conversation_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      run_id TEXT NOT NULL UNIQUE,
+      content_ref TEXT NOT NULL UNIQUE,
+      source_version TEXT NOT NULL,
+      committed_at TEXT NOT NULL,
+      user_text TEXT NOT NULL,
+      assistant_text TEXT NOT NULL,
+      PRIMARY KEY (conversation_id, turn_id)
+    ) STRICT;
+  `,
 }];
 
 function applyMigrations(database: DatabaseSync): number {
@@ -345,6 +369,7 @@ export class YuanpuMetadataDatabase {
   readonly schemaVersion: number;
   readonly agentRuns: AgentRunStore;
   readonly assistantLink: AssistantLinkStore;
+  readonly workConversations: WorkConversationStore;
   readonly channels: ChannelStore;
   readonly schedules: SchedulerStore;
 
@@ -352,6 +377,7 @@ export class YuanpuMetadataDatabase {
     this.schemaVersion = applyMigrations(database);
     this.agentRuns = new AgentRunStore(database);
     this.assistantLink = new AssistantLinkStore(database);
+    this.workConversations = new WorkConversationStore(database);
     this.channels = new ChannelStore(database);
     this.schedules = new SchedulerStore(database);
   }

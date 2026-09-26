@@ -44,6 +44,7 @@ export const RUNTIME_ROUTES = {
   assistantLink: '/v1/assistant/link',
   assistantMirrors: '/v1/assistant/mirrors',
   desktopTranscript: '/v1/desktop/transcript',
+  workConversations: '/v1/work/conversations',
   modelSettings: '/v1/settings/models',
   modelSettingsDelete: '/v1/settings/models/delete',
   modelCatalog: '/v1/settings/models/catalog',
@@ -116,6 +117,14 @@ export interface SaveModelSettingsInput {
 
 export type DesktopConversationSurface = 'work' | 'assistant';
 export type DesktopTranscriptSurface = DesktopConversationSurface | 'assistantArchive';
+
+export interface WorkConversation {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  current: boolean;
+  archived: boolean;
+}
 
 export interface DesktopTranscriptMessage {
   id: string;
@@ -356,8 +365,11 @@ export interface DesktopBridge {
   runtimeRecoveryNotice(): Promise<RuntimeRecoveryNotice | undefined>;
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
-  submitDesktopMessage(message: string, surface?: DesktopConversationSurface): Promise<AgentRunReceipt>;
-  getDesktopTranscript(surface: DesktopTranscriptSurface): Promise<DesktopTranscriptMessage[]>;
+  submitDesktopMessage(message: string, surface?: DesktopConversationSurface, conversationId?: string): Promise<AgentRunReceipt>;
+  getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
+  listWorkConversations(): Promise<WorkConversation[]>;
+  createWorkConversation(): Promise<WorkConversation>;
+  selectWorkConversation(conversationId: string): Promise<WorkConversation>;
   getAssistantLink(): Promise<AssistantLinkStatus>;
   bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;
   unbindAssistantContact(): Promise<AssistantLinkStatus>;

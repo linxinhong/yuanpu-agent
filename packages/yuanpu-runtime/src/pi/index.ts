@@ -29,19 +29,22 @@ export function readYuanpuChatTranscript(
   cwd: string,
   piSessionId: string,
   directory: string,
+  limit = 100,
+  completedOnly = false,
 ): DesktopTranscriptMessage[] {
   const path = SessionManager.findById(cwd, piSessionId, directory);
   if (!path) return [];
   const session = SessionManager.open(path, directory, cwd);
   return session.getBranch().flatMap((entry): DesktopTranscriptMessage[] => {
     if (entry.type !== 'message' || (entry.message.role !== 'user' && entry.message.role !== 'assistant')) return [];
+    if (completedOnly && entry.message.role === 'assistant' && entry.message.stopReason !== 'stop') return [];
     const content = entry.message.content;
     const text = typeof content === 'string'
       ? content
       : content.filter((block) => block.type === 'text').map((block) => block.text).join('\n');
     if (!text.trim()) return [];
     return [{ id: entry.id, role: entry.message.role, text, at: entry.timestamp }];
-  }).slice(-100);
+  }).slice(-limit);
 }
 
 const searchParameters = Type.Object({
@@ -246,6 +249,7 @@ export interface CreateYuanpuChatOptions {
   model: string;
   apiKey?: string;
   piSession?: { id: string; directory: string };
+  includeGlobalMemory?: boolean;
 }
 
 export interface YuanpuChatSession {
@@ -276,7 +280,7 @@ export async function createYuanpuChatSession(
   if (!model) throw new Error(`Unknown model ${options.provider}/${options.model}`);
 
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
-  const memory = await readMemory(options.agentDir);
+  const memory = options.includeGlobalMemory === false ? '' : await readMemory(options.agentDir);
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,

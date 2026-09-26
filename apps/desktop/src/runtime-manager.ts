@@ -651,19 +651,35 @@ export class RuntimeManager {
     });
   }
 
-  submitDesktopMessage(message: string, surface: 'work' | 'assistant' = 'work'): Promise<AgentRunReceipt> {
+  submitDesktopMessage(message: string, surface: 'work' | 'assistant' = 'work', conversationId?: string): Promise<AgentRunReceipt> {
     if (typeof message !== 'string' || !message.trim()) {
       throw new Error('A non-empty message is required.');
     }
     return this.request(RUNTIME_ROUTES.chatSubmit, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message, surface }),
+      body: JSON.stringify({ message, surface, conversationId }),
     });
   }
 
-  getDesktopTranscript(surface: DesktopTranscriptSurface): Promise<DesktopTranscriptMessage[]> {
-    return this.request(`${RUNTIME_ROUTES.desktopTranscript}?surface=${encodeURIComponent(surface)}`);
+  getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]> {
+    const query = new URLSearchParams({ surface });
+    if (conversationId) query.set('conversationId', conversationId);
+    return this.request(`${RUNTIME_ROUTES.desktopTranscript}?${query}`);
+  }
+
+  listWorkConversations(): Promise<import('@yuanpu-agent/protocol').WorkConversation[]> {
+    return this.request(RUNTIME_ROUTES.workConversations);
+  }
+
+  createWorkConversation(): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
+    return this.request(RUNTIME_ROUTES.workConversations, { method: 'POST' });
+  }
+
+  selectWorkConversation(conversationId: string): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
+    return this.request(RUNTIME_ROUTES.workConversations, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId }),
+    });
   }
 
   getAssistantLink(): Promise<AssistantLinkStatus> {

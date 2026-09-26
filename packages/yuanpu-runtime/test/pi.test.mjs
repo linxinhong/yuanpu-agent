@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -145,4 +145,38 @@ test('model HTTP failure rejects the prompt instead of returning a false complet
   });
   context.after(() => chat.dispose());
   await assert.rejects(chat.prompt('Synthetic test message'), { message: '模型请求失败，请检查模型配置或稍后重试。' });
+});
+
+test('Work omits global memory from the model request while the legacy Assistant retains it', async (context) => {
+  const { createServer } = await import('node:http');
+  const requests = [];
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    requests.push(body);
+    response.writeHead(400, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: 'fixture failure' } }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-memory-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'memory'));
+  await writeFile(join(root, 'memory', 'MEMORY.md'), 'PRIVATE MEMORY MARKER');
+  await writeFile(join(root, 'models.json'), JSON.stringify({ providers: { fixture: {
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions',
+    models: [{ id: 'fixture', name: 'fixture', reasoning: false, input: ['text'], contextWindow: 128000, maxTokens: 32000 }],
+  } } }));
+  const options = {
+    capabilityClient: { async search() { return { matches: [] }; }, async execute() { throw new Error('not used'); } },
+    agentDir: root, modelConfigDir: root, cwd: root, provider: 'fixture', model: 'fixture', apiKey: 'fixture-only',
+  };
+  for (const includeGlobalMemory of [false, true]) {
+    const chat = await createYuanpuChatSession({ ...options, includeGlobalMemory });
+    await assert.rejects(chat.prompt('Synthetic test message'), /模型请求失败/);
+    chat.dispose();
+  }
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].includes('PRIVATE MEMORY MARKER'), false);
+  assert.equal(requests[1].includes('PRIVATE MEMORY MARKER'), true);
 });

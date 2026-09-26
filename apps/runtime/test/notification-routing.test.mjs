@@ -163,6 +163,8 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
     method: 'POST', headers, body: 'null',
   })).status, 400);
 
+  const workConversationId = (await fetch(`${origin}/v1/work/conversations`, { headers })
+    .then((response) => response.json())).find((item) => item.current).id;
   const submission = await fetch(`${origin}/v1/agent/runs`, {
     method: 'POST',
     headers,
@@ -176,7 +178,7 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
         authenticatedBy: 'electron',
       },
       workspaceId: workspace,
-      conversation: { namespace: 'desktop', conversationId: 'default' },
+      conversation: { namespace: 'desktop', conversationId: workConversationId },
       input: { type: 'text', text: 'fixture' },
       idempotencyKey: 'notification-target-fixture',
       delivery: { kind: 'desktop' },
@@ -188,7 +190,7 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
   assert.equal(systemEvent.type, 'notification_requested');
   assert.equal(systemEvent.payload.kind, 'run_succeeded');
   assert.equal(systemEvent.payload.runId, submission.runId);
-  assert.equal(systemEvent.payload.conversationId, 'default');
+  assert.equal(systemEvent.payload.conversationId, workConversationId);
   assert.equal(systemEvent.payload.body.includes('fixture'), false);
   const receiptResponse = await fetch(`${origin}/v1/host/events/receipts`, {
     method: 'POST',
@@ -209,9 +211,9 @@ test('Runtime authenticates host events and canonicalizes notification navigatio
   const validate = (target) => fetch(`${origin}/v1/notifications/targets/validate`, {
     method: 'POST', headers, body: JSON.stringify(target),
   }).then((response) => response.json());
-  assert.deepEqual(await validate({ runId: submission.runId, conversationId: 'default' }), {
+  assert.deepEqual(await validate({ runId: submission.runId, conversationId: workConversationId }), {
     valid: true,
-    target: { conversationId: 'default', runId: submission.runId },
+    target: { conversationId: workConversationId, runId: submission.runId },
   });
   assert.equal((await validate({ runId: submission.runId, conversationId: 'forged' })).valid, false);
   assert.equal((await validate({ runId: 'forged-run' })).valid, false);
