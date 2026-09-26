@@ -32,4 +32,9 @@
 
   --yp-user-bubble: #eaf4ff;
   --yp-user-text: #1e2c3d;
+
+  /* 全局字体偏好：三套主题共享默认值，运行时由 font-preference 以内联样式覆盖。 */
+  --yp-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --yp-font-scale-ui: 1;
+  --yp-font-size-content: 14px;
 }

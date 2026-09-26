@@ -82,7 +82,7 @@
 }
 :root[data-yuanpu-theme='mindlink'][data-yuanpu-desktop='true'] .chat-header { padding-left: 62px; }
 :root[data-yuanpu-theme='mindlink'] .chat-heading { gap: 10px; }
-:root[data-yuanpu-theme='mindlink'] .chat-title-pill { min-height: 29px; border-color: var(--yp-border-control); background: var(--yp-canvas-surface); box-shadow: none; font-size: 12px; }
+:root[data-yuanpu-theme='mindlink'] .chat-title-pill { min-height: 29px; border-color: var(--yp-border-control); background: var(--yp-canvas-surface); box-shadow: none; font-size: 0.75rem; }
 :root[data-yuanpu-theme='mindlink'] .chat-rename-preview { color: var(--yp-text-action); }
 :root[data-yuanpu-theme='mindlink'] .runtime-meta { flex: 0 0 auto; }
 :root[data-yuanpu-theme='mindlink'] .panel-toggle { width: 30px; height: 30px; min-height: 30px; justify-content: center; border: 0; border-radius: 7px; padding: 0; color: var(--yp-text-action); background: transparent; }
@@ -99,8 +99,8 @@
   background: var(--yp-sidebar-surface);
 }
 :root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink { display: flex; min-height: 250px; justify-content: flex-end; gap: 14px; }
-:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-name { color: var(--yp-brand-text); text-orientation: upright; font-size: 20px; font-weight: 500; letter-spacing: .08em; }
-:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-roman { writing-mode: vertical-rl; text-orientation: sideways; color: var(--yp-brand-text); font-size: 16px; letter-spacing: .14em; }
+:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-name { color: var(--yp-brand-text); text-orientation: upright; font-size: 1.25rem; font-weight: 500; letter-spacing: .08em; }
+:root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-roman { writing-mode: vertical-rl; text-orientation: sideways; color: var(--yp-brand-text); font-size: 1rem; letter-spacing: .14em; }
 :root[data-yuanpu-theme='mindlink'] .brand-showcase-mindlink .brand-showcase-seal { width: 48px; height: 48px; max-width: none; }
 :root[data-yuanpu-theme='mindlink'] .chat-panel.is-empty .conversation-inner { padding-bottom: 0; }
 :root[data-yuanpu-theme='mindlink'] .chat-panel.is-empty .composer-wrap { margin-bottom: 0; }
@@ -117,11 +117,11 @@
 :root[data-yuanpu-theme='mindlink'] .mindlink-work-background-track { display: block; position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 :root[data-yuanpu-theme='mindlink'] .mindlink-work-background { display: flex; position: absolute; z-index: 0; top: 46%; left: 50%; flex-direction: column; align-items: center; opacity: .15; pointer-events: none; transform: translate(-50%, -50%); }
 :root[data-yuanpu-theme='mindlink'] .mindlink-work-background img { width: 120px; height: 120px; margin-bottom: 12px; object-fit: contain; }
-:root[data-yuanpu-theme='mindlink'] .mindlink-work-background strong { color: var(--yp-brand-text); font-family: 'Songti SC', 'Noto Serif CJK SC', serif; font-size: 35px; font-weight: 500; letter-spacing: .09em; white-space: nowrap; }
-:root[data-yuanpu-theme='mindlink'] .mindlink-work-background span { margin-top: 9px; color: var(--yp-brand-text); font-family: Georgia, serif; font-size: 13px; letter-spacing: .55em; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-work-background strong { color: var(--yp-brand-text); font-family: 'Songti SC', 'Noto Serif CJK SC', serif; font-size: 2.1875rem; font-weight: 500; letter-spacing: .09em; white-space: nowrap; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-work-background span { margin-top: 9px; color: var(--yp-brand-text); font-family: Georgia, serif; font-size: 0.8125rem; letter-spacing: .55em; }
 :root[data-yuanpu-theme='mindlink'] .mindlink-welcome img { width: 120px; height: 120px; margin-bottom: 12px; object-fit: contain; }
-:root[data-yuanpu-theme='mindlink'] .mindlink-welcome strong { color: var(--yp-brand-text); font-family: 'Songti SC', 'Noto Serif CJK SC', serif; font-size: 35px; font-weight: 500; letter-spacing: .09em; }
-:root[data-yuanpu-theme='mindlink'] .mindlink-welcome span { margin-top: 9px; color: var(--yp-brand-text); font-family: Georgia, serif; font-size: 13px; letter-spacing: .55em; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-welcome strong { color: var(--yp-brand-text); font-family: 'Songti SC', 'Noto Serif CJK SC', serif; font-size: 2.1875rem; font-weight: 500; letter-spacing: .09em; }
+:root[data-yuanpu-theme='mindlink'] .mindlink-welcome span { margin-top: 9px; color: var(--yp-brand-text); font-family: Georgia, serif; font-size: 0.8125rem; letter-spacing: .55em; }
 :root[data-yuanpu-theme='mindlink'] .nav-item:hover { background: #dedbd7; }
 :root[data-yuanpu-theme='mindlink'] .nav-item.active,
 :root[data-yuanpu-theme='mindlink'] .sidebar-footer.settings-trigger.active {
