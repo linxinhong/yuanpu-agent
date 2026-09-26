@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
@@ -52,6 +53,96 @@ async function stopWorker(child) {
   child.send({ kind: 'shutdown' });
   await new Promise((resolveExit) => child.once('exit', resolveExit));
 }
+
+test('headless Worker performs local daily and weekly checks, then stops with the host', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-automation-worker-'));
+  const assistantHome = join(root, 'assistant');
+  const worker = startWorker(assistantHome);
+  t.after(async () => { await stopWorker(worker.child); await rm(root, { recursive: true, force: true }); });
+  worker.child.on('message', (message) => {
+    if (message.kind === 'source-request' && message.method === 'listChanges') {
+      worker.child.send({ kind: 'source-result', id: message.id,
+        value: { events: [], nextCursor: message.args[1] } });
+    }
+  });
+  await nextMessage(worker.child, (message) => message.kind === 'ready');
+  const state = join(assistantHome, 'state.sqlite');
+  const deadline = Date.now() + 12_000;
+  let completed = 0;
+  while (Date.now() < deadline && completed < 2) {
+    try {
+      const database = new DatabaseSync(state);
+      try { completed = database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+        WHERE kind IN ('daily-check','weekly-check') AND status='completed'`).get().n; }
+      finally { database.close(); }
+    } catch { /* first pump may still be creating the database */ }
+    if (completed < 2) await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+  }
+  assert.equal(completed, 2);
+  await stopWorker(worker.child);
+  const database = new DatabaseSync(state);
+  try {
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checkpoints').get().n, 2);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checks').get().n, 2);
+  } finally { database.close(); }
+});
+
+test('delegation change enters durable queue and restart reconciles the latest host status', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-delegation-automation-'));
+  const assistantHome = join(root, 'assistant');
+  const taskId = 'delegated-1';
+  const assistantSessionId = 'assistant-session-1';
+  await mkdir(join(assistantHome, 'delegations'), { recursive: true });
+  await writeFile(join(assistantHome, 'delegations', `${taskId}.json`),
+    JSON.stringify({ taskId, assistantSessionId }));
+  let record = { taskId, assistantSessionId, status: 'running', followUps: [],
+    updatedAt: '2026-09-27T00:00:00.000Z' };
+  let worker;
+  t.after(async () => { await stopWorker(worker?.child); await rm(root, { recursive: true, force: true }); });
+  const launch = async () => {
+    worker = startWorker(assistantHome);
+    worker.child.on('message', (message) => {
+      if (message.kind === 'source-request' && message.method === 'listChanges') {
+        worker.child.send({ kind: 'source-result', id: message.id,
+          value: { events: [], nextCursor: message.args[1] } });
+      }
+      if (message.kind === 'delegation-request' && message.method === 'status') {
+        worker.child.send({ kind: 'delegation-result', id: message.id, value: record });
+      }
+    });
+    await nextMessage(worker.child, (message) => message.kind === 'ready');
+  };
+  const count = () => {
+    const database = new DatabaseSync(join(assistantHome, 'state.sqlite'));
+    try { return database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+      WHERE kind='verify-delegation'`).get().n; }
+    finally { database.close(); }
+  };
+  const eventuallyCount = async (expected) => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try { if (count() === expected) return; } catch { /* Worker may still be initializing */ }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    }
+    assert.equal(count(), expected);
+  };
+  await launch();
+  worker.child.send({ kind: 'delegation-event', record });
+  await eventuallyCount(1);
+  await stopWorker(worker.child);
+  record = { ...record, status: 'completed', updatedAt: '2026-09-27T00:01:00.000Z',
+    result: { status: 'completed', resultRef: 'opaque:delegation-result' } };
+  await launch();
+  await eventuallyCount(2);
+  await stopWorker(worker.child);
+  const database = new DatabaseSync(join(assistantHome, 'state.sqlite'));
+  try {
+    assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+      WHERE kind='verify-delegation' AND status='cancelled'`).get().n, 1);
+    assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+      WHERE kind='verify-delegation' AND status IN ('queued','waiting')`).get().n, 1);
+  } finally { database.close(); }
+});
 
 test('one headless Worker owns Home and a second writer is rejected', async (t) => {
   const assistantHome = await home(t);
@@ -161,6 +252,60 @@ test('Worker runs a real assistant turn, persists result, and does not replay th
   worker.child.send({ ...request, correlationId: 'third' });
   assert.equal((await duplicate).record.message, 'Worker reply.');
   assert.equal(calls, 1);
+});
+
+test('Worker delegates through its separate IPC channel and preserves the accepted task ID', async (t) => {
+  const assistantHome = await home(t);
+  let modelCalls = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* consume request */ }
+    modelCalls++;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    const send = (delta, finish_reason = null) => response.write(`data: ${JSON.stringify({ id: 'loopback',
+      object: 'chat.completion.chunk', created: 1, model: 'assistant-loopback',
+      choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
+    if (modelCalls === 1) {
+      send({ role: 'assistant', tool_calls: [{ index: 0, id: 'delegate-call', type: 'function',
+        function: { name: 'delegate_and_verify', arguments: JSON.stringify({ action: 'start',
+          skillName: 'reviewer', goal: 'Review a bounded source.', completionCriteria: ['Cite evidence'],
+          contextRefs: ['source:one'], readOnly: true }) } }] });
+      send({}, 'tool_calls');
+    } else { send({ role: 'assistant', content: 'Delegation accepted.' }); send({}, 'stop'); }
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  t.after(() => new Promise((resolveClose) => { server.closeAllConnections(); server.close(resolveClose); }));
+  const worker = startWorker(assistantHome);
+  t.after(() => stopWorker(worker.child));
+  const submitted = [];
+  worker.child.on('message', (message) => {
+    if (message.kind === 'model-request') {
+      worker.child.send({ kind: 'model', id: message.id, config: {
+        model: { id: 'assistant-loopback', name: 'Assistant loopback', provider: 'assistant-loopback',
+          api: 'openai-completions', baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
+          reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000, maxTokens: 1024 }, auth: { apiKey: 'loopback-test-key' },
+      } });
+    } else if (message.kind === 'delegation-request') {
+      assert.equal(message.method, 'start');
+      const brief = message.args[0];
+      submitted.push(brief.taskId);
+      worker.child.send({ kind: 'delegation-result', id: message.id, value: { ...brief,
+        status: 'accepted', followUps: [], createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString() } });
+    }
+  });
+  await nextMessage(worker.child, (message) => message.kind === 'ready');
+  const result = nextMessage(worker.child, (message) => message.kind === 'result'
+    && message.correlationId === 'delegated');
+  worker.child.send({ kind: 'prompt', id: 'delegated', correlationId: 'delegated',
+    text: 'Delegate the review.', deadlineAt: Date.now() + 10_000 });
+  assert.equal((await result).record.status, 'completed');
+  assert.equal(submitted.length, 1);
+  assert.match(submitted[0], /^[a-f0-9]{64}$/);
+  const archive = JSON.parse(await readFile(join(assistantHome, 'delegations', `${submitted[0]}.json`), 'utf8'));
+  assert.equal(archive.record.status, 'accepted');
+  assert.equal(modelCalls, 2);
 });
 
 test('a killed Worker leaves its accepted task identifiable as interrupted after restart', async (t) => {

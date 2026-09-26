@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { isSea } from 'node:sea';
 import { resolveAssistantModelConfig, type AssistantModelSelection } from './assistant-model.js';
 import type { AssistantSourceHost } from '@yuanpu-agent/assistant';
+import type { AssistantDelegationBrief, AssistantDelegationRecord } from '@yuanpu-agent/protocol';
+import type { AssistantDelegationService } from './assistant-delegation-service.js';
 
 export interface AssistantTaskRecord {
   id: string;
@@ -19,6 +21,7 @@ export interface AssistantWorkerManagerOptions {
   home: string;
   model: AssistantModelSelection;
   sources?: AssistantSourceHost;
+  delegations?: AssistantDelegationService;
   command?: WorkerCommand;
   startupTimeoutMs?: number;
   shutdownGraceMs?: number;
@@ -111,6 +114,31 @@ export class AssistantWorkerManager {
               error: error instanceof Error ? error.message : String(error) }));
         } else if (message.kind === 'source-error' && typeof message.error === 'string') {
           this.report(new Error(`Assistant source scan: ${message.error}`));
+        } else if (message.kind === 'delegation-request' && typeof message.id === 'string') {
+          const request = message as { id: string; method?: unknown; args?: unknown };
+          const args = Array.isArray(request.args) ? request.args : [];
+          let result: Promise<unknown>;
+          const host = this.options.delegations;
+          try {
+            if (!host) throw new Error('Assistant delegation host is unavailable.');
+            if (request.method === 'start' && args.length === 1 && args[0]
+              && typeof args[0] === 'object') result = host.start(args[0] as AssistantDelegationBrief);
+            else if (request.method === 'status' && args.length === 1 && typeof args[0] === 'string') {
+              result = host.status(args[0]);
+            } else if (request.method === 'followUp' && args.length === 3
+              && args.every((arg) => typeof arg === 'string')) {
+              result = host.followUp(args[0] as string, args[1] as string, args[2] as string);
+            } else if (request.method === 'cancel' && args.length === 2
+              && args.every((arg) => typeof arg === 'string')) {
+              result = host.cancel(args[0] as string, args[1] as string);
+            }
+            else throw new Error('Invalid Assistant delegation request.');
+          } catch (error) { result = Promise.reject(error); }
+          void result.then((value) => child.send?.({ kind: 'delegation-result', id: request.id, value }),
+            (error) => child.send?.({ kind: 'delegation-result', id: request.id,
+              error: error instanceof Error ? error.message : String(error) }));
+        } else if (message.kind === 'delegation-error' && typeof message.error === 'string') {
+          this.report(new Error(`Assistant delegation wake: ${message.error}`));
         } else if ((message.kind === 'result' || message.kind === 'task') && typeof message.correlationId === 'string') {
           const pending = this.pending.get(message.correlationId);
           if (!pending) return;
@@ -183,6 +211,9 @@ export class AssistantWorkerManager {
 
   task(id: string): Promise<AssistantTaskRecord | undefined> { return this.request({ kind: 'task', id }); }
   cancel(id: string): void { if (this.ready) this.child?.send({ kind: 'cancel', id }); }
+  notifyDelegation(record: AssistantDelegationRecord): void {
+    if (this.ready) this.child?.send({ kind: 'delegation-event', record });
+  }
 
   private async terminate(child: ChildProcess): Promise<void> {
     if (child.exitCode !== null || child.signalCode !== null) return;
