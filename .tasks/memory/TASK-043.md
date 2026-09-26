@@ -16,5 +16,6 @@
 - 聚焦：Assistant 文档/队列 12 个测试、Work v8/v9/v10→v11 迁移、VACUUM/删最大行游标、真实 Runtime Manager→Worker 来源 RPC 与重启去重、205 条 Work 来源 100/100/5 分页均通过。运行器证据：`1790440763921231000.log`、`1790440331943569000.log`、`1790440262974454000.log`。
 - 最终 `pnpm check && pnpm build:native && pnpm smoke:native` 全通过，macOS arm64、Node 24.15.0、pnpm 11.22.0；Assistant 12、runtime-kit 175、Runtime 45 测试通过，SEA smoke 通过。证据 `.git/worktrees/assistant-architecture/coding-owner/1790440774360817000.log`。一次前置全量测试遇 Runtime 测试清理 Home 与新异步 Worker 写库竞态，已等待 Runtime/Worker 退出后清理并在最终全量验证通过。
 - **尚未满足产物来源验收**：现有 `yp_work_turn_sources` 与 `yp_assistant_sources` 只持久化回合文本引用；`yp_agent_run_outputs` 工具信息仅 `{name,status}`，无稳定且可授权读取的 artifact ID/ref。当前 Host 不凭输出文字或绝对路径猜产物，返回无产物引用。主线新建 TASK-061「建立工作工具结果与产物的助理来源契约」，应补持久 artifact ledger、授权读取、旧 Pi Session 回填边界、删除/离线事件；TASK-044 依赖该卡。不可把本实现称为全量产物已收集。
+- 生产 Work/Assistant 文本来源账本当前只追加创建/更新事件，尚不发删除或暂不可用事件；删除、离线、恢复的持久队列行为已在助理包测试适配器覆盖，不能称生产旧 Session 失效自动撤回。Host 若无法解析已排队引用返回暂不可用而非擅自删除；生产生命周期事件需后续来源账本补齐。
 - 未验证 Windows/Linux 原生包及真实历史产物迁移；TASK-042 的真实企业微信往返由独立阶段验收记录，不是本卡来源测试。生产来源适配当前仅 `personal:local-user`，其他受众明确拒绝。索引可重建，不能删除 `state.sqlite` 来“重建”队列或遗忘墓碑。
 - 检索证据：当前 host 未暴露 zvec-grep 工具；按精确符号 `sourceChanges/resolveContentRef/AssistantWorkerManager/yp_work_turn_sources` 在 `packages/yuanpu-runtime` 与 `apps/runtime` 限定 `rg` 并核对源码。主工作区用户未提交 Work 改动保持只读，集成时需单独消解 schema/WorkStore 差异；未推送。
