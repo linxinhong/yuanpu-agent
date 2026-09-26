@@ -2066,7 +2066,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-058
     title: "工作会话文件树后端阶段验证"
-    status: in_progress
+    status: done
     goal: "独立验证文件夹管理、真实磁盘移动、Pi 会话恢复与内容搜索在失败和重启后仍保持同一工作事实。"
     scope:
       in: ["独立验证者使用临时 Home 的真实 Runtime/SQLite/Pi JSONL 走新建、移动、重启、搜索和归档恢复", "注入目录冲突、迁移中断、无权路径与索引失效，核对权威状态", "记录 revision、环境、fixture/真实模式及 pass/fail/unverified"]
@@ -2091,14 +2091,20 @@ tasks:
       owner: "conversation-verifier-sol-10677-10677"
       attempts: 0
       claimed_at: "2026-09-26T19:59:17.440Z"
-      completed_at: null
+      completed_at: "2026-09-26T20:20:18.513Z"
       worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
       branch: "task/task-058-work-tree-verification"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "independent verification integrated", status: "passed", summary: "TASK-058 verifier branch 7fe33c1 merged to main f488fc8; independent Runtime test implementation 396723a."}
+        - {type: "test", check: "real Runtime HTTP and durable state", status: "passed", summary: "V58-01..03 independently exercised nested folders, two Work conversations, actual disk move, SQLite bindings, Pi JSONL history, restart, preview, search, archive, ID retention and rejected moves under temporary YUANPU_HOME; 2/2 new tests passed."}
+        - {type: "test", check: "fault and search regressions", status: "passed", summary: "V58-04..06 reused 24/24 move fault tests and 2/2 JSONL search tests with real temporary SQLite/Pi data and local SSE fixture model. No persistent search index exists; missing/corrupt JSONL yields contentFailures."}
+        - {type: "test", check: "integrated main pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0 pnpm check on main f488fc8 exited 0; Runtime 116/116 tests passed. Only unrelated .zcode plan remained unstaged."}
+        - {type: "document", check: "scenario report and memory", status: "passed", summary: ".tasks/verification/TASK-058/results.md records V58-01..07, revision, commands, pass/unverified and limits; .tasks/memory/TASK-058.md provides handoff."}
+        - {type: "boundary", check: "platform and real user data", status: "unverified", summary: "Windows/Linux, packaged SEA/native and real user database not exercised; no external model invoked."}
       follow_up_candidates: []
   - id: TASK-059
     title: "接入工作会话文件夹树管理界面"
-    status: pending
+    status: ready
     goal: "用户在现有工作对话左栏像管理文件一样管理会话，且能看清文件夹层级、拖动结果、标签、归档与搜索定位。"
     scope:
       in: ["左侧工作树、紧凑工具栏、面包屑、折叠/缩进、选中态及三主题样式", "新建会话/文件夹、行内重命名、更换图标、添加标签、归档/恢复、排序与拖放/移动到菜单", "树搜索、消息结果定位、空态/失败恢复和键盘操作"]
