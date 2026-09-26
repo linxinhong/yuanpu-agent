@@ -159,7 +159,8 @@ export function ChatPanel({
   });
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [rightPanelMaximized, setRightPanelMaximized] = useState(false);
-  const [activityTab, setActivityTab] = useState<'activity' | 'run' | 'files'>('activity');
+  const [workspaceTabHost, setWorkspaceTabHost] = useState<HTMLDivElement | null>(null);
+  const [activityTab, setActivityTab] = useState<'activity' | 'run' | 'files'>(surface === 'work' ? 'files' : 'activity');
   const [filePreviewPath, setFilePreviewPath] = useState<string>();
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const activityEventsRef = useRef<ActivityEvent[]>([]);
@@ -761,6 +762,26 @@ export function ChatPanel({
     && messages[0].role === 'assistant'
     && messages[0].text === (surface === 'assistant' ? assistantGreeting : initialMessages[0]?.text);
 
+  useEffect(() => {
+    const pane = activityDialog.current;
+    const header = workspaceTabHost?.closest<HTMLElement>('.chat-header');
+    const controls = header?.querySelector<HTMLElement>('.runtime-meta');
+    if (!pane || !header || !controls || !workspaceTabHost) return;
+    function alignTabs() {
+      if (!pane || !header || !controls || !workspaceTabHost) return;
+      const style = getComputedStyle(header);
+      const available = header.getBoundingClientRect().right - pane.getBoundingClientRect().left
+        - parseFloat(style.paddingRight) - controls.getBoundingClientRect().width - parseFloat(style.columnGap);
+      workspaceTabHost.style.flexBasis = `${Math.max(100, available)}px`;
+    }
+    const observer = new ResizeObserver(alignTabs);
+    observer.observe(pane);
+    observer.observe(header);
+    observer.observe(controls);
+    alignTabs();
+    return () => observer.disconnect();
+  }, [workspaceTabHost, activityOpen, rightPanelMaximized, active]);
+
   function resizeRightPanel(clientX: number, panel: HTMLElement) {
     const bounds = panel.getBoundingClientRect();
     const result = resizePanel(bounds.right - clientX, maxRightPanelWidth(bounds.width, listOpen),
@@ -774,7 +795,8 @@ export function ChatPanel({
   return (
     <section ref={chatPanel} className={`chat-panel ${surface}-mode ${emptyConversation && surface === 'work' ? 'is-empty' : ''} ${listOpen ? 'list-open' : 'list-closed'} ${activityOpen ? 'activity-open' : 'activity-closed'} ${rightPanelMaximized ? 'right-panel-maximized' : ''} ${rightPanelResizing ? 'right-panel-resizing' : ''} ${active ? '' : 'view-hidden'}`}
       style={{ '--yp-right-panel-width': `${rightPanelWidth}px` } as CSSProperties} aria-hidden={!active}>
-      <PageToolbar active={active}><header className="chat-header">
+      <PageToolbar active={active}><header className={`chat-header ${surface === 'work' && activityOpen ? 'has-workspace-tabs' : ''}`}
+        style={{ '--workspace-toolbar-width': rightPanelMaximized ? 'calc(100% - 300px)' : `${rightPanelWidth}px` } as CSSProperties}>
           <div className="chat-heading">
             <button type="button" className="chat-list-toggle" title={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`}
               aria-label={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`} aria-expanded={listOpen}
@@ -786,6 +808,7 @@ export function ChatPanel({
             </nav>
             <button type="button" className="chat-rename-preview" disabled title="重命名会话尚未接入（界面预览）" aria-label="重命名会话（界面预览）"><AppIcon name="edit" /></button>
           </div>
+          {surface === 'work' && activityOpen && <div className="workspace-tab-host" ref={setWorkspaceTabHost} />}
           <div className="runtime-meta">
             {navigationTarget && (
               <span role="status">
@@ -808,9 +831,9 @@ export function ChatPanel({
             {activityOpen && <button type="button" className="panel-maximize-toggle" title={rightPanelMaximized ? '还原右侧面板' : '铺满右侧面板'}
               aria-label={rightPanelMaximized ? '还原右侧面板' : '铺满右侧面板'} aria-pressed={rightPanelMaximized}
               onClick={() => setRightPanelMaximized((value) => !value)}><AppIcon name={rightPanelMaximized ? 'collapse' : 'expand'} /></button>}
-            <button ref={activityToggle} type="button" className="panel-toggle" title={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '运行详情'}`}
-              aria-label={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '运行详情'}`} aria-expanded={activityOpen}
-              onClick={() => { restoreActivityFocus.current = true; if (activityOpen) setRightPanelMaximized(false); setActivityOpen((value) => !value); }}><AppIcon name="panel" /><span className="panel-toggle-label">{surface === 'assistant' ? '助理面板' : '运行详情'}</span></button>
+            <button ref={activityToggle} type="button" className="panel-toggle" title={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '右侧面板'}`}
+              aria-label={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '右侧面板'}`} aria-expanded={activityOpen}
+              onClick={() => { restoreActivityFocus.current = true; if (activityOpen) setRightPanelMaximized(false); setActivityOpen((value) => !value); }}><AppIcon name="panel" /><span className="panel-toggle-label">{surface === 'assistant' ? '助理面板' : '右侧面板'}</span></button>
           </div>
           {surface === 'assistant' && <div className="assistant-channel-state" role="status">
             {archiveOpen ? '旧助理会话归档 · 只读' : assistantLinkQuery.data?.linked
@@ -1044,13 +1067,11 @@ export function ChatPanel({
               disconnected: Boolean(runRecovery) || locatedRun === 'error',
             }}
             run={visibleRun} archiveOpen={archiveOpen} onToggleArchive={() => setArchiveOpen((value) => !value)} /> : <>
-          <div className="activity-panel-heading"><strong>运行详情</strong><span>{surface === 'work' ? '当前工作' : '助理会话'}</span></div>
-          <div className={`activity-tabs ${surface === 'work' ? 'work-tabs' : ''}`} role="group" aria-label="会话信息">
-            <button type="button" aria-pressed={activityTab === 'activity'} onClick={() => setActivityTab('activity')}>动态</button>
-            <button type="button" aria-pressed={activityTab === 'run'} onClick={() => setActivityTab('run')}>运行</button>
-            {surface === 'work' && <button type="button" aria-pressed={activityTab === 'files'} onClick={() => setActivityTab('files')}>文件</button>}
-          </div>
-          {activityTab === 'activity' ? (
+          <FileWorkspace key={workConversationId ?? 'empty'} host={fileHost} scopeKey={workConversationId ?? 'empty'}
+            rootName={workConversationsQuery.data?.find((item) => item.id === workConversationId)?.workingDirectory.split(/[\\/]/).filter(Boolean).pop()}
+            requestPath={filePreviewPath} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
+            view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); }}
+            runContent={activityTab === 'activity' ? (
             <div className="activity-content">
               <div className="activity-section-heading">
                 <h2>当前会话</h2>
@@ -1075,7 +1096,7 @@ export function ChatPanel({
                 <div className="activity-empty"><strong>还没有运行记录</strong><span>发送消息后，当前会话的任务状态会显示在这里。</span></div>
               )}
             </div>
-          ) : activityTab === 'run' ? (
+          ) : (
             <div className="activity-content">
               <h2>最近一次运行</h2>
               {visibleRun ? <dl className="activity-run-facts">
@@ -1086,13 +1107,7 @@ export function ChatPanel({
                 <div><dt>运行 ID</dt><dd><code>{visibleRun.runId}</code></dd></div>
               </dl> : <div className="activity-empty"><strong>还没有运行记录</strong><span>任务提交后可在这里查看状态与时间。</span></div>}
             </div>
-          ) : (
-            <div className="activity-content file-panel">
-              {!fileHost || !workConversationId ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
-                : <FileWorkspace key={workConversationId} host={fileHost} scopeKey={workConversationId}
-                  requestPath={filePreviewPath} onActiveFileChange={setFilePreviewPath} />}
-            </div>
-          )}
+          )} />
           </>}
         </dialog>
       )}

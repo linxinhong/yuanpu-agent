@@ -10,7 +10,7 @@ register();
 // renderer build and the desktop smoke test.
 const { classifyWorkFile } = await import('../src/viewer/core/content-kind.ts');
 const { formatFileTime, formatFileSize } = await import('../src/viewer/core/format.ts');
-const { FileTree } = await import('../src/viewer/files/file-tree.tsx');
+const { FileTree, visibleWorkspacePaths } = await import('../src/viewer/files/file-tree.tsx');
 
 test('viewer modules export their components and helpers', () => {
   assert.equal(typeof classifyWorkFile, 'function');
@@ -28,6 +28,17 @@ test('classifyWorkFile routes by extension', () => {
   assert.equal(classifyWorkFile('data.csv'), 'text');
   assert.equal(classifyWorkFile('archive.zip'), 'other');
   assert.equal(classifyWorkFile('Makefile'), 'other');
+});
+
+test('file tree keeps empty directories and ancestors of filtered files', () => {
+  const entries = [
+    { name: 'empty', path: 'empty', kind: 'directory' },
+    { name: 'docs', path: 'docs', kind: 'directory' },
+    { name: 'notes', path: 'docs/notes', kind: 'directory' },
+    { name: 'plan.md', path: 'docs/notes/plan.md', kind: 'file' },
+  ];
+  assert.deepEqual(visibleWorkspacePaths(entries, ''), ['empty/', 'docs/', 'docs/notes/', 'docs/notes/plan.md']);
+  assert.deepEqual(visibleWorkspacePaths(entries, 'plan'), ['docs/', 'docs/notes/', 'docs/notes/plan.md']);
 });
 
 test('formatFileSize and formatFileTime produce readable labels', () => {
