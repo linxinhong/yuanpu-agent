@@ -5,11 +5,86 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { AssistantAutomationEngine, AssistantAutomationStore } from '@yuanpu-agent/assistant';
+import { AssistantAutomationEngine, AssistantAutomationStore, AssistantSourceStore,
+  AssistantWorkReviewStore } from '@yuanpu-agent/assistant';
 
 const require = createRequire(import.meta.url);
 const { assistantAutomationHandler } = require('../dist/index.cjs');
 const audience = { kind: 'personal', id: 'local-user' };
+
+test('saved Work source invokes bounded review and commits the record once', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-review-wake-'));
+  const home = join(root, 'assistant');
+  const sources = await AssistantSourceStore.open(home);
+  t.after(async () => { sources.close(); await rm(root, { recursive: true, force: true }); });
+  const change = { sourceId: 'work-turn:work:one:turn-1', sourceVersion: 'version-1',
+    kind: 'created', audience, occurredAt: new Date().toISOString(),
+    contentRef: 'opaque:turn-1', workId: 'work:one' };
+  sources.enqueuePage('work', '0', { nextCursor: '1', events: [{ eventId: '1', change }] });
+  await sources.processNext({ currentSource: async () => ({ status: 'available',
+    sourceVersion: change.sourceVersion }), readSource: async () => ({ status: 'available',
+    sourceVersion: change.sourceVersion, text: 'User: Write a report.\nAssistant: Done.' }) });
+  const store = new AssistantAutomationStore(sources.database);
+  const reviews = new AssistantWorkReviewStore(sources.database, sources, home);
+  assert.equal(store.reconcileProcessedSources(), 1);
+  let modelCalls = 0;
+  const handler = assistantAutomationHandler({ sources: { database: sources.database } }, store,
+    undefined, { store: reviews, async review(snapshot, _signal, beforeModel) {
+      assert.equal(snapshot.workId, 'work:one');
+      assert.equal(beforeModel(), true);
+      modelCalls++;
+      return { costUsd: 0.01, message: JSON.stringify({ goal: 'Write a report',
+        constraints: [], judgment: 'supported', findings: [{ claim: 'Report completed',
+          judgment: 'supported', evidenceRefs: [change.sourceId] }], unresolved: [], followUp: [],
+        memoryCandidates: [], ledgerCandidates: [] }) };
+    } });
+  const engine = new AssistantAutomationEngine(store, handler);
+  assert.equal((await engine.tick()).status, 'completed');
+  assert.equal(modelCalls, 1);
+  const row = sources.database.prepare('SELECT review_id FROM work_reviews').get();
+  assert.equal(reviews.get(row.review_id).judgment, 'unverified');
+  assert.match(await readFile(join(home, 'reviews', 'one', `${row.review_id}.md`), 'utf8'),
+    /Judgment: unverified/);
+  assert.equal(store.reconcileProcessedSources(), 0);
+  await engine.tick();
+  assert.equal(modelCalls, 1);
+});
+
+test('a lost review model result becomes a visible unverified review without rebilling', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-review-lost-'));
+  const home = join(root, 'assistant');
+  const sources = await AssistantSourceStore.open(home);
+  t.after(async () => { sources.close(); await rm(root, { recursive: true, force: true }); });
+  const change = { sourceId: 'work-turn:work:lost:turn-1', sourceVersion: 'v1',
+    kind: 'created', audience, occurredAt: new Date().toISOString(),
+    contentRef: 'opaque:lost', workId: 'work:lost' };
+  sources.enqueuePage('work', '0', { nextCursor: '1', events: [{ eventId: '1', change }] });
+  await sources.processNext({ currentSource: async () => ({ status: 'available',
+    sourceVersion: 'v1' }), readSource: async () => ({ status: 'available',
+    sourceVersion: 'v1', text: 'User: Make a report.\nAssistant: Done.' }) });
+  const store = new AssistantAutomationStore(sources.database);
+  const reviews = new AssistantWorkReviewStore(sources.database, sources, home);
+  store.reconcileProcessedSources();
+  const job = store.byKey('source:review-work:work-turn:work:lost:turn-1:v1');
+  let calls = 0;
+  const handler = assistantAutomationHandler({ sources: { database: sources.database } }, store,
+    undefined, { store: reviews, async review(_snapshot, _signal, beforeModel) {
+      assert.equal(beforeModel(), true);
+      calls++;
+      throw new Error('model response lost');
+    } });
+  const engine = new AssistantAutomationEngine(store, handler);
+  assert.equal((await engine.tick()).status, 'waiting');
+  sources.database.prepare('UPDATE automation_jobs SET retry_at=? WHERE job_id=?')
+    .run(new Date(0).toISOString(), job.jobId);
+  assert.equal((await engine.tick()).status, 'completed');
+  assert.equal(calls, 1);
+  const row = sources.database.prepare('SELECT review_id FROM work_reviews WHERE job_id=?')
+    .get(job.jobId);
+  assert.equal(reviews.get(row.review_id).judgment, 'unverified');
+  assert.match(await readFile(join(home, 'reviews', 'lost', `${row.review_id}.md`), 'utf8'),
+    /model result was interrupted or lost/);
+});
 
 function fixture() {
   const database = new DatabaseSync(':memory:');
