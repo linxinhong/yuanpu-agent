@@ -68,6 +68,7 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
           checks: Array<{ criterion: string; evidenceRefs: string[] }> };
         signal.throwIfAborted();
         const current = await delegations.current(job.delegationId);
+        signal.throwIfAborted();
         if (!current || current.taskId !== value.taskId || current.updatedAt !== value.updatedAt
           || current.status !== value.status || store.get(job.jobId)?.status !== 'running') {
           throw new Error('Delegation changed before verification commit.');

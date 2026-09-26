@@ -32,6 +32,7 @@ export interface AssistantTurnResult {
   runId: string;
   message: string;
   costUsd: number;
+  usageKnown: boolean;
 }
 
 export interface AssistantSession {
@@ -89,9 +90,12 @@ async function completeTurn(lane: AgentLane, sessionId: string, run: ReturnType<
   }, BACKGROUND_CONTEXT);
   const message = lastAssistantText(entries);
   if (!message) throw new Error('Assistant run completed without a text reply.');
-  const costUsd = entries.reduce((sum, entry) => entry.type === 'message'
-    && entry.message.role === 'assistant' ? sum + entry.message.usage.cost.total : sum, 0);
-  return { sessionId, runId: result.value.operationId, message, costUsd };
+  const assistantMessages = entries.flatMap((entry) => entry.type === 'message'
+    && entry.message.role === 'assistant' ? [entry.message] : []);
+  const costUsd = assistantMessages.reduce((sum, item) => sum + item.usage.cost.total, 0);
+  const usageKnown = assistantMessages.length > 0
+    && assistantMessages.every((item) => item.usage.totalTokens > 0);
+  return { sessionId, runId: result.value.operationId, message, costUsd, usageKnown };
 }
 
 /** Owns only assistant Sessions. Caller must keep one executor per assistant Home writer. */
@@ -194,9 +198,16 @@ export async function createAssistantExecutor(options: {
             return serialize(async () => {
               automationTaskId = taskId;
               try {
-                return await completeTurn(lane, sessionId, lane.skill('delegate-and-verify',
+                const result = await completeTurn(lane, sessionId, lane.skill('delegate-and-verify',
                   `A delegated task changed state. Query only task ID ${taskId}. This is a proposal phase: do not call link_evidence. If completed, return only JSON {"checks":[{"criterion":"...","evidenceRefs":["..."]}]} with one entry per actual completion criterion and only returned evidence references. For any other state, return only JSON {"checks":[]}. Do not start or follow up another task.`,
                   BACKGROUND_CONTEXT));
+                if (!result.usageKnown && [model.cost.input, model.cost.output,
+                  model.cost.cacheRead, model.cost.cacheWrite,
+                  ...(model.cost.tiers ?? []).flatMap((tier) => [tier.input, tier.output,
+                    tier.cacheRead, tier.cacheWrite])].some((rate) => rate > 0)) {
+                  throw new Error('Delegation verification model usage is unknown; retain the original task ID.');
+                }
+                return result;
               } finally { automationTaskId = undefined; }
             }, signal);
           },
