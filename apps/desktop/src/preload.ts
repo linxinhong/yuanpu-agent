@@ -42,6 +42,8 @@ const bridge: DesktopBridge = {
   setAssistantSuggestionsPaused: (until) => ipcRenderer.invoke('assistant:suggestions:pause', until),
   markAssistantSuggestionRead: (id) => ipcRenderer.invoke('assistant:suggestions:read', id),
   getAssistantWorkspace: (memoryLimit) => ipcRenderer.invoke('assistant:workspace:get', memoryLimit),
+  revokeAssistantSource: (sourceId, expectedVersion) =>
+    ipcRenderer.invoke('assistant:source:revoke', sourceId, expectedVersion),
   correctAssistantMemory: (id, expectedVersion, text, revisionId) =>
     ipcRenderer.invoke('assistant:memory:correct', id, expectedVersion, text, revisionId),
   forgetAssistantMemory: (id) => ipcRenderer.invoke('assistant:memory:forget', id),

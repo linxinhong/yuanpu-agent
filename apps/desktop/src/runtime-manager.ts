@@ -802,6 +802,12 @@ export class RuntimeManager {
       : `${RUNTIME_ROUTES.assistantWorkspace}?memoryLimit=${encodeURIComponent(memoryLimit)}`);
   }
 
+  revokeAssistantSource(sourceId: string, expectedVersion: string): Promise<import('@yuanpu-agent/protocol').AssistantSourceRevocationReceipt> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'revoke-source', sourceId, expectedVersion }) });
+  }
+
   correctAssistantMemory(id: string, expectedVersion: number, text: string,
     revisionId: string): Promise<import('@yuanpu-agent/protocol').AssistantMemoryView> {
     return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',

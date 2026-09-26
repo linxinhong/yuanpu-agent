@@ -76,6 +76,38 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
     return this.lifecycle.markDeleted(feedId, sourceId, audienceId);
   }
 
+  /** Explicit personal-user revocation. One durable row is both the tombstone and feed event. */
+  revokeSource(sourceId: string, expectedVersion: string): {
+    sourceId: string; tombstoneVersion: string; status: 'accepted' | 'already_accepted' } {
+    if (typeof sourceId !== 'string' || sourceId.length > 300
+      || typeof expectedVersion !== 'string' || !expectedVersion || expectedVersion.length > 300) {
+      throw new Error('Invalid source revocation request.');
+    }
+    const feedId = sourceId.startsWith('work-turn:') || sourceId.startsWith('work-tool:')
+      || sourceId.startsWith('work-artifact:') ? 'work'
+      : sourceId.startsWith('assistant-turn:') || sourceId.startsWith('legacy-assistant:')
+        ? 'assistant' : undefined;
+    if (!feedId) throw new Error('Unknown revocable source.');
+    const evidence = sourceId.startsWith('work-tool:') || sourceId.startsWith('work-artifact:')
+      ? this.workEvidence?.sourceById(sourceId) : undefined;
+    const original = feedId === 'assistant' ? this.assistant.currentSourceChange(sourceId)
+      : sourceId.startsWith('work-turn:') ? this.work.sourceById(sourceId)
+        : evidence && this.workEvidence?.workspaceForSource(evidence) ? evidence : undefined;
+    if (!original || (feedId === 'assistant'
+      && (original as AssistantSourceChange).audience.id !== 'local-user')) {
+      throw new Error('Source is not owned by this Assistant user.');
+    }
+    if (original.sourceVersion !== expectedVersion) throw new Error('Source version conflict. Refresh before revoking.');
+    const existing = this.lifecycle.deletion(feedId, sourceId);
+    const expectedTombstone = `deleted:${createHash('sha256').update(expectedVersion).digest('hex')}`;
+    if (existing) {
+      if (existing.sourceVersion !== expectedTombstone) throw new Error('Source revocation version conflict.');
+      return { sourceId, tombstoneVersion: existing.sourceVersion, status: 'already_accepted' };
+    }
+    const deleted = this.lifecycle.markDeleted(feedId, sourceId, 'local-user', expectedVersion);
+    return { sourceId, tombstoneVersion: deleted.sourceVersion, status: 'accepted' };
+  }
+
   async listChanges(feedId: string, afterCursor: string, limit: number): Promise<AssistantSourcePage> {
     if (!feeds.includes(feedId as typeof feeds[number]) || !Number.isSafeInteger(limit)
       || limit < 1 || limit > 500) throw new Error('Invalid source feed request.');

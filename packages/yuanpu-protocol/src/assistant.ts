@@ -136,7 +136,15 @@ export interface AssistantSourceView {
   sourceId: string;
   sourceVersion: string;
   availability: 'available' | 'temporarily_unavailable' | 'deleted' | 'unknown';
+  current?: boolean;
   workConversationId?: string;
+}
+
+/** Host accepted revocation; Assistant processing may still be pending. */
+export interface AssistantSourceRevocationReceipt {
+  sourceId: string;
+  tombstoneVersion: string;
+  status: 'accepted' | 'already_accepted';
 }
 
 export interface AssistantWorkspaceSnapshot {
@@ -150,6 +158,7 @@ export interface AssistantWorkspaceSnapshot {
     evidenceByCriterion: Record<string, string[]> }>;
   delegationsUnavailable?: boolean;
   sources: AssistantSourceView[];
+  hasMoreSources: boolean;
   organizingPausedUntil?: string;
   sourceSync: { processed: number; pending: number; unavailable: number; lastObservedAt?: string };
 }

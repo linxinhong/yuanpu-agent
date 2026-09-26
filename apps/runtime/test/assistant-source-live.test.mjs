@@ -6,12 +6,60 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { AssistantMemoryRepository } from '@yuanpu-agent/assistant';
 import { openYuanpuMetadataDatabase } from '@yuanpu-agent/runtime-kit';
 
 const require = createRequire(import.meta.url);
 const { AssistantWorkerManager, RuntimeAssistantSourceHost } = require('../dist/index.cjs');
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
 const person = { kind: 'personal', id: 'local-user' };
+
+test('explicit source revocation is versioned, personal, durable and keeps original records', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-source-revoke-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const metadata = openYuanpuMetadataDatabase(join(root, 'automation.sqlite'));
+  t.after(() => metadata.close());
+  const sourceId = 'work-turn:work:fixture:turn-revoke';
+  const ref = `work-content:${createHash('sha256').update(sourceId).digest('hex')}`;
+  metadata.database.prepare(`INSERT INTO yp_work_turn_sources(conversation_id,turn_id,run_id,
+    content_ref,source_version,committed_at,user_text,assistant_text)
+    VALUES (?,?,?,?,?,?,?,?)`).run('work:fixture', 'turn-revoke', 'run-revoke', ref,
+      'work-v1', '2026-09-27T00:00:00.000Z', 'User source remains', 'Assistant answer remains');
+  metadata.assistantHost.recordLegacyArchive('owned-session', [
+    { id: 'user-1', role: 'user', text: 'Assistant source remains', at: '2026-09-27T00:00:00.000Z' },
+  ]);
+  const assistantId = `legacy-assistant:${createHash('sha256').update('owned-session').digest('hex')}`;
+  const assistantVersion = metadata.assistantHost.currentSourceChange(assistantId).sourceVersion;
+  metadata.database.prepare(`INSERT INTO yp_assistant_sources(source_id,source_version,content_ref,
+    audience_id,legacy_content_json,occurred_at) VALUES (?,?,?,?,?,?)`)
+    .run('legacy-assistant:other', 'other-v1', 'legacy-assistant-content:other', 'other',
+      '[{"id":"other","role":"user","text":"private","at":"2026-09-27T00:00:00.000Z"}]',
+      '2026-09-27T00:00:00.000Z');
+  const host = new RuntimeAssistantSourceHost(metadata.workConversations, metadata.assistantHost,
+    metadata.assistantSourceLifecycle);
+  assert.throws(() => host.revokeSource(sourceId, 'old-v0'), /version conflict/);
+  assert.throws(() => host.revokeSource('work-turn:unknown', 'work-v1'), /not owned/);
+  assert.throws(() => host.revokeSource('legacy-assistant:other', 'other-v1'), /not owned/);
+  assert.throws(() => host.revokeSource('legacy-memory:MEMORY', 'any'), /Unknown revocable/);
+  const orphanHost = new RuntimeAssistantSourceHost(metadata.workConversations, metadata.assistantHost,
+    metadata.assistantSourceLifecycle, undefined, {
+      sourceById: () => ({ sourceId: 'work-tool:orphan', sourceVersion: 'orphan-v1' }),
+      workspaceForSource: () => undefined,
+    });
+  assert.throws(() => orphanHost.revokeSource('work-tool:orphan', 'orphan-v1'), /not owned/);
+  assert.equal(metadata.assistantSourceLifecycle.deletion('work', 'work-tool:orphan'), undefined);
+  const accepted = host.revokeSource(sourceId, 'work-v1');
+  assert.equal(accepted.status, 'accepted');
+  assert.match(accepted.tombstoneVersion, /^deleted:[a-f0-9]{64}$/);
+  assert.deepEqual(host.revokeSource(sourceId, 'work-v1'), { ...accepted, status: 'already_accepted' });
+  assert.equal((await host.readSource(ref, sourceId, 'work-v1', person, 32_000)).status, 'deleted');
+  assert.equal(metadata.workConversations.sourceById(sourceId).userText, 'User source remains');
+  assert.equal((await host.listChanges('work-deletions', '0', 10)).events.length, 1);
+  assert.equal(host.revokeSource(assistantId, assistantVersion).status, 'accepted');
+  assert.equal((await host.currentSource(assistantId, person)).status, 'deleted');
+  assert.equal(metadata.assistantHost.currentSourceChange(assistantId).sourceVersion, assistantVersion);
+  assert.equal((await host.listChanges('assistant-deletions', '0', 10)).events.length, 1);
+});
 
 async function eventually(assertion) {
   const deadline = Date.now() + 10_000;
@@ -102,6 +150,103 @@ test('real Runtime source adapter pages saved Work and Assistant turns into Work
     'restarting Worker and polling the same host changes must not duplicate the queue');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_text').get().n, 1);
   db.close();
+});
+
+test('revocation while Worker is stopped withdraws only unsupported memory after restart', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-source-revoke-restart-'));
+  const metadata = openYuanpuMetadataDatabase(join(root, 'automation.sqlite'));
+  const home = join(root, 'assistant');
+  let first;
+  let second;
+  let third;
+  t.after(async () => {
+    await third?.stop(); await second?.stop(); await first?.stop();
+    metadata.close(); await rm(root, { recursive: true, force: true });
+  });
+  const sourceId = 'work-turn:work:fixture:turn-shared';
+  const ref = `work-content:${createHash('sha256').update(sourceId).digest('hex')}`;
+  metadata.database.prepare(`INSERT INTO yp_work_turn_sources(conversation_id,turn_id,run_id,
+    content_ref,source_version,committed_at,user_text,assistant_text)
+    VALUES (?,?,?,?,?,?,?,?)`).run('work:fixture', 'turn-shared', 'run-shared', ref,
+      'work-v1', '2026-09-27T00:00:00.000Z', 'Work evidence', 'Work answer');
+  metadata.assistantHost.recordLegacyArchive('shared-session', [
+    { id: 'user-1', role: 'user', text: 'Assistant evidence', at: '2026-09-27T00:00:00.000Z' },
+  ]);
+  const assistantId = `legacy-assistant:${createHash('sha256').update('shared-session').digest('hex')}`;
+  const assistantVersion = metadata.assistantHost.currentSourceChange(assistantId).sourceVersion;
+  const host = new RuntimeAssistantSourceHost(metadata.workConversations, metadata.assistantHost,
+    metadata.assistantSourceLifecycle);
+  const sourceErrors = [];
+  const options = { home, model: { appPath: root, agentPath: root,
+    provider: 'fixture', model: 'fixture' }, sources: host,
+  onError: (error) => sourceErrors.push(error.message),
+  command: { executable: process.execPath, args: [entry, '--assistant-worker'] } };
+  first = new AssistantWorkerManager(options);
+  await first.start();
+  const state = join(home, 'state.sqlite');
+  await eventually(() => {
+    const db = new DatabaseSync(state);
+    try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM source_current WHERE availability='available'").get().n, 2); }
+    finally { db.close(); }
+  });
+  await first.stop(); first = undefined;
+  const memory = await AssistantMemoryRepository.open(home);
+  const at = '2026-09-27T00:00:00.000Z';
+  const evidenceWork = { sourceId, sourceVersion: 'work-v1', observedAt: at };
+  const evidenceAssistant = { sourceId: assistantId, sourceVersion: assistantVersion, observedAt: at };
+  const base = { section: 'memories', kind: 'observed', audience: person,
+    context: 'Shared project', verifiedAt: at, text: 'Evidence-bound understanding',
+    dependsOn: [], manualAuthority: false, reason: 'Fixture' };
+  await memory.commit({ ...base, id: 'work-only', expectedVersion: 0,
+    revisionId: 'work-only-r1', evidence: [evidenceWork] });
+  await memory.commit({ ...base, id: 'shared-memory', expectedVersion: 0,
+    revisionId: 'shared-r1', evidence: [evidenceWork, evidenceAssistant] });
+  memory.close();
+  const reviewId = `review-${'a'.repeat(24)}`;
+  const review = { reviewId, workId: 'work:fixture', reviewVersion: 1, audience: person,
+    goal: 'Review the saved Work turn', constraints: [], judgment: 'unverified',
+    findings: [{ claim: 'Work answer exists', judgment: 'unverified', evidence: [evidenceWork] }],
+    unresolved: [], followUp: [], committedLedgerRevisionIds: [],
+    committedMemoryRevisionIds: [], createdAt: at };
+  const reviewDb = new DatabaseSync(state);
+  reviewDb.prepare(`INSERT INTO work_reviews(review_id,job_id,work_id,source_id,source_version,
+    material_versions_json,review_version,review_json,proposal_json,status,file_hash)
+    VALUES (?,?,?,?,?,'[]',1,?,'{"memoryCandidates":[],"ledgerCandidates":[]}','active',NULL)`)
+    .run(reviewId, 'job-source-revoke', 'work:fixture', sourceId, 'work-v1', JSON.stringify(review));
+  reviewDb.close();
+  assert.equal(host.revokeSource(sourceId, 'work-v1').status, 'accepted');
+  second = new AssistantWorkerManager(options);
+  await second.start();
+  await eventually(() => {
+    const db = new DatabaseSync(state);
+    try {
+      assert.equal(db.prepare("SELECT status FROM memory_documents WHERE id='work-only'").get().status,
+        'withdrawn', sourceErrors.join('\n'));
+      assert.equal(db.prepare("SELECT status FROM memory_documents WHERE id='shared-memory'").get().status, 'active');
+      const current = db.prepare("SELECT availability FROM source_current WHERE source_id=?").get(sourceId);
+      assert.equal(current.availability, 'deleted');
+      assert.equal(db.prepare('SELECT status FROM work_reviews WHERE review_id=?').get(reviewId).status,
+        'withdrawn', sourceErrors.join('\n'));
+    } finally { db.close(); }
+  });
+  assert.equal(host.revokeSource(assistantId, assistantVersion).status, 'accepted');
+  second.refreshSources();
+  await eventually(() => {
+    const db = new DatabaseSync(state);
+    try { assert.equal(db.prepare("SELECT status FROM memory_documents WHERE id='shared-memory'").get().status, 'withdrawn'); }
+    finally { db.close(); }
+  });
+  await second.stop(); second = undefined;
+  third = new AssistantWorkerManager(options);
+  await third.start();
+  await new Promise((resolveWait) => setTimeout(resolveWait, 350));
+  const db = new DatabaseSync(state);
+  try {
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM source_text WHERE source_id IN (?,?)")
+      .get(sourceId, assistantId).n, 0);
+    assert.equal(db.prepare("SELECT status FROM memory_documents WHERE id='work-only'").get().status, 'withdrawn');
+    assert.equal(db.prepare("SELECT status FROM memory_documents WHERE id='shared-memory'").get().status, 'withdrawn');
+  } finally { db.close(); }
 });
 
 test('legacy MEMORY is read through Host once and A→B→A receives unique durable event IDs', async (t) => {

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AssistantSourceChange } from '@yuanpu-agent/protocol';
 
@@ -21,10 +21,14 @@ function deletionChange(row: DeletionRow): AssistantSourceChange {
 export class AssistantSourceLifecycleStore {
   constructor(private readonly database: DatabaseSync) {}
 
-  markDeleted(feedId: OriginFeed, sourceId: string, audienceId: string): AssistantSourceChange {
+  markDeleted(feedId: OriginFeed, sourceId: string, audienceId: string,
+    expectedVersion?: string): AssistantSourceChange {
+    const sourceVersion = expectedVersion
+      ? `deleted:${createHash('sha256').update(expectedVersion).digest('hex')}`
+      : `deleted:${randomUUID()}`;
     this.database.prepare(`INSERT OR IGNORE INTO yp_assistant_source_deletions
       (feed_id,source_id,source_version,audience_id,occurred_at) VALUES (?,?,?,?,?)`)
-      .run(feedId, sourceId, `deleted:${randomUUID()}`, audienceId, new Date().toISOString());
+      .run(feedId, sourceId, sourceVersion, audienceId, new Date().toISOString());
     return this.deletion(feedId, sourceId)!;
   }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import type { AgentRunRecord, AssistantDelegationRecord, AssistantEvidenceRef, AssistantLinkStatus,
-  AssistantReviewJudgment, ScheduleRecord } from '@yuanpu-agent/protocol';
+  AssistantReviewJudgment, AssistantSourceRevocationReceipt, ScheduleRecord } from '@yuanpu-agent/protocol';
 import { AppIcon } from '../shared/app-icon.js';
 import { MessageContent } from '../shared/message-content.js';
 import { readSavedContent, removeSavedContent, savedContentEvent } from '../shared/saved-content.js';
@@ -51,6 +51,9 @@ export function AssistantHome({ active, link, linkLoading, linkError, retryLink,
   const [selectedSuggestion, setSelectedSuggestion] = useState<string>();
   const [selectedReview, setSelectedReview] = useState<string>();
   const [selectedDelegation, setSelectedDelegation] = useState<string>();
+  const [selectedSource, setSelectedSource] = useState<string>();
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [sourceReceipt, setSourceReceipt] = useState<AssistantSourceRevocationReceipt>();
   const [memoryDraft, setMemoryDraft] = useState('');
   const [editingMemory, setEditingMemory] = useState(false);
   const [forgetConfirm, setForgetConfirm] = useState(false);
@@ -91,6 +94,9 @@ export function AssistantHome({ active, link, linkLoading, linkError, retryLink,
     onSuccess: () => { setSelectedMemory(undefined); setForgetConfirm(false); refreshWorkspace(); refreshSuggestions(); } });
   const organizingPause = useMutation({ mutationFn: (until?: string) =>
     desktop!.setAssistantOrganizingPaused(until), onSuccess: refreshWorkspace });
+  const revokeSource = useMutation({ mutationFn: (input: { sourceId: string; expectedVersion: string }) =>
+    desktop!.revokeAssistantSource(input.sourceId, input.expectedVersion),
+    onSuccess: (receipt) => { setSourceReceipt(receipt); setConfirmRevoke(false); refreshWorkspace(); } });
   const importSaved = useMutation({ mutationFn: (item: ReturnType<typeof readSavedContent>[number]) =>
     desktop!.importAssistantSavedMemory(item.id, item.surface, item.text, item.savedAt),
     onSuccess: () => { setSelectedSaved(undefined); refreshWorkspace(); } });
@@ -129,6 +135,7 @@ export function AssistantHome({ active, link, linkLoading, linkError, retryLink,
   const delegation = workspace.data?.delegations.find((item) => item.taskId === selectedDelegation);
   const delegationVerification = delegation
     ? workspace.data?.delegationVerifications?.[delegation.taskId] : undefined;
+  const currentSources = workspace.data?.sources.filter((item) => item.current) ?? [];
   const schedule = schedules.data?.find((item) => item.scheduleId === selectedSchedule);
   const upcoming = (schedules.data ?? []).filter((item) => item.enabled && item.nextTriggerAt)
     .sort((a, b) => a.nextTriggerAt!.localeCompare(b.nextTriggerAt!));
@@ -155,15 +162,32 @@ export function AssistantHome({ active, link, linkLoading, linkError, retryLink,
     correctionRequest.current = request;
     correctMemory.mutate(request);
   }
-  function sourceRefs(refs: AssistantEvidenceRef[]) {
+  function sourceRefs(refs: Array<Pick<AssistantEvidenceRef, 'sourceId' | 'sourceVersion'>>) {
     if (!refs.length) return <p>尚无可展示的来源引用。</p>;
     return <ul className="assistant-source-list">{refs.map((ref) => {
       const source = workspace.data?.sources.find((item) => item.sourceId === ref.sourceId
         && item.sourceVersion === ref.sourceVersion);
-      return <li key={`${ref.sourceId}:${ref.sourceVersion}`}><span>{ref.sourceId} · {source?.availability === 'available'
+      const key = `${ref.sourceId}:${ref.sourceVersion}`;
+      return <li key={key}><span>{ref.sourceId} · {source?.availability === 'available'
         ? '可用' : source?.availability === 'temporarily_unavailable' ? '暂不可用'
-          : source?.availability === 'deleted' ? '已撤回' : '待确认'}</span>
+          : source?.availability === 'deleted' ? '已停止读取' : '待确认'}</span>
         {source?.workConversationId && <button type="button" onClick={() => onOpenWorkConversation(source.workConversationId!)}>打开工作</button>}
+        <button type="button" onClick={() => { setSelectedSource(selectedSource === key ? undefined : key);
+          setConfirmRevoke(false); revokeSource.reset(); }}>来源详情</button>
+        {selectedSource === key && <div className="assistant-source-detail">
+          <p>助理来源版本：{ref.sourceVersion}</p>
+          <p>撤销只停止助理读取这条来源并撤回仅由它支持的整理；原始工作对话、助理对话和文件仍保留。</p>
+          {source?.availability === 'deleted' ? <p>助理已停止读取该来源；相关认识和评估仍需核对。</p>
+            : ['available', 'temporarily_unavailable'].includes(source?.availability ?? '') ? <>
+              {!confirmRevoke ? <button type="button" onClick={() => setConfirmRevoke(true)}>撤销助理读取</button>
+                : <div role="alert"><p>确认撤销这条来源？仅登记后续处理，不代表记忆已立即删除。</p>
+                  <button type="button" disabled={revokeSource.isPending}
+                    onClick={() => revokeSource.mutate({ sourceId: ref.sourceId,
+                      expectedVersion: ref.sourceVersion })}>确认撤销</button>
+                  <button type="button" onClick={() => setConfirmRevoke(false)}>保留来源</button></div>}
+            </> : <p>当前版本不可确认，请刷新后再操作。</p>}
+          {revokeSource.error && <p role="alert">撤销未确认：{errorMessage(revokeSource.error)}</p>}
+        </div>}
       </li>;
     })}</ul>;
   }
@@ -205,6 +229,10 @@ export function AssistantHome({ active, link, linkLoading, linkError, retryLink,
     <AssistantCompanion active={active} activity={activity} />
     </header>
     <div ref={scroll} id="assistant-tab-content" className="assistant-home-content" role="tabpanel" aria-labelledby={`assistant-tab-${tabs.indexOf(tab)}`} tabIndex={0}>
+      {sourceReceipt && <p role="status">来源 {sourceReceipt.sourceId} 的撤销已由宿主登记；
+        {workspace.data?.sources.some((item) => item.sourceId === sourceReceipt.sourceId
+          && item.availability === 'deleted') ? '助理已停止读取，相关整理仍需核对' : '助理正在处理'}。
+        原始记录仍保留。</p>}
       {tab === '今日' && <>
         <header className="assistant-day-heading"><time>{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</time>
           <h1>先把重要的事，安排好。</h1><p>{upcoming.length ? `${upcoming.length} 项计划待执行。` : '把要跟进的事交给助理，从这里开始。'}</p></header>
@@ -375,6 +403,11 @@ export function AssistantHome({ active, link, linkLoading, linkError, retryLink,
               && <div className="assistant-card assistant-empty"><h3>还没有助理记忆</h3><p>助理会从可靠来源整理，也可以手动导入旧收藏。</p></div>}
           {workspace.data?.hasMoreMemories && <button type="button" disabled={workspace.isFetching}
             onClick={() => setMemoryLimit((limit) => Math.min(limit + 100, 10_000))}>加载更早的记忆</button>}
+          {currentSources.length > 0 && <details className="assistant-card"><summary>助理来源（{currentSources.length}{workspace.data?.hasMoreSources ? '+' : ''}）</summary>
+            <p className="assistant-home-note">这里列出助理已处理的来源。撤销助理读取不会删除原始工作或对话。</p>
+            {sourceRefs(currentSources)}
+            {workspace.data?.hasMoreSources && <button type="button" disabled={workspace.isFetching}
+              onClick={() => setMemoryLimit((limit) => Math.min(limit + 100, 10_000))}>加载更多来源</button>}</details>}
           {savedMemories.length > 0 && <section><div className="assistant-section-title"><h2>旧本地收藏</h2></div>
             <p className="assistant-home-note">它们来自本机手动保存的回复，点击后可选择导入。</p>
             {savedMemories.map((item) => <button key={item.id} type="button" className="assistant-card assistant-item"

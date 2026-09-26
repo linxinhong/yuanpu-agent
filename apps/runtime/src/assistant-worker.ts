@@ -51,6 +51,7 @@ type HostMessage =
   | { kind: 'workspace-pause'; correlationId: string; until?: string }
   | { kind: 'workspace-delegation'; correlationId: string; id: string;
       action: 'follow-up' | 'cancel'; text?: string }
+  | { kind: 'refresh-sources' }
   | { kind: 'shutdown' };
 
 function send(message: Record<string, unknown>): void {
@@ -577,6 +578,7 @@ export async function runAssistantWorker(): Promise<void> {
         return;
       }
       if (message.kind === 'shutdown') { void shutdown(); return; }
+      if (message.kind === 'refresh-sources') { pumpSources(); return; }
       if (message.kind === 'cancel') {
         void active.get(message.id)?.cancel();
         return;

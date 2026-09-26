@@ -133,7 +133,7 @@ export class AssistantWorkerManager {
               && typeof args[0] === 'object') result = host.start(args[0] as AssistantDelegationBrief);
             else if (request.method === 'status' && args.length === 1 && typeof args[0] === 'string') {
               result = host.status(args[0]);
-            } else if (request.method === 'followUp' && args.length === 3
+            } else if (request.method === 'followUp' && args.length === 4
               && args.every((arg) => typeof arg === 'string')) {
               result = host.followUp(args[0] as string, args[1] as string, args[2] as string,
                 args[3] as string);
@@ -307,6 +307,7 @@ export class AssistantWorkerManager {
     return this.suggestionOperation({ kind: 'workspace-delegation', id, action: 'cancel' }) as
       Promise<AssistantDelegationRecord>;
   }
+  refreshSources(): void { if (this.ready) this.child?.send({ kind: 'refresh-sources' }); }
   cancel(id: string): void { if (this.ready) this.child?.send({ kind: 'cancel', id }); }
   notifyDelegation(record: AssistantDelegationRecord): void {
     if (this.ready) this.child?.send({ kind: 'delegation-event', record });
