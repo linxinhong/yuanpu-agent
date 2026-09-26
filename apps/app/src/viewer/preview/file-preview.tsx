@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import type { WorkFilePreview as WorkFilePreviewData } from '@yuanpu-agent/protocol';
+import type { WorkFilePreview } from '@yuanpu-agent/protocol';
 
-import { MessageContent } from './message-content.js';
-import { WorkFilePdf } from './work-file-pdf.js';
-import { classifyWorkFile, formatFileSize, formatFileTime } from './work-file-utils.js';
+import { MessageContent } from '../../shared/message-content.js';
+import { classifyWorkFile } from '../core/content-kind.js';
+import { formatFileSize, formatFileTime } from '../core/format.js';
+import type { ViewerFileHost } from '../host/file-host.js';
+import { PdfView } from './pdf-view.js';
 
 const MAX_RENDERED_LINES = 2000;
 
@@ -19,7 +21,7 @@ function TextPreview({ content, truncated }: { content: string; truncated: boole
   </>;
 }
 
-function PreviewBody({ name, preview }: { name: string; preview: WorkFilePreviewData }) {
+function PreviewBody({ name, preview }: { name: string; preview: WorkFilePreview }) {
   if (preview.kind === 'unsupported') {
     return <p className="file-preview-error" role="alert">{preview.reason}</p>;
   }
@@ -27,7 +29,7 @@ function PreviewBody({ name, preview }: { name: string; preview: WorkFilePreview
     return <img className="file-preview-image" src={`data:${preview.mediaType};base64,${preview.base64}`} alt={name} />;
   }
   if (preview.kind === 'pdf') {
-    return <WorkFilePdf base64={preview.base64} />;
+    return <PdfView base64={preview.base64} />;
   }
   return classifyWorkFile(name) === 'markdown'
     ? <div className="file-preview-markdown"><MessageContent text={preview.content} /></div>
@@ -35,15 +37,16 @@ function PreviewBody({ name, preview }: { name: string; preview: WorkFilePreview
 }
 
 /** Read-only preview of one workspace file with a back affordance to the tree. */
-export function WorkFilePreview({ conversationId, filePath, onBack }: {
-  conversationId: string;
+export function FilePreview({ host, scopeKey, filePath, onBack }: {
+  host: ViewerFileHost;
+  /** Opaque identity of the browsed scope (the Work conversation id). */
+  scopeKey: string;
   filePath: string;
   onBack: () => void;
 }) {
   const query = useQuery({
-    queryKey: ['work', 'file', conversationId, filePath],
-    queryFn: () => window.yuanpu!.readWorkFile(conversationId, filePath),
-    enabled: Boolean(conversationId) && Boolean(window.yuanpu),
+    queryKey: ['viewer', 'file', scopeKey, filePath],
+    queryFn: () => host.readFile(filePath),
   });
   const name = filePath.split('/').pop() ?? filePath;
   const meta = query.data && query.data.kind !== 'unsupported'

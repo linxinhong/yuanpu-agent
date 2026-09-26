@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
 import { marked, type Token, type Tokens } from 'marked';
 
-import { splitTextByFilePaths } from './work-file-utils.js';
+import { splitTextByFilePaths } from './work-file-links.js';
 
 type RenderOptions = { onOpenFilePath?: (path: string) => void };
 

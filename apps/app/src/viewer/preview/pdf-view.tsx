@@ -39,7 +39,7 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
 }
 
 /** Renders a base64 PDF payload page-by-page; heavy pages load in small batches. */
-export function WorkFilePdf({ base64 }: { base64: string }) {
+export function PdfView({ base64 }: { base64: string }) {
   const [doc, setDoc] = useState<PDFDocumentProxy>();
   const [error, setError] = useState('');
   const [visiblePages, setVisiblePages] = useState(INITIAL_PAGES);

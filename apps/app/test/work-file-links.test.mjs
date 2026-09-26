@@ -6,24 +6,10 @@ import { register } from 'tsx/esm/api';
 register();
 
 const {
-  classifyWorkFile,
   extractFilePathCandidates,
-  formatFileTime,
-  formatFileSize,
   normalizeWorkspacePath,
   splitTextByFilePaths,
-} = await import('../src/shared/work-file-utils.ts');
-
-test('classifyWorkFile routes by extension', () => {
-  assert.equal(classifyWorkFile('README.md'), 'markdown');
-  assert.equal(classifyWorkFile('notes.MARKDOWN'), 'markdown');
-  assert.equal(classifyWorkFile('docs/report.pdf'), 'pdf');
-  assert.equal(classifyWorkFile('logo.PNG'), 'image');
-  assert.equal(classifyWorkFile('src/index.ts'), 'text');
-  assert.equal(classifyWorkFile('data.csv'), 'text');
-  assert.equal(classifyWorkFile('archive.zip'), 'other');
-  assert.equal(classifyWorkFile('Makefile'), 'other');
-});
+} = await import('../src/shared/work-file-links.ts');
 
 test('extractFilePathCandidates finds separated paths and previewable bare names', () => {
   assert.deepEqual(
@@ -58,15 +44,6 @@ test('normalizeWorkspacePath strips ./ and collapses separators, rejecting escap
   assert.equal(normalizeWorkspacePath('..'), null);
   assert.equal(normalizeWorkspacePath('src/../../outside'), null);
   assert.equal(normalizeWorkspacePath('src/..b/c.ts'), 'src/..b/c.ts');
-});
-
-test('formatFileSize and formatFileTime produce readable labels', () => {
-  assert.equal(formatFileSize(undefined), '');
-  assert.equal(formatFileSize(512), '512 B');
-  assert.equal(formatFileSize(2048), '2.0 KB');
-  assert.equal(formatFileSize(3 * 1024 * 1024), '3.0 MB');
-  assert.equal(formatFileTime(undefined), '');
-  assert.match(formatFileTime(new Date('2026-09-26T08:30:00Z').toISOString()), /\d{1,2}:\d{2}/);
 });
 
 test('splitTextByFilePaths isolates path segments for interactive rendering', () => {

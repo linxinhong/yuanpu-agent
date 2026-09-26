@@ -23,3 +23,12 @@
 
 ## 集成阻塞（截至本记忆）
 - main 检出存在未提交改动，且与本项目修改文件重叠（chat.tsx、protocol/index.ts、runtime/index.ts、desktop 三件、muse-theme.css、assistant-reply.tsx、pnpm-lock.yaml）。git 拒绝在受影响文件本地修改时合并；不代用户提交或 stash。需用户处置未提交工作后再并入。
+
+## 2026-09-26 模块化重构（应用户要求）
+
+- 放弃独立 `packages/yuanpu-viewer` 包方案（用户改为 app 内组织）：查看器代码迁入 `apps/app/src/viewer/`，按 `core/`（内容类型判定与格式化）、`files/`（目录树）、`preview/`（文本/Markdown/图片/PDF）、`browser/`（预留，见其 README）、`host/`（`ViewerFileHost` 接缝）分模块，模块图见 `apps/app/src/viewer/README.md`。
+- 职责边界（用户确认）：viewer=查看器组件与内容适配；apps/app 其余=面板布局、拖宽、打开哪个视图、会话关联；apps/desktop（含其管理的 sidecar）=实际文件读写与系统能力。viewer 组件不触碰 `window.yuanpu`，chat.tsx 用桥+会话 ID 实现 host。
+- 会话关联修正：chat.tsx 给 `FileTree` 加 `key={workConversationId}`，切换/新建会话时文件树展开状态随预览一并重置（补齐验收项）。
+- 聊天内路径链接工具更名 `shared/work-file-links.ts`（extract/split/normalize）；`classifyWorkFile`/格式化函数迁入 `viewer/core/`；`message-content.tsx` 只改导入。样式仍全部在 `muse-theme.css`（theme-contract 继续覆盖）。
+- 验证：pnpm check 全过（app 15 测试）、vite 构建含 pdf worker、浏览器冒烟（work 文件页签空态正常、助理面板无文件入口）。
+- 测试限制：`viewer/preview/*` 无法被 node:test（tsx）加载——pdf worker 的 `?url` 导入是 Vite 专有转换；viewer-modules.test.mjs 只覆盖 core/files，preview 行为靠构建与桌面冒烟。

@@ -19,9 +19,10 @@ import { AppIcon } from '../shared/app-icon.js';
 import { AssistantReply } from '../shared/assistant-reply.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
-import { WorkFilePreview } from '../shared/work-file-preview.js';
-import { WorkFileTree } from '../shared/work-file-tree.js';
-import { normalizeWorkspacePath } from '../shared/work-file-utils.js';
+import { normalizeWorkspacePath } from '../shared/work-file-links.js';
+import { FileTree } from '../viewer/files/file-tree.js';
+import { FilePreview } from '../viewer/preview/file-preview.js';
+import type { ViewerFileHost } from '../viewer/host/file-host.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
 type ChatMessage = {
@@ -622,6 +623,14 @@ export function ChatPanel({
     setFilePreviewPath(normalizeWorkspacePath(rawPath) ?? rawPath);
   }
 
+  // Session association lives here; the viewer only receives its host seam.
+  const fileHost: ViewerFileHost | undefined = surface === 'work' && workConversationId && desktop
+    ? {
+      listDirectory: (dirPath?: string) => desktop.listWorkFiles(workConversationId, dirPath),
+      readFile: (filePath: string) => desktop.readWorkFile(workConversationId, filePath),
+    }
+    : undefined;
+
   const visibleRun = navigationTarget?.runId
     ? (locatedRun && typeof locatedRun !== 'string' ? locatedRun : undefined)
     : lastRun;
@@ -947,12 +956,12 @@ export function ChatPanel({
             </div>
           ) : (
             <div className="activity-content file-panel">
-              {!workConversationId ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
+              {!fileHost || !workConversationId ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
                 : <>
-                  <WorkFileTree conversationId={workConversationId} selectedPath={filePreviewPath}
-                    onOpenFile={setFilePreviewPath} hidden={Boolean(filePreviewPath)} />
+                  <FileTree key={workConversationId} host={fileHost} scopeKey={workConversationId}
+                    selectedPath={filePreviewPath} onOpenFile={setFilePreviewPath} hidden={Boolean(filePreviewPath)} />
                   {filePreviewPath && <div className="file-preview-wrap">
-                    <WorkFilePreview conversationId={workConversationId} filePath={filePreviewPath}
+                    <FilePreview host={fileHost} scopeKey={workConversationId} filePath={filePreviewPath}
                       onBack={() => setFilePreviewPath(undefined)} />
                   </div>}
                 </>}

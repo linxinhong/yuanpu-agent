@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { WorkFileEntry } from '@yuanpu-agent/protocol';
 
-import { AppIcon } from './app-icon.js';
+import type { ViewerFileHost } from '../host/file-host.js';
+import { AppIcon } from '../../shared/app-icon.js';
 
-function useWorkDirectory(conversationId: string | undefined, dirPath: string, enabled: boolean) {
+function useViewerDirectory(host: ViewerFileHost | undefined, dirPath: string, enabled: boolean) {
   return useQuery({
-    queryKey: ['work', 'files', conversationId, dirPath],
-    queryFn: () => window.yuanpu!.listWorkFiles(conversationId!, dirPath),
-    enabled: enabled && Boolean(conversationId) && Boolean(window.yuanpu),
+    queryKey: ['viewer', 'files', host, dirPath],
+    queryFn: () => host!.listDirectory(dirPath),
+    enabled: enabled && Boolean(host),
   });
 }
 
@@ -16,15 +17,15 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function FileRow({ conversationId, entry, depth, selectedPath, onOpenFile }: {
-  conversationId: string;
+function FileRow({ host, entry, depth, selectedPath, onOpenFile }: {
+  host: ViewerFileHost;
   entry: WorkFileEntry;
   depth: number;
   selectedPath?: string;
   onOpenFile: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const children = useWorkDirectory(conversationId, entry.path, entry.kind === 'directory' && expanded);
+  const children = useViewerDirectory(host, entry.path, entry.kind === 'directory' && expanded);
   return <>
     <button type="button" className={`file-tree-row ${selectedPath === entry.path ? 'selected' : ''}`}
       style={{ paddingLeft: `${10 + depth * 14}px` }}
@@ -41,25 +42,31 @@ function FileRow({ conversationId, entry, depth, selectedPath, onOpenFile }: {
         : children.error ? <p className="file-tree-status" role="alert" style={{ paddingLeft: `${10 + (depth + 1) * 14}px` }}>读取失败：{formatError(children.error)}</p>
           : children.data && children.data.entries.length === 0
             ? <p className="file-tree-status" style={{ paddingLeft: `${10 + (depth + 1) * 14}px` }}>空目录</p>
-            : children.data?.entries.map((child) => <FileRow key={child.path} conversationId={conversationId}
+            : children.data?.entries.map((child) => <FileRow key={child.path} host={host}
               entry={child} depth={depth + 1} selectedPath={selectedPath} onOpenFile={onOpenFile} />)
     )}
   </>;
 }
 
-/** Lazy-loading workspace file tree. Stays mounted behind the preview to keep expansion state. */
-export function WorkFileTree({ conversationId, selectedPath, onOpenFile, hidden }: {
-  conversationId: string;
+/**
+ * Lazy-loading directory tree over the file host. Stays mounted behind the
+ * preview to keep expansion state; the app remounts it (by scope key) when
+ * the associated conversation changes.
+ */
+export function FileTree({ host, scopeKey, selectedPath, onOpenFile, hidden }: {
+  host: ViewerFileHost;
+  /** Opaque identity of the browsed scope (the Work conversation id). */
+  scopeKey: string;
   selectedPath?: string;
   onOpenFile: (path: string) => void;
   hidden?: boolean;
 }) {
-  const root = useWorkDirectory(conversationId, '', true);
+  const root = useViewerDirectory(host, '', true);
   return <div className={hidden ? 'file-tree hidden' : 'file-tree'} aria-hidden={hidden || undefined} role="tree" aria-label="工作区文件">
     {root.isLoading && <p className="file-tree-status">正在读取工作区…</p>}
     {root.error && <p className="file-tree-status" role="alert">工作区读取失败：{formatError(root.error)}</p>}
     {root.data && root.data.entries.length === 0 && <p className="file-tree-status">工作区还没有文件。</p>}
-    {root.data?.entries.map((entry) => <FileRow key={entry.path} conversationId={conversationId}
+    {root.data?.entries.map((entry) => <FileRow key={entry.path} host={host}
       entry={entry} depth={0} selectedPath={selectedPath} onOpenFile={onOpenFile} />)}
   </div>;
 }
