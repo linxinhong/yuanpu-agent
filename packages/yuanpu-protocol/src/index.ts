@@ -501,7 +501,7 @@ export interface DesktopBridge {
   getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
   listWorkConversations(): Promise<WorkConversation[]>;
   createWorkConversation(folderId?: string, requestId?: string): Promise<WorkConversation>;
-  selectWorkConversation(conversationId: string): Promise<WorkConversation>;
+  selectWorkConversation(conversationId: string, previewArchived?: boolean): Promise<WorkConversation>;
   updateWorkConversation(conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }): Promise<WorkConversation>;
   moveWorkNode(request: WorkMoveRequest): Promise<WorkMoveResult>;
   searchWorkConversations(input: WorkSearchQuery): Promise<WorkSearchResult>;

@@ -13,6 +13,8 @@ import type {
   AgentRunRecord,
   PrivateImRunSummary,
   WorkConversation,
+  WorkSearchItem,
+  WorkMessageWindowResult,
 } from '@yuanpu-agent/protocol';
 import { effectiveHotkeyBinding } from '@yuanpu-agent/protocol';
 import mindlinkSeal from '../../themes/assets/mindlink-seal.png';
@@ -27,6 +29,8 @@ import { AvatarMark } from '../shared/avatar-mark.js';
 import { resizePanel } from '../shared/panel-resize.js';
 import { PageToolbar } from '../shared/page-toolbar.js';
 import { AssistantHome } from './assistant-home.js';
+import { WorkTree } from './work-tree.js';
+import { folderPath } from './work-tree-model.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
 import { normalizeWorkspacePath } from '../shared/work-file-links.js';
 import { FileWorkspace, ImagePreviewPanel, type ImagePreviewRequest } from '../viewer/files/file-tabs.js';
@@ -35,6 +39,7 @@ import type { ViewerFileHost } from '../viewer/host/file-host.js';
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
 type ChatMessage = {
   id: number;
+  entryId?: string;
   role: 'user' | 'assistant' | 'error' | 'notice';
   text: string;
   at?: string;
@@ -103,13 +108,15 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function rightPanelSpace(panelWidth: number, listOpen: boolean): number {
-  const leftPanelWidth = listOpen && window.innerWidth > 780 ? window.innerWidth <= 1100 ? 240 : 260 : 0;
+function rightPanelSpace(panelWidth: number, listOpen: boolean, workTree: boolean): number {
+  const treeIsOverlay = workTree && window.innerWidth <= 900;
+  const leftPanelWidth = listOpen && !treeIsOverlay && window.innerWidth > 780
+    ? workTree ? window.innerWidth <= 1100 ? 260 : 300 : window.innerWidth <= 1100 ? 240 : 260 : 0;
   return Math.max(1, panelWidth - leftPanelWidth);
 }
 
-function maxRightPanelWidth(panelWidth: number, listOpen: boolean): number {
-  return Math.floor(rightPanelSpace(panelWidth, listOpen) * 0.7);
+function maxRightPanelWidth(panelWidth: number, listOpen: boolean, workTree: boolean): number {
+  return Math.floor(rightPanelSpace(panelWidth, listOpen, workTree) * 0.7);
 }
 
 export function ChatPanel({
@@ -174,7 +181,10 @@ export function ChatPanel({
   const [bridgeError, setBridgeError] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [workConversationId, setWorkConversationId] = useState<string>();
-  const pendingWorkCreateRequestId = useRef<string | undefined>(undefined);
+  const [renameRequest, setRenameRequest] = useState(0);
+  const [searchWindow, setSearchWindow] = useState<{ conversationId: string; entryId: string; result: Extract<WorkMessageWindowResult, { status: 'ok' }> }>();
+  const [searchLocationError, setSearchLocationError] = useState('');
+  const pendingWorkCreateRequest = useRef<{ folderId?: string; requestId: string } | undefined>(undefined);
   const [workListError, setWorkListError] = useState('');
   const approvalContext = `${surface}:${workConversationId ?? ''}:${navigationTarget?.runId ?? ''}`;
   const approvalContextRef = useRef(approvalContext);
@@ -204,7 +214,19 @@ export function ChatPanel({
     queryFn: () => desktop!.listWorkConversations(),
     enabled: active && surface === 'work' && Boolean(desktop),
   });
-  const workArchived = surface === 'work' && workConversationId === 'default';
+  const workFoldersQuery = useQuery({
+    queryKey: ['work', 'folders'], queryFn: () => desktop!.listWorkFolders(),
+    enabled: active && surface === 'work' && Boolean(desktop),
+  });
+  const workTagsQuery = useQuery({
+    queryKey: ['work', 'tags'], queryFn: () => desktop!.listWorkTags(),
+    enabled: active && surface === 'work' && Boolean(desktop),
+  });
+  const selectedWork = workConversationsQuery.data?.find((item) => item.id === workConversationId);
+  const workArchived = surface === 'work' && Boolean(selectedWork?.archived || workConversationId === 'default');
+  const workTreeLocked = busy || Boolean(runRecovery) || Boolean(approvalBusy)
+    || activeRunStatus === 'queued' || activeRunStatus === 'running' || activeRunStatus === 'waiting_approval';
+  const workPath = selectedWork ? folderPath(workFoldersQuery.data ?? [], selectedWork.folderId) : [];
   useEffect(() => {
     if (surface !== 'work' || !workConversationsQuery.data || workConversationId) return;
     setWorkConversationId(workConversationsQuery.data.find((item) => item.current)?.id);
@@ -240,6 +262,7 @@ export function ChatPanel({
   const appliedTranscript = useRef('');
 
   useEffect(() => {
+    if (searchWindow?.conversationId === workConversationId) return;
     if (busy || !transcriptQuery.data) return;
     const key = `${workConversationId ?? surface}:${assistantLinkQuery.data?.contactId ?? 'local'}:${JSON.stringify(transcriptQuery.data)}`;
     if (key === appliedTranscript.current) return;
@@ -253,7 +276,7 @@ export function ChatPanel({
         const previous = regular[index];
         const sameMessage = previous?.role === item.role && previous.text === item.text;
         const run = item.role === 'assistant' ? (sameMessage ? previous?.run : undefined) ?? findReplyRun(surface, item.id, item.text, item.at) ?? item.run : undefined;
-        return sameMessage ? { ...previous, at: item.at, run } : { id: index + 1, role: item.role, text: item.text, at: item.at, run };
+        return sameMessage ? { ...previous, entryId: item.id, at: item.at, run } : { id: index + 1, entryId: item.id, role: item.role, text: item.text, at: item.at, run };
       })
       : workArchived ? [] : surface === 'assistant'
         ? [{ ...initialMessages[0]!, text: assistantGreeting }]
@@ -265,7 +288,18 @@ export function ChatPanel({
       }
       return refreshed;
     });
-  }, [busy, transcriptQuery.data, assistantLinkQuery.data?.contactId, surface, workConversationId, workArchived]);
+  }, [busy, transcriptQuery.data, assistantLinkQuery.data?.contactId, surface, workConversationId, workArchived, searchWindow]);
+
+  useEffect(() => {
+    if (!searchWindow || searchWindow.conversationId !== workConversationId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = Array.from(conversationInner.current?.querySelectorAll<HTMLElement>('[data-message-entry-id]') ?? [])
+        .find((element) => element.dataset.messageEntryId === searchWindow.entryId);
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target?.classList.add('work-message-located');
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [searchWindow, workConversationId]);
 
   useEffect(() => {
     try { window.localStorage.setItem(`yuanpu:draft:${surface}`, input); }
@@ -285,8 +319,8 @@ export function ChatPanel({
       const width = panel.getBoundingClientRect().width;
       if (surface === 'assistant') {
         // Preserve the split ratio when the window or left list changes size.
-        setRightPanelWidth(rightPanelSpace(width, listOpen) * assistantPanelRatio.current);
-      } else setRightPanelWidth((current) => Math.min(current, maxRightPanelWidth(width, listOpen)));
+        setRightPanelWidth(rightPanelSpace(width, listOpen, false) * assistantPanelRatio.current);
+      } else setRightPanelWidth((current) => Math.min(current, maxRightPanelWidth(width, listOpen, true)));
     };
     fit();
     const observer = new ResizeObserver(fit);
@@ -508,12 +542,15 @@ export function ChatPanel({
     finally { sending.current = false; setBusy(false); }
   }
 
-  async function openWorkConversation(item: WorkConversation) {
-    if (!desktop || busy || runRecovery || approvalBusy || item.id === workConversationId) return;
+  async function openWorkConversation(item: WorkConversation): Promise<boolean> {
+    if (!desktop || workTreeLocked) return false;
+    if (item.id === workConversationId) return true;
     setWorkListError('');
     try {
-      if (!item.archived) await desktop.selectWorkConversation(item.id);
+      await desktop.selectWorkConversation(item.id, item.archived ? true : undefined);
       setWorkConversationId(item.id);
+      setSearchWindow(undefined);
+      setSearchLocationError('');
       setMessages([]);
       setApprovals([]);
       setReadyApprovals(new Set());
@@ -529,18 +566,22 @@ export function ChatPanel({
       setFilePreviewPath(undefined);
       setImagePreviewRequest(undefined);
       void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
-    } catch (error) { setWorkListError(formatError(error)); }
+      return true;
+    } catch (error) { setWorkListError(formatError(error)); return false; }
   }
 
-  async function newWorkConversation() {
-    if (!desktop || busy || runRecovery || approvalBusy) return;
+  async function newWorkConversation(folderId?: string) {
+    if (!desktop || workTreeLocked) return;
     setWorkListError('');
     try {
-      const requestId = pendingWorkCreateRequestId.current ?? crypto.randomUUID();
-      pendingWorkCreateRequestId.current = requestId;
-      const item = await desktop.createWorkConversation(undefined, requestId);
-      pendingWorkCreateRequestId.current = undefined;
+      const pendingRequest = pendingWorkCreateRequest.current;
+      const requestId = pendingRequest && pendingRequest.folderId === folderId
+        ? pendingRequest.requestId : crypto.randomUUID();
+      pendingWorkCreateRequest.current = { folderId, requestId };
+      const item = await desktop.createWorkConversation(folderId, requestId);
+      pendingWorkCreateRequest.current = undefined;
       setWorkConversationId(item.id);
+      setSearchWindow(undefined);
       setMessages([initialMessages[0]!]);
       setApprovals([]);
       setReadyApprovals(new Set());
@@ -559,7 +600,24 @@ export function ChatPanel({
     } catch (error) { setWorkListError(formatError(error)); }
   }
 
+  async function openWorkSearchHit(hit: WorkSearchItem): Promise<void> {
+    if (!desktop || workTreeLocked) return;
+    const item = workConversationsQuery.data?.find((conversation) => conversation.id === hit.conversationId);
+    if (!item || !(await openWorkConversation(item))) return;
+    setSearchLocationError('');
+    if (!hit.messageEntryId) return;
+    try {
+      const result = await desktop.getWorkMessageWindow(hit.conversationId, hit.messageEntryId, 20);
+      if (result.status !== 'ok') {
+        setSearchLocationError('这条历史消息暂时无法定位。可重新搜索或打开该会话查看最近消息。');
+        return;
+      }
+      setSearchWindow({ conversationId: hit.conversationId, entryId: hit.messageEntryId, result });
+    } catch (error) { setSearchLocationError(`消息定位失败：${formatError(error)}`); }
+  }
+
   async function sendMessage() {
+    if (searchWindow) setSearchWindow(undefined);
     const draft = input.trim();
     const includedAttachments = attachments;
     if ((!draft && !includedAttachments.length) || sending.current || runRecovery || workArchived
@@ -820,10 +878,10 @@ export function ChatPanel({
 
   function resizeRightPanel(clientX: number, panel: HTMLElement) {
     const bounds = panel.getBoundingClientRect();
-    const result = resizePanel(bounds.right - clientX, maxRightPanelWidth(bounds.width, listOpen),
+    const result = resizePanel(bounds.right - clientX, maxRightPanelWidth(bounds.width, listOpen, surface === 'work'),
       rightPanelGesture.current.startedAtLimit, rightPanelGesture.current.stopped);
     rightPanelGesture.current.stopped = result.stopped;
-    if (surface === 'assistant') assistantPanelRatio.current = result.width / rightPanelSpace(bounds.width, listOpen);
+    if (surface === 'assistant') assistantPanelRatio.current = result.width / rightPanelSpace(bounds.width, listOpen, false);
     setRightPanelWidth(result.width);
     setRightPanelMaximized(result.maximized);
   }
@@ -840,9 +898,14 @@ export function ChatPanel({
             <span className="chat-toolbar-divider" aria-hidden="true" />
             <nav className="chat-breadcrumb" aria-label="会话位置">
               <span>{surface === 'work' ? '工作' : '助理'}</span><AppIcon name="chevron" />
-              <strong>{workArchived ? '旧工作归档' : archiveOpen ? '原桌面会话' : scheduleOrigin ? '定时任务会话' : '当前会话'}</strong>
+              {surface === 'work' && workPath.map((folder) => <span className="chat-breadcrumb-part" key={folder.id} title={folder.name}>{folder.name}<AppIcon name="chevron" /></span>)}
+              <strong title={surface === 'work' ? (selectedWork?.title || '未命名会话') : undefined}>{surface === 'work'
+                ? workConversationId === 'default' ? '旧工作归档' : selectedWork?.title || '未命名会话'
+                : archiveOpen ? '原桌面会话' : scheduleOrigin ? '定时任务会话' : '当前会话'}</strong>
             </nav>
-            <button type="button" className="chat-rename-preview" disabled title="重命名会话尚未接入（界面预览）" aria-label="重命名会话（界面预览）"><AppIcon name="edit" /></button>
+            {surface === 'work' && selectedWork?.id !== 'default' && <button type="button" className="chat-rename-preview"
+              disabled={!selectedWork || workTreeLocked} title="重命名会话" aria-label="重命名会话"
+              onClick={() => { setListOpen(true); setRenameRequest((value) => value + 1); }}><AppIcon name="edit" /></button>}
           </div>
           {surface === 'work' && activityOpen && <div className="workspace-tab-host" ref={setWorkspaceTabHost} />}
           <div className="runtime-meta">
@@ -881,19 +944,17 @@ export function ChatPanel({
           </div>}
       </header></PageToolbar>
       {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表' : '会话列表预览'}>
-        <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong>
-          {surface === 'work' && <button type="button" className="work-new-button" disabled={busy || Boolean(runRecovery) || Boolean(approvalBusy) || !desktop}
-            onClick={() => void newWorkConversation()}>新建工作</button>}</div>
+        <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong></div>
         {surface === 'work' ? <>
           {workConversationsQuery.isLoading && <p>正在读取工作列表…</p>}
           {workConversationsQuery.error && <p role="alert">工作列表读取失败：{formatError(workConversationsQuery.error)}</p>}
+          {workFoldersQuery.error && <p role="alert">文件夹读取失败：{formatError(workFoldersQuery.error)}</p>}
+          {workTagsQuery.error && <p role="alert">标签读取失败：{formatError(workTagsQuery.error)}</p>}
           {workListError && <p role="alert">{workListError}</p>}
-          <div className="work-conversation-list">{workConversationsQuery.data?.map((item) =>
-            <button key={item.id} type="button" className="work-conversation-item" aria-current={item.id === workConversationId ? 'page' : undefined}
-              disabled={busy || Boolean(runRecovery) || Boolean(approvalBusy)} onClick={() => void openWorkConversation(item)}>
-              <span>{item.archived ? '旧工作归档' : `工作 · ${new Date(item.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`}</span>
-              <small>{item.archived ? '只读' : item.id === workConversationId ? '当前' : ''}</small>
-            </button>)}</div>
+          {desktop && <WorkTree desktop={desktop} conversations={workConversationsQuery.data ?? []}
+            folders={workFoldersQuery.data ?? []} tags={workTagsQuery.data ?? []}
+            currentId={workConversationId} locked={workTreeLocked} renameRequest={renameRequest}
+            onOpen={openWorkConversation} onCreate={newWorkConversation} onSearchHit={openWorkSearchHit} />}
         </> : <><div className="conversation-list-current"><span>{archiveOpen ? '原桌面会话' : '当前会话'}</span><small>当前</small></div>
           <p>历史会话列表尚未接入，此处为界面预览。</p></>}
       </aside>}
@@ -944,9 +1005,16 @@ export function ChatPanel({
                 </dl>
               </article>
             )}
-            {(archiveOpen ? (archiveQuery.data ?? []).map((item, index): ChatMessage => ({ id: index + 1, role: item.role, text: item.text, at: item.at, run: item.run })) : emptyConversation ? [] : messages).map((message) => message.role === 'notice'
+            {searchLocationError && <p className="archive-notice" role="alert">{searchLocationError}</p>}
+            {searchWindow?.conversationId === workConversationId && <div className="work-message-window-banner" role="status">
+              <span>正在查看搜索命中附近的历史消息。</span>
+              <button type="button" onClick={() => setSearchWindow(undefined)}>返回最近消息</button>
+            </div>}
+            {(archiveOpen ? (archiveQuery.data ?? []).map((item, index): ChatMessage => ({ id: index + 1, role: item.role, text: item.text, at: item.at, run: item.run }))
+              : searchWindow && searchWindow.conversationId === workConversationId ? searchWindow.result.messages.map((item, index): ChatMessage => ({ id: index + 1, entryId: item.id, role: item.role, text: item.text, at: item.at, run: item.run }))
+                : emptyConversation ? [] : messages).map((message) => message.role === 'notice'
               ? <div key={message.id} className="conversation-stop-run" role="status"><ReplyRunDetails run={message.run} summary={message.text} /></div>
-              : <article key={message.id} className={`message ${message.role}`}>
+              : <article key={message.entryId ?? message.id} data-message-entry-id={message.entryId} className={`message ${message.role}`}>
                 {surface === 'assistant' && message.role === 'assistant' && <span className="assistant-message-avatar" role="img" aria-label="助理标识"><img src={new URL('../assets/assistant/portrait-resting.png', import.meta.url).href} alt="" /></span>}
                 <div className="message-label">
                   {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
@@ -1034,7 +1102,7 @@ export function ChatPanel({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={workArchived ? '旧工作归档只读，请选择或新建工作' : archiveOpen ? '归档只读，请返回已绑定会话继续对话' : '今天帮你做些什么？'}
+              placeholder={workArchived ? workConversationId === 'default' ? '旧工作归档只读，请选择或新建工作' : '会话已归档，恢复后可继续对话' : archiveOpen ? '归档只读，请返回已绑定会话继续对话' : '今天帮你做些什么？'}
               disabled={archiveOpen || workArchived || (surface === 'work' && Boolean(desktop) && !workConversationId)}
               rows={2}
             />
@@ -1051,7 +1119,7 @@ export function ChatPanel({
                   aria-label={`${redactionPreviewEnabled ? '关闭' : '启用'}脱敏（界面预览，尚未生效）`} aria-pressed={redactionPreviewEnabled}
                   onClick={() => setRedactionPreviewEnabled((value) => !value)}><AppIcon name={redactionPreviewEnabled ? 'shield-filled' : 'shield'} /></button>
               </div>
-              {(archiveOpen || workArchived || busy) && <span className="composer-hint">{workArchived ? '旧工作归档只读' : archiveOpen ? '原桌面会话归档只读' : '任务执行中'}</span>}
+              {(archiveOpen || workArchived || busy) && <span className="composer-hint">{workArchived ? workConversationId === 'default' ? '旧工作归档只读' : '会话已归档 · 只读' : archiveOpen ? '原桌面会话归档只读' : '任务执行中'}</span>}
               <button type="button" onClick={() => void sendMessage()} disabled={archiveOpen || workArchived || (surface === 'work' && Boolean(desktop) && !workConversationId) || (!input.trim() && attachments.length === 0) || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>
             </div>
           </div>
@@ -1061,7 +1129,7 @@ export function ChatPanel({
       {(activityOpen || surface === 'assistant') && (
         <dialog ref={activityDialog} className={`activity-panel ${surface === 'assistant' ? 'assistant-home-panel' : ''}`} aria-label={surface === 'assistant' ? '助理面板' : '当前会话动态'} onCancel={() => { setActivityOpen(false); setRightPanelMaximized(false); }}>
           <div className="activity-resize-handle" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" aria-valuemin={260}
-            aria-valuemax={maxRightPanelWidth(chatPanel.current?.clientWidth ?? window.innerWidth - 50, listOpen)} aria-valuenow={rightPanelWidth} tabIndex={0}
+            aria-valuemax={maxRightPanelWidth(chatPanel.current?.clientWidth ?? window.innerWidth - 50, listOpen, surface === 'work')} aria-valuenow={rightPanelWidth} tabIndex={0}
             onPointerDown={(event) => {
               if (window.matchMedia('(max-width: 560px)').matches) return;
               const panel = chatPanel.current;
@@ -1069,7 +1137,7 @@ export function ChatPanel({
               event.preventDefault();
               rightPanelDragCleanup.current?.();
               rightPanelGesture.current = {
-                startedAtLimit: rightPanelWidth >= maxRightPanelWidth(panel.getBoundingClientRect().width, listOpen) - 1,
+                startedAtLimit: rightPanelWidth >= maxRightPanelWidth(panel.getBoundingClientRect().width, listOpen, surface === 'work') - 1,
                 stopped: false,
               };
               const pointerId = event.pointerId;
@@ -1098,7 +1166,7 @@ export function ChatPanel({
               const panel = event.currentTarget.closest<HTMLElement>('.chat-panel');
               if (!panel) return;
               const bounds = panel.getBoundingClientRect();
-              rightPanelGesture.current = { startedAtLimit: rightPanelWidth >= maxRightPanelWidth(bounds.width, listOpen) - 1, stopped: false };
+              rightPanelGesture.current = { startedAtLimit: rightPanelWidth >= maxRightPanelWidth(bounds.width, listOpen, surface === 'work') - 1, stopped: false };
               resizeRightPanel(bounds.right - rightPanelWidth + (event.key === 'ArrowLeft' ? -24 : 24), panel);
             }} />
           {surface === 'assistant' ? imagePreviewRequest
@@ -1113,8 +1181,8 @@ export function ChatPanel({
               disconnected: Boolean(runRecovery) || locatedRun === 'error',
             }}
             run={visibleRun} archiveOpen={archiveOpen} onToggleArchive={() => setArchiveOpen((value) => !value)} /> : <>
-          <FileWorkspace key={workConversationId ?? 'empty'} host={fileHost} scopeKey={workConversationId ?? 'empty'}
-            rootName={workConversationsQuery.data?.find((item) => item.id === workConversationId)?.workingDirectory.split(/[\\/]/).filter(Boolean).pop()}
+          <FileWorkspace key={`${workConversationId ?? 'empty'}:${selectedWork?.workingDirectory ?? ''}`} host={fileHost} scopeKey={workConversationId ?? 'empty'}
+            rootName={selectedWork?.title || '工作区'}
             requestPath={filePreviewPath} requestImage={imagePreviewRequest} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
             view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); setImagePreviewRequest(undefined); }}
             runContent={activityTab === 'activity' ? (
