@@ -1631,7 +1631,7 @@ tasks:
 
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
-    status: in_progress
+    status: done
     goal: "助理通过独立普通任务对话调用专业技能，持续跟进并回收可验证结果。"
     scope:
       in: ["skills/delegate-and-verify/SKILL.md 与宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
@@ -1662,10 +1662,15 @@ tasks:
       owner: "assistant-contract-review-20260927-046-10414"
       attempts: 0
       claimed_at: "2026-09-26T16:28:00.683Z"
-      completed_at: null
+      completed_at: "2026-09-26T18:57:34.243Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
       branch: "task/task-046-assistant-delegation"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "main integration", status: "passed", summary: "TASK-046 branch ef75cdf integrated at main d5e6088. Conflict resolution preserved v14 WorkEvidence Host arguments and delegation service wiring. Assistant Worker shutdown availability race fixed at 4a1d72c."}
+        - {type: "command", check: "clean integrated pnpm check and native smoke", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0 on macOS arm64 at clean detached main 8b8bfb5. pnpm check log .git/worktrees/assistant-final-check/coding-owner/1790448641635590000.log and build:native plus smoke:native log 1790448987951885000.log exited 0, changed_during_run=false."}
+        - {type: "test", check: "delegation and UI behavior", status: "passed", summary: "Temporary Home plus loopback model verifies signed task grant before professional execution, persistent original task ID, Worker completion wake, source reference linking, pre-model foreground preemption recovery, post-dispatch unknown and archive/SQLite failure recovery. Isolated Electron approval click probe passed; no real WeCom message sent for this task."}
+        - {type: "review", check: "independent recovery review", status: "passed", summary: "Read-only reviewer confirmed prior preemption and cross-store commit blockers fixed; model-started unknown is not blindly replayed and metered proposal is persisted before idempotent local evidence linking. Real archive-write then injected failure and SQLite reopen regression added."}
+        - {type: "boundary", check: "business semantics and platform", status: "unverified", summary: "evidence_linked confirms references belong to original task, not semantic business completion. Nonzero-rate model without usage fails conservatively; Windows/Linux and a real professional external-effect account were not exercised."}
       follow_up_candidates: []
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
