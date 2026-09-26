@@ -1,0 +1,219 @@
+import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { isAbsolute, join, resolve } from 'node:path';
+import type { AssistantDelegationBrief, AssistantDelegationRecord, AssistantDelegationResult } from '@yuanpu-agent/protocol';
+import { assertNoSymlinkAncestors, canonicalRealDirectory } from './assistant-delegation-paths.js';
+
+export type DelegationBrief = AssistantDelegationBrief;
+export type DelegationResult = AssistantDelegationResult;
+export type DelegationRecord = AssistantDelegationRecord;
+
+export interface DelegationExecutionAdapter {
+  run(brief: DelegationBrief, followUp: string | undefined, signal: AbortSignal): Promise<DelegationResult>;
+  query(taskId: string): Promise<DelegationResult | undefined>;
+  cancel(taskId: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+const validId = (id: string) => /^[A-Za-z0-9_-]{1,128}$/.test(id);
+
+function validateBrief(brief: DelegationBrief): void {
+  if (!validId(brief.taskId) || !validId(brief.assistantSessionId)
+    || !/^[a-z][a-z0-9-]{0,63}$/.test(brief.skillName)
+    || !brief.goal.trim() || brief.goal.length > 16_000
+    || brief.completionCriteria.length < 1 || brief.completionCriteria.length > 12
+    || brief.completionCriteria.some((item) => !item.trim() || item.length > 2_000)
+    || brief.contextRefs.length > 20 || brief.contextRefs.some((item) => !item || item.length > 300)
+    || brief.authorizedCapabilities.length > 10
+    || !Number.isFinite(Date.parse(brief.deadlineAt)) || Date.parse(brief.deadlineAt) <= Date.now()) {
+    throw new Error('Invalid bounded delegation brief.');
+  }
+}
+
+/** Durable host ledger. Accepted task IDs are never submitted twice after a lost response or restart. */
+export class AssistantDelegationService {
+  private readonly root: string;
+  private canonicalRoot?: string;
+  private readonly adapter: DelegationExecutionAdapter;
+  private readonly onTerminal?: (record: DelegationRecord) => void;
+  private active = new Map<string, { controller: AbortController; done: Promise<void> }>();
+  private operations = new Map<string, Promise<void>>();
+  private closed = false;
+
+  constructor(root: string, adapter: DelegationExecutionAdapter,
+    onTerminal?: (record: DelegationRecord) => void) {
+    if (!isAbsolute(root)) throw new Error('Delegation ledger root must be absolute.');
+    this.root = resolve(root);
+    this.adapter = adapter;
+    this.onTerminal = onTerminal;
+  }
+
+  async open(): Promise<void> {
+    await assertNoSymlinkAncestors(this.root);
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    this.canonicalRoot = await canonicalRealDirectory(this.root);
+    for (const name of await readdir(this.root)) {
+      if (!name.endsWith('.json')) continue;
+      const id = name.slice(0, -5);
+      if (!validId(id)) throw new Error('Invalid delegation ledger entry.');
+      const record = await this.read(id);
+      if (record && ['accepted', 'running'].includes(record.status)) {
+        await this.save({ ...record, status: 'unknown', updatedAt: new Date().toISOString() });
+      }
+    }
+  }
+
+  private file(taskId: string): string {
+    if (!validId(taskId)) throw new Error('Invalid delegation task ID.');
+    return join(this.root, `${taskId}.json`);
+  }
+
+  private async read(taskId: string): Promise<DelegationRecord | undefined> {
+    await this.assertRoot();
+    try {
+      const file = this.file(taskId);
+      const info = await lstat(file);
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe delegation ledger entry.');
+      const record = JSON.parse(await readFile(file, 'utf8')) as DelegationRecord;
+      if (record.taskId !== taskId) throw new Error('Delegation ledger ID mismatch.');
+      return record;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  }
+
+  private async save(record: DelegationRecord): Promise<void> {
+    await this.assertRoot();
+    const temporary = `${this.file(record.taskId)}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
+      await rename(temporary, this.file(record.taskId));
+    } finally { await rm(temporary, { force: true }); }
+  }
+
+  private async assertRoot(): Promise<void> {
+    if (!this.canonicalRoot || await canonicalRealDirectory(this.root) !== this.canonicalRoot) {
+      throw new Error('Delegation ledger root changed or was not opened.');
+    }
+  }
+
+  private async exclusive<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
+    const prior = this.operations.get(taskId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolveGate) => { release = resolveGate; });
+    const queued = prior.then(() => gate);
+    this.operations.set(taskId, queued);
+    await prior;
+    try { return await operation(); }
+    finally {
+      release();
+      if (this.operations.get(taskId) === queued) this.operations.delete(taskId);
+    }
+  }
+
+  async start(brief: DelegationBrief): Promise<DelegationRecord> {
+    if (this.closed) throw new Error('Delegation service is closed.');
+    return this.exclusive(brief.taskId, async () => {
+      const existing = await this.read(brief.taskId);
+      if (existing) {
+        const original: DelegationBrief = {
+          taskId: existing.taskId, assistantSessionId: existing.assistantSessionId,
+          skillName: existing.skillName, goal: existing.goal,
+          completionCriteria: existing.completionCriteria, contextRefs: existing.contextRefs,
+          authorizedCapabilities: existing.authorizedCapabilities, readOnly: existing.readOnly,
+          deadlineAt: existing.deadlineAt,
+        };
+        if (JSON.stringify(original) !== JSON.stringify(brief)) throw new Error('Delegation task ID scope conflict.');
+        return existing;
+      }
+      validateBrief(brief);
+      const now = new Date().toISOString();
+      const record: DelegationRecord = { ...brief, status: 'accepted', followUps: [], createdAt: now, updatedAt: now };
+      await this.save(record);
+      this.dispatch(record);
+      return record;
+    });
+  }
+
+  private dispatch(record: DelegationRecord, followUp?: string): void {
+    const controller = new AbortController();
+    const done = (async () => {
+      try {
+        await this.exclusive(record.taskId, async () => {
+          record = { ...record, status: 'running', updatedAt: new Date().toISOString() };
+          await this.save(record);
+        });
+        const result = await this.adapter.run(record, followUp, controller.signal);
+        await this.exclusive(record.taskId, async () => {
+          const latest = await this.read(record.taskId);
+          if (!latest || latest.status !== 'running') return;
+          record = { ...latest, status: result.status, result, updatedAt: new Date().toISOString() };
+          await this.save(record);
+          this.onTerminal?.(record);
+        });
+      } catch (error) {
+        await this.exclusive(record.taskId, async () => {
+          const latest = await this.read(record.taskId);
+          if (!latest || latest.status !== 'running') return;
+          record = { ...latest, status: controller.signal.aborted ? 'unknown' : 'failed',
+            result: { status: controller.signal.aborted ? 'unknown' : 'failed',
+              errorCode: controller.signal.aborted ? 'interrupted' : 'adapter_error' },
+            updatedAt: new Date().toISOString() };
+          await this.save(record);
+          this.onTerminal?.(record);
+        });
+      } finally { this.active.delete(record.taskId); }
+    })();
+    this.active.set(record.taskId, { controller, done });
+  }
+
+  async status(taskId: string): Promise<DelegationRecord | undefined> {
+    return this.exclusive(taskId, async () => {
+      const record = await this.read(taskId);
+      if (!record || record.status !== 'unknown') return record;
+      const resolved = await this.adapter.query(taskId);
+      if (!resolved || resolved.status === 'unknown') return record;
+      const updated = { ...record, status: resolved.status, result: resolved, updatedAt: new Date().toISOString() };
+      await this.save(updated);
+      this.onTerminal?.(updated);
+      return updated;
+    });
+  }
+
+  async followUp(taskId: string, assistantSessionId: string, text: string): Promise<DelegationRecord> {
+    if (this.closed || !text.trim() || text.length > 16_000) throw new Error('Invalid delegation follow-up.');
+    return this.exclusive(taskId, async () => {
+      const current = await this.read(taskId);
+      if (!current || current.assistantSessionId !== assistantSessionId) throw new Error('Unknown delegation in this Assistant Session.');
+      if (!['completed', 'failed'].includes(current.status)) throw new Error('Delegation is not ready for follow-up.');
+      const next = { ...current, status: 'accepted' as const, result: undefined,
+        followUps: [...current.followUps, text], updatedAt: new Date().toISOString() };
+      await this.save(next);
+      this.dispatch(next, text);
+      return next;
+    });
+  }
+
+  async cancel(taskId: string, assistantSessionId: string): Promise<DelegationRecord> {
+    return this.exclusive(taskId, async () => {
+      const record = await this.read(taskId);
+      if (!record || record.assistantSessionId !== assistantSessionId) throw new Error('Unknown delegation in this Assistant Session.');
+      if (['accepted', 'running', 'waiting_approval', 'unknown'].includes(record.status)) {
+        this.active.get(taskId)?.controller.abort();
+        await this.adapter.cancel(taskId);
+        const cancelled = { ...record, status: 'cancelled' as const, updatedAt: new Date().toISOString() };
+        await this.save(cancelled);
+        return cancelled;
+      }
+      return record;
+    });
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    for (const job of this.active.values()) job.controller.abort();
+    await Promise.allSettled([...this.active.values()].map((job) => job.done));
+    await this.adapter.close();
+  }
+}

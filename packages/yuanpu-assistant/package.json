@@ -20,6 +20,7 @@
     "@earendil-works/pi-agent-core": "0.86.1",
     "@earendil-works/pi-ai": "0.86.1",
     "@yuanpu-agent/protocol": "workspace:*",
+    "typebox": "1.3.27",
     "yaml": "2.9.0"
   },
   "engines": {

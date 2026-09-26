@@ -65,6 +65,8 @@ import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { AssistantHostService } from './assistant-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
+export { AssistantDelegationService } from './assistant-delegation-service.js';
+export { createProfessionalSession, createProfessionalTools, LocalProfessionalAdapter } from './assistant-delegation-local.js';
 import { runAssistantWorker } from './assistant-worker.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
