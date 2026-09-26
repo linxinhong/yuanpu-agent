@@ -10,6 +10,7 @@ import type {
 } from './scheduler.js';
 
 export * from './agent.js';
+export * from './assistant.js';
 export * from './host-events.js';
 export * from './scheduler.js';
 

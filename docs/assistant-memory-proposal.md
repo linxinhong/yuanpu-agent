@@ -68,6 +68,18 @@ Hermes 的小文件字符上限是为了限制每次提示词成本，不是 Yua
 
 接入验证应覆盖：同一会话两个客户端的状态一致；断线期间任务继续且重连后可恢复状态；请求结果丢失时不重复执行；过期 attachment 被拒绝；未授权界面无法读取助理服务；独立 Work/Assistant 的技能及存储边界仍成立；无界面连接时整理仍可工作；App 退出后所有工作进程被回收。先用本地与企业微信两个入口、独立聊天会话和一个后台整理任务做适配验证，再决定具体通信迁移方案。
 
+### TASK-037 通信适配结论与契约
+
+`packages/yuanpu-protocol/src/assistant.ts` 定义助理 IPC v1，独立于现有桌面 HTTP `PROTOCOL_VERSION=4`。添加字段时保持旧字段语义和读取兼容；更改必填字段、身份含义或状态终态时提升 `ASSISTANT_CONTRACT_VERSION`，宿主与 Worker 启动握手拒绝不支持的版本。持久来源、记忆和评估各保留自己的 `sourceVersion`、`version`、`reviewVersion`，不是用 IPC 版本覆盖内容版本。迁移旧记录时写新格式和来源引用，旧 Pi 会话原件只读保留；不在旧会话文件上原地改格式。
+
+宿主在接入层核验桌面本地身份或企微配对，生成 `AssistantPrincipal`；持久化 `AssistantConversationBinding`，决定独立 `conversationId`、`sessionId`、受众和回复目标。入站消息不能指定身份、Session、受众或投递路由。`validateAssistantIngress` 对照宿主可信身份和会话绑定，个人受众 ID 必须等于可信 `principalId`；去重键包含渠道、账号、组织、会话、线程和平台消息 ID。宿主先持久化已接受请求和去重键，再交给 Worker；断线后按 `requestId` 查询结果，已有请求不得重放执行。相同 Session 的输入由 Worker 串行，取消绑定具体 run。默认桌面和企微各有聊天 Session，同一 `assistantId` 共享经受众过滤的助理记忆；只有用户明确续接且受众相同才绑定同一 Session。
+
+宿主拥有平台凭据、配对、渠道原始消息、业务请求去重、`replyTarget` 和出站状态，以及 `automation.sqlite`。普通回复只投递到请求绑定的原渠道会话与线程；投递结果未知时保留 `unknown`，核对平台记录后再决定重试。Assistant Worker 独占助理目录、会话、记忆、台账、评估、建议和委派记录的写入权；执行子代理只返回有界结果引用，不能直接写助理目录。来源 `AssistantSourceChange` 携带稳定 ID、版本、受众和内容引用；Worker 按来源版本排除重复、乱序和已撤回材料。`AssistantWorkReview` 的判断只针对工作目标、过程与产物，每项结论带来源版本；无足够证据记 `unverified`。记忆更正与遗忘使用 `expectedVersion` 并传播到派生摘要、评估引用和跨渠道展示；委派的 `completed` 只表示专业任务有终态，工作完成仍要核对产物。个人记忆仅允许同一 `personal` 受众读取，组织或会话范围只读取同范围或明确另行授权的材料。
+
+本地探针 `packages/yuanpu-runtime/test/assistant-pi-session-probe.test.mjs` 实际启动 Pi 0.86.1 的 Unix server、两个 Pi client、`JsonlSessionRepo` 和 `AgentHarness`。两个已获探针凭证的连接 attach 同一 Session，取得订阅快照与后续状态；第三个无凭证连接不能 attach 或借用别人的 attachment 读取。企微代表连接在请求已接收而响应未返回时断开，显式 reconnect/attach 后按业务 ID 查询；旧 attachment 被拒。探针在临时目录持久化请求记录，重启 Pi server、重新载入记录并重复提交后，离线模型提供者仍只执行一次。这证明宿主服务可在 Pi 路由之上实现该恢复路径；探针凭证和 JSON 日志仅是测试适配器，真实配对、并发事务与进程崩溃一致性仍由 TASK-041 实现和验证。探针还实际创建现有 `createYuanpuChatSession`，确认它仍走 `SessionManager` 的旧会话接缝。Pi server 要求新的 durable `Session` 和 `RoutedSessionHandle`；现有聊天工厂返回的是旧 `YuanpuChatSession`，不能直接作为其 `openSession`。因此新助理包以 Pi Session/Harness 装配自己的服务，现有 Work 适配维持旧路径与只读归档；迁移旧助理历史时以来源引用导入新助理，不复制原始 Session 文件。Yuanpu 自有的服务层实现鉴权、会话目录、订阅、请求去重和结果查询；Pi 只提供连接、路由及状态传输。私有 Unix socket 仅用于本地进程；桌面 preload 与企微长连接由宿主接入此服务，不让平台直接连接 socket。
+
+此探针证明本地传输和离线模型回合可组合，尚未证明真实企微账号、模型、SEA Worker 生命周期或进程崩溃恢复；这些由 TASK-040、TASK-041 和阶段验收覆盖。`JsonlSessionRepo` 用独立助理目录，不能与现有 `SessionManager` 同写。若后续 Pi 实验接口变化，保持上述助理 v1 业务契约，替换 Yuanpu 的窄传输层及 Session 路由适配，先重跑此探针再迁移生产连接。
+
 ## 多渠道助理服务
 
 用户最新确认本轮仅实现本地与企业微信，其他平台暂不考虑，不建立其占位实现、设置页面或验收任务。助理仍是由多个入口访问的长期个人服务，本地 UI 是其中一个入口；保留窄渠道接口即可，不预建通用多平台网关。
