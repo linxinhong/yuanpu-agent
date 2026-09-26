@@ -2,6 +2,7 @@
 
 - 日期：2026-09-27；owner conversation-move-astra-10677；分支 task/task-056-work-directory-move。
 - 独占 worktree `.worktrees/conversation-move-astra`；claim 基点 97cb2f8；依赖 TASK-055 在 main 664b9fd done。
+- 实现提交 `85aebbb`；合入最新 main `3930afb` 后 tested HEAD `4a5ab7e`。合入只改变 `.tasks/tasks.yaml`，运行代码与已通过全量检查的实现树相同。
 - 授权边界：本分支实现、验证及独立复核后交给主任务集成 main/complete；本分支不 push、不操作真实用户 Home。
 
 ## 实现与契约
@@ -28,6 +29,8 @@
 - 构建、Yuanpu 全类型检查及 Runtime HTTP move/preview/幂等重试聚焦验收通过；日志 `1790450098413913000`。真实模型使用本地 fixture provider，无外网模型调用。
 - 独立只读 reviewer `review_move` 检查迁移顺序、恢复、路径、来源 ID、预览竞争、权限；初查 3 个 P2 已修复：持久 checkpoint 漏检、Git worktree 注册破坏、umask 权限变化；增量复核无新阻塞 P1/P2。额外建议的未知工具状态 fail-closed 已补回归。
 - 全量 `pnpm check` 最终通过；日志 `1790450371414911000`，耗时 73.41 秒，测试期间工作树未变化。首轮日志 `1790450274962051000` 仅 Desktop fixture 的旧协议常量造成 7 项失败；修正为 v6 后单跑 Runtime manager 通过（`1790450336619983000`），再重跑全量成功。
+
+- 合入最新 main 后在干净 HEAD `4a5ab7e` 重跑 24 项 focused 全通过；日志 `1790450478757655000`。仅账本变更，保留此前全量通过证据，不重复不变的 broad suite。
 
 ## 限制与接力
 
