@@ -19,6 +19,8 @@ import {
   type BundledAssistantSkillFile,
 } from './home.js';
 import { loadAssistantSkills } from './skills.js';
+import { AssistantDelegationCoordinator, createAssistantDelegationTool,
+  type AssistantDelegationHost } from './delegations.js';
 
 /** The host owns model selection and credentials; the assistant receives no auth file or Work executor. */
 export interface AssistantHost {
@@ -91,6 +93,7 @@ export async function createAssistantExecutor(options: {
   host: AssistantHost;
   bundledSkillsRoot?: string;
   bundledSkillFiles?: readonly BundledAssistantSkillFile[];
+  delegations?: AssistantDelegationHost;
 }): Promise<AssistantExecutor> {
   const paths = await initializeAssistantHome(options.assistantHome, {
     ...(options.bundledSkillsRoot ? { bundledSkillsRoot: options.bundledSkillsRoot } : {}),
@@ -101,6 +104,8 @@ export async function createAssistantExecutor(options: {
     sessionsRoot: 'sessions/pi',
   });
   const openSessions = new Map<string, Promise<AssistantSession>>();
+  const delegationCoordinator = options.delegations
+    ? new AssistantDelegationCoordinator(paths.root, options.delegations) : undefined;
   let closed = false;
 
   const openSession = async (selectedId?: string, openOptions: { createIfMissing?: boolean } = {}): Promise<AssistantSession> => {
@@ -135,14 +140,16 @@ export async function createAssistantExecutor(options: {
           };
           await writeFile(snapshotFile, JSON.stringify(frozen), { flag: 'wx', mode: 0o600 });
         }
+        const delegationTool = delegationCoordinator
+          ? createAssistantDelegationTool(delegationCoordinator, sessionId) : undefined;
         const { harness } = await AgentHarness.create({
           session,
           models,
           model,
           systemPrompt: frozen.prompt,
           resources: { skills },
-          activeToolNames: [],
-          tools: [],
+          activeToolNames: delegationTool ? [delegationTool.name] : [],
+          tools: delegationTool ? [delegationTool] : [],
         }, BACKGROUND_CONTEXT);
         const lane = await harness.lane('main', BACKGROUND_CONTEXT);
         let tail: Promise<unknown> = Promise.resolve();

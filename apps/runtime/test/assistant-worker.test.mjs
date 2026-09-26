@@ -197,6 +197,60 @@ test('Worker runs a real assistant turn, persists result, and does not replay th
   assert.equal(calls, 1);
 });
 
+test('Worker delegates through its separate IPC channel and preserves the accepted task ID', async (t) => {
+  const assistantHome = await home(t);
+  let modelCalls = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* consume request */ }
+    modelCalls++;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    const send = (delta, finish_reason = null) => response.write(`data: ${JSON.stringify({ id: 'loopback',
+      object: 'chat.completion.chunk', created: 1, model: 'assistant-loopback',
+      choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
+    if (modelCalls === 1) {
+      send({ role: 'assistant', tool_calls: [{ index: 0, id: 'delegate-call', type: 'function',
+        function: { name: 'delegate_and_verify', arguments: JSON.stringify({ action: 'start',
+          skillName: 'reviewer', goal: 'Review a bounded source.', completionCriteria: ['Cite evidence'],
+          contextRefs: ['source:one'], readOnly: true }) } }] });
+      send({}, 'tool_calls');
+    } else { send({ role: 'assistant', content: 'Delegation accepted.' }); send({}, 'stop'); }
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  t.after(() => new Promise((resolveClose) => { server.closeAllConnections(); server.close(resolveClose); }));
+  const worker = startWorker(assistantHome);
+  t.after(() => stopWorker(worker.child));
+  const submitted = [];
+  worker.child.on('message', (message) => {
+    if (message.kind === 'model-request') {
+      worker.child.send({ kind: 'model', id: message.id, config: {
+        model: { id: 'assistant-loopback', name: 'Assistant loopback', provider: 'assistant-loopback',
+          api: 'openai-completions', baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
+          reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000, maxTokens: 1024 }, auth: { apiKey: 'loopback-test-key' },
+      } });
+    } else if (message.kind === 'delegation-request') {
+      assert.equal(message.method, 'start');
+      const brief = message.args[0];
+      submitted.push(brief.taskId);
+      worker.child.send({ kind: 'delegation-result', id: message.id, value: { ...brief,
+        status: 'accepted', followUps: [], createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString() } });
+    }
+  });
+  await nextMessage(worker.child, (message) => message.kind === 'ready');
+  const result = nextMessage(worker.child, (message) => message.kind === 'result'
+    && message.correlationId === 'delegated');
+  worker.child.send({ kind: 'prompt', id: 'delegated', correlationId: 'delegated',
+    text: 'Delegate the review.', deadlineAt: Date.now() + 10_000 });
+  assert.equal((await result).record.status, 'completed');
+  assert.equal(submitted.length, 1);
+  assert.match(submitted[0], /^[a-f0-9]{64}$/);
+  const archive = JSON.parse(await readFile(join(assistantHome, 'delegations', `${submitted[0]}.json`), 'utf8'));
+  assert.equal(archive.record.status, 'accepted');
+  assert.equal(modelCalls, 2);
+});
+
 test('a killed Worker leaves its accepted task identifiable as interrupted after restart', async (t) => {
   const assistantHome = await home(t);
   let began;

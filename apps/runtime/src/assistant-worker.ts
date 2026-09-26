@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { AssistantAutomationEngine, AssistantAutomationStore, AssistantMemoryRepository,
   assertSafeDirectory, createAssistantExecutor, resolveAssistantHome,
-  type AssistantSession, type AssistantSourceHost } from '@yuanpu-agent/assistant';
+  type AssistantDelegationHost, type AssistantSession, type AssistantSourceHost } from '@yuanpu-agent/assistant';
 import { assistantAutomationHandler } from './assistant-automation-handler.js';
+import type { AssistantDelegationRecord } from '@yuanpu-agent/protocol';
 import { assistantModelHost, type AssistantModelConfig } from './assistant-model.js';
 import { bundledAssistantSkillFiles } from './assistant-skill-assets.generated.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
@@ -23,6 +24,8 @@ type HostMessage =
   | { kind: 'bootstrap'; home: string; parentPid: number }
   | { kind: 'model'; id: string; config?: AssistantModelConfig; error?: string }
   | { kind: 'source-result'; id: string; value?: unknown; error?: string }
+  | { kind: 'delegation-result'; id: string; value?: unknown; error?: string }
+  | { kind: 'delegation-event'; record: AssistantDelegationRecord }
   | { kind: 'prompt'; id: string; correlationId: string; sessionId?: string; text: string; deadlineAt: number }
   | { kind: 'cancel'; id: string }
   | { kind: 'task'; id: string; correlationId: string }
@@ -96,6 +99,8 @@ export async function runAssistantWorker(): Promise<void> {
   const pendingModels = new Map<string, { resolve(value: AssistantModelConfig): void; reject(error: Error): void }>();
   const pendingSources = new Map<string, { resolve(value: unknown): void; reject(error: Error): void;
     timeout: NodeJS.Timeout }>();
+  const pendingDelegations = new Map<string, { resolve(value: unknown): void; reject(error: Error): void;
+    timeout: NodeJS.Timeout }>();
   const active = new Map<string, { cancel(): Promise<void>; result: Promise<TaskRecord> }>();
   const tasks = join(paths.root, 'tasks');
   let memory: AssistantMemoryRepository | undefined;
@@ -121,6 +126,23 @@ export async function runAssistantWorker(): Promise<void> {
     readSource: (contentRef, sourceId, sourceVersion, audience, maxCharacters) => sourceRequest(
       'readSource', [contentRef, sourceId, sourceVersion, audience, maxCharacters]) as
       ReturnType<AssistantSourceHost['readSource']>,
+  };
+  const delegationRequest = (method: string, args: unknown[]): Promise<unknown> => new Promise((resolve, reject) => {
+    const id = randomUUID();
+    const timeout = setTimeout(() => {
+      pendingDelegations.delete(id);
+      reject(new Error('Assistant delegation host timed out; query the original task ID.'));
+    }, 10_000);
+    pendingDelegations.set(id, { resolve, reject, timeout });
+    send({ kind: 'delegation-request', id, method, args });
+  });
+  const delegationHost: AssistantDelegationHost = {
+    start: (brief) => delegationRequest('start', [brief]) as ReturnType<AssistantDelegationHost['start']>,
+    status: (taskId) => delegationRequest('status', [taskId]) as ReturnType<AssistantDelegationHost['status']>,
+    followUp: (taskId, sessionId, text) => delegationRequest('followUp', [taskId, sessionId, text]) as
+      ReturnType<AssistantDelegationHost['followUp']>,
+    cancel: (taskId, sessionId) => delegationRequest('cancel', [taskId, sessionId]) as
+      ReturnType<AssistantDelegationHost['cancel']>,
   };
   const pumpSources = (): void => {
     if (closed || sourcePump) return;
@@ -172,6 +194,7 @@ export async function runAssistantWorker(): Promise<void> {
       pendingModels.set(id, { resolve, reject });
       send({ kind: 'model-request', id });
     })),
+    delegations: delegationHost,
   }); } catch (error) {
     lock.exec('ROLLBACK');
     lock.close();
@@ -199,6 +222,11 @@ export async function runAssistantWorker(): Promise<void> {
         pending.reject(new Error('Assistant Worker is stopping.'));
       }
       pendingSources.clear();
+      for (const pending of pendingDelegations.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error('Assistant Worker is stopping.'));
+      }
+      pendingDelegations.clear();
       await sourcePump?.catch(() => undefined);
       await automationRun?.catch(() => undefined);
       memory?.close();
@@ -231,6 +259,23 @@ export async function runAssistantWorker(): Promise<void> {
         clearTimeout(pending.timeout);
         if (message.error) pending.reject(new Error(message.error));
         else pending.resolve(message.value);
+        return;
+      }
+      if (message.kind === 'delegation-result') {
+        const pending = pendingDelegations.get(message.id);
+        if (!pending) return;
+        pendingDelegations.delete(message.id);
+        clearTimeout(pending.timeout);
+        if (message.error) pending.reject(new Error(message.error));
+        else pending.resolve(message.value);
+        return;
+      }
+      if (message.kind === 'delegation-event') {
+        const record = message.record;
+        if (!record || !validId(record.assistantSessionId)) return;
+        void executor.openSession(record.assistantSessionId).then((session) => session.prompt(
+          `Delegated task ${record.taskId} changed to ${record.status}. Query its existing task ID and review returned evidence before reporting completion.`,
+        )).catch((error) => send({ kind: 'delegation-error', error: String(error) }));
         return;
       }
       if (message.kind === 'shutdown') { void shutdown(); return; }
