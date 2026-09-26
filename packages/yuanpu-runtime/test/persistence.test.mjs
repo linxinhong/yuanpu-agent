@@ -111,6 +111,30 @@ test('v11 metadata gains deletion and legacy source ledgers without rewriting sa
   upgraded.close();
 });
 
+test('v13 Work tree metadata upgrades to v14 evidence without dropping folders or tags', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-v13-evidence-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'automation.sqlite');
+  openYuanpuMetadataDatabase(path).close();
+  const old = new DatabaseSync(path);
+  old.exec(`DROP TABLE yp_work_evidence_sources;
+    DELETE FROM yp_schema_migrations WHERE version=14;
+    PRAGMA user_version=13;`);
+  old.prepare(`INSERT INTO yp_work_tags(tag_id,workspace_id,name,color,created_at,updated_at)
+    VALUES ('tag-one','/workspace','Important','#123456','2026-09-27','2026-09-27')`).run();
+  old.close();
+  const upgraded = openYuanpuMetadataDatabase(path);
+  assert.equal(upgraded.schemaVersion, 14);
+  assert.equal(upgraded.database.prepare('SELECT name FROM yp_work_tags WHERE tag_id=?')
+    .get('tag-one').name, 'Important');
+  assert.deepEqual(upgraded.workEvidence.sourcePage(0, 10), []);
+  upgraded.close();
+  const repeated = openYuanpuMetadataDatabase(path);
+  assert.equal(repeated.schemaVersion, 14);
+  assert.equal(repeated.database.prepare('SELECT COUNT(*) AS n FROM yp_work_tags').get().n, 1);
+  repeated.close();
+});
+
 test('repairs both historical schema v8 shapes and a v9 Work database without losing records', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-metadata-v8-collision-'));
   context.after(() => rm(root, { recursive: true, force: true }));

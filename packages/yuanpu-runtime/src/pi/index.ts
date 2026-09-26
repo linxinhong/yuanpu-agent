@@ -105,15 +105,28 @@ export interface SavedWorkToolResult {
 /** Read only persisted Pi tool results; never infer an artifact from result prose. */
 export function readYuanpuSavedToolResults(cwd: string, piSessionId: string,
   directory: string): SavedWorkToolResult[] {
-  return savedSessionBranch(cwd, piSessionId, directory).flatMap((entry) => {
-    if (entry.type !== 'message' || entry.message.role !== 'toolResult') return [];
+  const calls = new Map<string, string>();
+  const results: SavedWorkToolResult[] = [];
+  for (const entry of savedSessionBranch(cwd, piSessionId, directory)) {
+    if (entry.type !== 'message') continue;
+    if (entry.message.role === 'assistant') {
+      for (const block of entry.message.content) {
+        if (block.type === 'toolCall') calls.set(block.id, block.name);
+      }
+      continue;
+    }
+    if (entry.message.role !== 'toolResult') continue;
+    const name = calls.get(entry.message.toolCallId);
+    if (!name || name !== entry.message.toolName) continue;
+    calls.delete(entry.message.toolCallId);
     const text = entry.message.content.filter((block) => block.type === 'text')
       .map((block) => block.text).join('\n');
-    if (!text) return [];
-    return [{ entryId: entry.id, toolCallId: entry.message.toolCallId,
-      name: entry.message.toolName, status: entry.message.isError ? 'failed' as const : 'completed' as const,
-      text: text.slice(0, 4_000), truncated: text.length > 4_000, at: entry.timestamp }];
-  });
+    if (!text) continue;
+    results.push({ entryId: entry.id, toolCallId: entry.message.toolCallId,
+      name, status: entry.message.isError ? 'failed' : 'completed',
+      text: text.slice(0, 4_000), truncated: text.length > 4_000, at: entry.timestamp });
+  }
+  return results;
 }
 
 const searchParameters = Type.Object({

@@ -13,7 +13,7 @@ import { openYuanpuMetadataDatabase, readYuanpuChatTranscript,
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 
-test('saved Pi tool result and verified file descriptor become distinct stable Work sources', async (context) => {
+test('saved Pi tool result and settled write payload become distinct stable Work sources', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-'));
   context.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'workspace');
@@ -139,4 +139,26 @@ test('legacy Pi backfill skips a symlinked session file', async (context) => {
   await symlink(outside, original);
   assert.deepEqual(readYuanpuSavedToolResults(workspace, 'legacy-safe-session', sessions), []);
   assert.deepEqual(readYuanpuChatTranscript(workspace, 'legacy-safe-session', sessions), []);
+});
+
+test('legacy Pi backfill requires a matching assistant tool call before accepting a result', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-pairing-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const sessions = join(root, 'sessions');
+  await mkdir(workspace);
+  const pi = SessionManager.create(workspace, sessions, { id: 'legacy-pairing-session' });
+  pi.appendMessage({ role: 'user', content: 'prepare notes', timestamp: Date.now() });
+  pi.appendMessage({ role: 'assistant', content: [{ type: 'toolCall', id: 'paired-call', name: 'write',
+    arguments: { path: 'note.md', content: 'verified' } }],
+  api: 'anthropic-messages', provider: 'anthropic', model: 'fixture', stopReason: 'toolUse',
+  usage, timestamp: Date.now() });
+  pi.appendMessage({ role: 'toolResult', toolCallId: 'orphan-call', toolName: 'write',
+    content: [{ type: 'text', text: 'fabricated orphan' }], isError: false, timestamp: Date.now() });
+  pi.appendMessage({ role: 'toolResult', toolCallId: 'paired-call', toolName: 'edit',
+    content: [{ type: 'text', text: 'wrong tool name' }], isError: false, timestamp: Date.now() });
+  pi.appendMessage({ role: 'toolResult', toolCallId: 'paired-call', toolName: 'write',
+    content: [{ type: 'text', text: 'verified result' }], isError: false, timestamp: Date.now() });
+  assert.deepEqual(readYuanpuSavedToolResults(workspace, 'legacy-pairing-session', sessions)
+    .map((item) => item.text), ['verified result']);
 });

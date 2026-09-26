@@ -27,7 +27,7 @@ async function eventually(assertion) {
   return assertion();
 }
 
-test('real Runtime/Pi Work file tool settles distinct turn, tool and verified artifact sources', async (t) => {
+test('real Runtime/Pi Work write settles distinct turn, tool and payload snapshot sources', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-live-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'workspace');

@@ -13,7 +13,7 @@ register();
 const { RuntimeAssistantSourceHost } = await import('../src/assistant-source-host.ts');
 const person = { kind: 'personal', id: 'local-user' };
 
-test('host rechecks saved Work tool and artifact refs, and emits explicit deletion separately', async (context) => {
+test('host rechecks saved Work tool and write snapshot refs, and emits explicit deletion separately', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-evidence-host-'));
   context.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'workspace');
