@@ -35,7 +35,7 @@ export type AutomationOutcome = 'applied' | 'unknown' | 'absent' | 'deferred';
 export interface AutomationHandler {
   /** Check an earlier attempt before any possible external side effect. */
   lookup(job: AutomationJob): Promise<AutomationOutcome>;
-  /** Produce a proposal only. Model output must not write durable state here. */
+  /** Produce a proposal without business effects; durable attempt/proposal checkpoints are allowed. */
   prepare(job: AutomationJob, signal: AbortSignal): Promise<AutomationProposal>;
   /** Commit durable effects only inside commit(). It rejects a cancelled or obsolete job. */
   apply(job: AutomationJob, proposal: AutomationProposal,

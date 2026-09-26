@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
@@ -143,6 +143,7 @@ test('a persisted billed proposal resumes local evidence commit without a second
   const root = await mkdtemp(join(tmpdir(), 'yp-delegation-proposal-restart-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, 'state.sqlite');
+  const archive = join(root, 'archive.json');
   const record = { taskId: 'proposal_task', assistantSessionId: 'assistant_one',
     status: 'completed', updatedAt: new Date().toISOString() };
   let notifications = 0;
@@ -156,6 +157,8 @@ test('a persisted billed proposal resumes local evidence commit without a second
     },
     async linkEvidence() {
       links++;
+      await writeFile(archive, JSON.stringify({ taskId: record.taskId,
+        verification: { 'Cite evidence': ['source:one'] } }));
       if (links === 1) throw new Error('Worker died after the idempotent archive write');
     } };
   const firstDb = new DatabaseSync(path);
@@ -178,4 +181,6 @@ test('a persisted billed proposal resumes local evidence commit without a second
   assert.equal(notifications, 1);
   assert.equal(links, 2);
   assert.equal(secondStore.hasCheckpoint(job.effectId), true);
+  assert.deepEqual(JSON.parse(await readFile(archive, 'utf8')).verification,
+    { 'Cite evidence': ['source:one'] });
 });
