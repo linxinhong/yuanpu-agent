@@ -128,36 +128,45 @@ export function parseWorkReviewProposal(message: string): WorkReviewProposal {
 
 function redact(text: string): string {
   return text
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu,
+      '[redacted credential]')
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/gu, '[redacted credential]')
-    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9-]{12,})\b/giu,
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_-]{12,}|npm_[A-Za-z0-9]{12,}|xox[baprs]-[A-Za-z0-9-]{12,})\b/giu,
       '[redacted credential]')
     .replace(/\b(?:AIza[A-Za-z0-9_-]{20,}|(?:pk|sk|rk)_live_[A-Za-z0-9]{12,}|whsec_[A-Za-z0-9]{12,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})\b/gu,
       '[redacted credential]')
     .replace(/\bAKIA[A-Z0-9]{16}\b/gu, '[redacted credential]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{12,}/giu, '[redacted credential]')
-    .replace(/\b(api[_-]?key|password|secret|token)\s*[:=]\s*\S+/giu, '$1: [redacted credential]');
+    .replace(/\b(api[_-]?key|password|secret|token|credential)\s*[:=]\s*\S+/giu,
+      '$1: [redacted credential]')
+    .replace(/\b(?=[A-Za-z0-9_+/-]{24,}\b)(?=[A-Za-z0-9_+/-]*[A-Za-z])(?=[A-Za-z0-9_+/-]*\d)[A-Za-z0-9_+/-]{24,}={0,2}\b/gu,
+      '[redacted opaque token]');
 }
 
 /** A complete claim needs a host-verified artifact satisfying a literal user request. */
-function exactWriteSatisfied(snapshot: WorkReviewSnapshot, evidence: AssistantEvidenceRef[]): boolean {
+function exactWriteProof(snapshot: WorkReviewSnapshot,
+  evidence: AssistantEvidenceRef[]): AssistantEvidenceRef[] | undefined {
   const turns = snapshot.materials.filter((item) => item.kind === 'turn');
-  if (turns.length !== 1 || !turns[0]!.text.startsWith('User:')) return false;
+  if (turns.length !== 1 || !turns[0]!.text.startsWith('User:')) return undefined;
   const instruction = /^User:\s*Write exactly `([^`\n]{1,1000})` to `([^`\n]{1,256})`\.\s*(?:\nAssistant:[^\n]*)?$/u
     .exec(turns[0]!.text);
-  if (!instruction) return false;
-  return evidence.some((ref) => {
+  if (!instruction) return undefined;
+  for (const ref of evidence) {
     const artifact = snapshot.materials.find((item) => item.sourceId === ref.sourceId
       && item.kind === 'artifact');
-    if (!artifact) return false;
+    if (!artifact) continue;
     const payload = /^Successful write payload for requested Work path ([^\n]+), run [^\n]+:\n([\s\S]*)$/u
       .exec(artifact.text);
     const suffix = artifact.sourceId.slice('work-artifact:'.length);
     const toolId = `work-tool:${suffix}`;
-    return payload !== null && payload[1] === instruction[2] && payload[2] === instruction[1]
-      && evidence.some((item) => item.sourceId === toolId)
-      && snapshot.materials.some((item) => item.sourceId === toolId && item.kind === 'tool'
-        && item.text.startsWith('Tool write (completed)'));
-  });
+    const toolRef = evidence.find((item) => item.sourceId === toolId);
+    if (payload !== null && payload[1] === instruction[2] && payload[2] === instruction[1]
+      && toolRef && snapshot.materials.some((item) => item.sourceId === toolId
+        && item.kind === 'tool' && item.text.startsWith('Tool write (completed)'))) {
+      return [toolRef, ref];
+    }
+  }
+  return undefined;
 }
 
 function workDirectory(workId: string): string {
@@ -269,7 +278,7 @@ export class AssistantWorkReviewStore {
         return { sourceId: id, sourceVersion: material.sourceVersion,
           observedAt: material.observedAt };
       });
-      const exactMatch = exactWriteSatisfied(snapshot, evidence);
+      const exactProof = exactWriteProof(snapshot, evidence);
       const failedTool = evidence.some((ref) => {
         const material = known.get(ref.sourceId);
         return material?.kind === 'tool' && /\(failed\)/u.test(material.text);
@@ -279,10 +288,16 @@ export class AssistantWorkReviewStore {
         return material?.kind === 'tool' && /\(completed\)/u.test(material.text);
       });
       let judgment = item.judgment;
-      if (judgment === 'supported' && !exactMatch) judgment = successfulTool ? 'partial' : 'unverified';
+      if (judgment === 'supported' && !exactProof) judgment = successfulTool ? 'partial' : 'unverified';
       if (judgment === 'partial' && !successfulTool) judgment = 'unverified';
       if (judgment === 'failed' && !failedTool) judgment = 'unverified';
-      return { claim: redact(item.claim), judgment, evidence };
+      if (judgment === 'supported' && exactProof) {
+        return { claim: 'The exact text requested by the user was written to the requested Work path.',
+          judgment, evidence: exactProof };
+      }
+      return { claim: judgment === 'partial' ? 'A successful tool step was observed; the full goal is not verified.'
+        : judgment === 'failed' ? 'A tool step failed; the full goal is not verified.'
+          : redact(item.claim), judgment, evidence };
     });
     let judgment = proposal.judgment;
     const hasGoalSource = snapshot.materials.some((item) => item.kind === 'turn'

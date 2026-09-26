@@ -85,11 +85,14 @@ test('review preserves source versions and waits for real tool evidence before c
     proposal(['outside-source'])), /unknown evidence/);
   const exactProposal = proposal(['work-tool:one', 'work-artifact:one']);
   exactProposal.constraints = [];
+  exactProposal.findings[0].claim = 'Production database was deleted';
   assert.equal(commitReview(store, reviews, artifactJob, complete, exactProposal), true);
   await reviews.flushPending();
   const record = context.sources.database.prepare('SELECT review_id FROM work_reviews WHERE job_id=?')
     .get(artifactJob.jobId);
   assert.equal(reviews.get(record.review_id).judgment, 'supported');
+  assert.equal(reviews.get(record.review_id).findings[0].claim,
+    'The exact text requested by the user was written to the requested Work path.');
   assert.equal(reviews.get(record.review_id).reviewVersion, 2);
   assert.deepEqual(reviews.get(record.review_id).findings[0].evidence.map((ref) => ref.sourceVersion),
     ['v2', 'v3']);
@@ -101,7 +104,8 @@ test('review preserves source versions and waits for real tool evidence before c
   assert.equal(reviews.get(record.review_id).findings[0].judgment, 'unverified');
   await reviews.reconcileSources();
   const file = join(context.home, 'reviews', 'example', `${record.review_id}.md`);
-  assert.match(await readFile(file, 'utf8'), /Judgment: unverified[\s\S]*- unverified: The report was written/);
+  assert.match(await readFile(file, 'utf8'),
+    /Judgment: unverified[\s\S]*- unverified: The exact text requested by the user was written/);
   context.sources.setCurrent({ feedId: 'work-evidence', eventId: '3', change: {
     sourceId: 'work-artifact:one', sourceVersion: 'v3', kind: 'created', audience,
     occurredAt: at, contentRef: 'ref:3', workId: 'work:example' } }, 'available');
@@ -125,7 +129,8 @@ test('a successful irrelevant write is only partial and credentials are redacted
   const result = proposal(['work-tool:one', 'work-artifact:one']);
   result.goal = 'Create a chart report ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
   result.findings[0].claim = 'Done ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
-  result.memoryCandidates = ['Remember ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456'];
+  result.memoryCandidates = ['Remember npm_abcdefghijklmnopqrstuvwxyz0123456789'];
+  result.ledgerCandidates = ['-----BEGIN PRIVATE KEY----- ABCDEFGHIJKLMNOP1234567890 -----END PRIVATE KEY-----'];
   assert.equal(commitReview(store, reviews, job, snapshot, result), true);
   await reviews.flushPending();
   const row = context.sources.database.prepare('SELECT review_id,review_json,proposal_json FROM work_reviews WHERE job_id=?')
@@ -133,7 +138,7 @@ test('a successful irrelevant write is only partial and credentials are redacted
   assert.equal(reviews.get(row.review_id).judgment, 'partial');
   const file = await readFile(join(context.home, 'reviews', 'example', `${row.review_id}.md`), 'utf8');
   assert.doesNotMatch(file + row.review_json + row.proposal_json,
-    /ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456/);
+    /ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456|npm_abcdefghijklmnopqrstuvwxyz0123456789|BEGIN PRIVATE KEY/);
 });
 
 test('review file intent survives restart and source deletion scrubs the committed finding', async (t) => {
