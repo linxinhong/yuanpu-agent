@@ -1,6 +1,6 @@
 # 独立助理与双入口阶段验证（TASK-042）
 
-状态：**in_progress；离线 10 项与真实企业微信单次往返 1 项通过、0 项失败。** 本记录只验证已列明的运行模式，不把模拟渠道、loopback 模型、编译或 SEA 启动冒烟算作真实账号收发。真实平台重投、断线重连和跨平台／云端运行仍未实际验证。
+状态：**done；离线 10 项与真实企业微信单次往返 1 项通过、0 项失败。** 本记录只验证已列明的运行模式，不把模拟渠道、loopback 模型、编译或 SEA 启动冒烟算作真实账号收发。真实平台重投、断线重连和跨平台／云端运行仍未实际验证。
 
 ## 基线与环境
 
@@ -33,4 +33,4 @@ fixture 忠实度更正：初版探针将 `workspace_id` 重命名为 `working_d
 
 V42-09 元数据查询口径：`yp_assistant_requests` 按 `created_at >= '2026-09-26T16:16:00' AND created_at < '2026-09-26T16:22:00'`、`channel,status` 聚合 `COUNT(*)`、`COUNT(DISTINCT dedup_key)`、`COUNT(DISTINCT external_message_id)`、`SUM(length(response_text)>0)`、`SUM(cancel_requested)`；同一窗口按 `request_id` 关联 `yp_assistant_deliveries` 与 `yp_assistant_sources` 计数，并通过 `yp_assistant_bindings` 检查 `active=1` 及相同 generation；跨渠道仅计 `COUNT(DISTINCT session_id)` 和 `COUNT(DISTINCT conversation_id)`。旧 Work 路径仅计 `yp_channel_inbound` 中 `provider='wecom'` 的窗口行数。查询未投影任何标识符或正文；`accepted` 是平台发送接口返回的记录状态，不能单独推出用户已看见，也不能推出真实重放已发生。
 
-离线必需场景 **10 项通过、0 项失败**，真实企业微信单次往返 **1 项通过**；跨平台／云端边界另列为未验证，真实平台重投/断线重连仍需后续受控验证。**TASK-042 仍保持 in_progress，待集成 main 并在该 revision 验证后由主线决定状态与 TASK-043 依赖。** V42-12 产品阻断已由 TASK-054 修复并在独立验证树复测。旧来源在归档空读或原件失效时仍保留快照，不产生删除／暂不可用事件；TASK-041 交接已明确该来源生命周期与分片预算归 TASK-043，不能把本阶段的旧档案保留判定扩写为遗忘能力。
+离线必需场景 **10 项通过、0 项失败**，真实企业微信单次往返 **1 项通过**；跨平台／云端边界另列为未验证，真实平台重投/断线重连仍需后续受控验证。**TASK-042 已集成 main 并完成主线检查，任务登记为 done。** V42-12 产品阻断已由 TASK-054 修复并在独立验证树复测。旧来源在归档空读或原件失效时仍保留快照，不产生删除／暂不可用事件；TASK-041 交接已明确该来源生命周期与分片预算归 TASK-043，不能把本阶段的旧档案保留判定扩写为遗忘能力。
