@@ -72,6 +72,8 @@ test('management bridge uses authenticated schedule routes and handles empty rev
   assert.equal((await manager.testWecomConnection('test')).status, 'connected');
   assert.equal((await manager.saveWecomConnection({ connectionId: 'test', enabled: false })).status, 'disabled');
   assert.equal((await manager.submitDesktopMessage('fixture message')).runId, 'run-fixture');
+  assert.equal((await manager.searchWorkConversations({ query: 'needle', archive: 'all', limit: 5 })).items[0].messageEntryId, 'entry-1');
+  assert.equal((await manager.getWorkMessageWindow('work:fixture', 'entry-1', 3)).messages[0].id, 'entry-1');
   assert.equal((await manager.listSchedulePrivateContacts())[0].contactId, 'contact-fixture');
   assert.equal((await manager.getScheduleHistory('schedule-fixture', 3))[0].runId, 'run-fixture');
   assert.equal((await manager.setScheduleEnabled('schedule-fixture', false)).enabled, false);

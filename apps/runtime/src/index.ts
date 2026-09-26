@@ -26,6 +26,8 @@ import {
   capabilityManifestDigest,
   openYuanpuMetadataDatabase,
   readYuanpuChatTranscript,
+  readSavedWorkMessageWindow,
+  searchWorkConversations,
   readYuanpuSavedToolResults,
   PersistentAgentService,
   HostNotificationRouter,
@@ -1438,6 +1440,52 @@ async function serve(): Promise<void> {
           ? readYuanpuChatTranscript(workConversation?.working_directory ?? home.config.workingDirectory,
             piSessionId, home.sessionsPath)
           : []));
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workSearch && request.method === 'GET') {
+        try {
+          const limit = url.searchParams.get('limit');
+          response.end(JSON.stringify(searchWorkConversations(workConversations, {
+            workspaceId: workScope, sessionsDirectory: home.sessionsPath,
+            query: url.searchParams.get('query') ?? '',
+            archive: (url.searchParams.get('archive') ?? undefined) as import('@yuanpu-agent/protocol').WorkSearchQuery['archive'],
+            limit: limit === null ? undefined : Number(limit),
+            cursor: url.searchParams.get('cursor') ?? undefined,
+          })));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workMessageWindow && request.method === 'GET') {
+        const conversationId = url.searchParams.get('conversationId');
+        const entryId = url.searchParams.get('entryId');
+        const radius = url.searchParams.get('radius');
+        if (!conversationId || !entryId) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Work conversation and message IDs are required.' }));
+          return;
+        }
+        const piSessionId = workConversations.sessionId(workScope, conversationId);
+        if (!piSessionId) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
+        try {
+          const cwd = workConversations.row(workScope, conversationId)?.working_directory ?? workScope;
+          const window = readSavedWorkMessageWindow(cwd, piSessionId, home.sessionsPath,
+            entryId, radius === null ? undefined : Number(radius));
+          response.end(JSON.stringify(window.status === 'ok' ? { ...window, messages: window.messages.map((item) => ({
+            id: item.entryId, role: item.role, text: item.text, at: item.at,
+          })) } : window));
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
         return;
       }
 

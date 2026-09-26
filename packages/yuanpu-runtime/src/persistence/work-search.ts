@@ -1,35 +1,11 @@
 import { createHash } from 'node:crypto';
-import type { WorkConversation, WorkFolder, WorkTag } from '@yuanpu-agent/protocol';
+import type { WorkConversation, WorkFolder, WorkSearchItem, WorkSearchQuery, WorkSearchResult, WorkTag } from '@yuanpu-agent/protocol';
 import type { WorkConversationStore } from './work-conversation-store.js';
-import { readSavedWorkMessages, type SavedWorkMessages } from '../pi/work-message-search.js';
+import { readSavedWorkMessages } from '../pi/work-message-search.js';
 
-export interface WorkSearchInput {
+export interface WorkSearchInput extends WorkSearchQuery {
   workspaceId: string;
   sessionsDirectory: string;
-  query: string;
-  archive?: 'active' | 'archived' | 'all';
-  limit?: number;
-  cursor?: string;
-}
-
-export interface WorkSearchItem {
-  kind: 'conversation' | 'message';
-  conversationId: string;
-  title: string;
-  archived: boolean;
-  folderPath: Array<{ id: string; name: string }>;
-  matchedField: 'title' | 'folder' | 'tag' | 'message';
-  snippet: string;
-  messageEntryId?: string;
-  role?: 'user' | 'assistant';
-  at?: string;
-  messagePosition?: number;
-}
-
-export interface WorkSearchResult {
-  items: WorkSearchItem[];
-  nextCursor?: string;
-  contentFailures: Array<{ conversationId: string; reason: Exclude<SavedWorkMessages['status'], 'ok'> | 'budget_exceeded' }>;
 }
 
 const maxSearchBytes = 128 * 1024 * 1024;
