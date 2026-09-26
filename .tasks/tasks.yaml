@@ -1437,7 +1437,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-042
     title: "独立助理与双入口阶段验证"
-    status: in_progress
+    status: done
     goal: "在真实服务与持久层证明隔离、迁移、双入口和进程退出成立，为记忆系统提供可信来源。"
     scope:
       in: ["独立 Worker 与双入口的 API/IPC/存储业务场景", "真实企业微信一位已授权用户私聊；本地服务调用", "迁移、重启、拒绝身份和 SEA 退出验证"]
@@ -1464,11 +1464,16 @@ tasks:
       owner: "assistant-contract-review-verify-20260926-10414"
       attempts: 0
       claimed_at: "2026-09-26T15:22:25.617Z"
-      completed_at: null
+      completed_at: "2026-09-26T16:26:58.987Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-verification"
       branch: "task/task-042-assistant-verification"
-      evidence: []
-      follow_up_candidates: ["TASK-054"]
+      evidence:
+        - {type: "commit", check: "integrated stage evidence", status: "passed", summary: "Independent TASK-042 harness and real WeCom acceptance evidence are ancestors of main c8b863f; clean darwin-arm64 packaged App product revision 8ac4d5b was tested and TASK-054 migration repair is included."}
+        - {type: "test", check: "offline isolation, migration and process lifecycle", status: "passed", summary: "Independent V42-01 through V42-08 and V42-11/V42-12 pass: two local clients, fixture WeCom route and dedup, legacy archive, headless relocation, competing writer, Worker/parent exit, SEA/native smoke, packaged App normal exit, and v8 Work database repair. See .tasks/verification/TASK-042/results.md."}
+        - {type: "test", check: "authorized real local and Enterprise WeChat roundtrip", status: "passed", summary: "At 2026-09-26 16:16–16:22 UTC, real Home after backed-up v8→v10 migration had one completed desktop request and one completed WeCom request in distinct sessions, one accepted WeCom delivery, no Work WeCom inbound, quick_check ok. The user confirmed the test account received the requested reply; App, Runtime and Worker exited. Independent read-only metadata review is recorded as V42-09. Real platform redelivery/reconnect and other platforms remain unverified boundaries."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Full build, typecheck and tests passed on main product tree at f0a1a8c/c8b863f (the intervening merge changed only the TASK-042 evidence document), Node 24.15.0 and pnpm 11.22.0; Runtime 43/43. Pre-existing unrelated dirty files were preserved and not staged."}
+      follow_up_candidates:
+        - "TASK-054"
   - id: TASK-043
     title: "实现来源与可修订记忆存储"
     status: in_progress
@@ -1618,7 +1623,7 @@ tasks:
 
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
-    status: pending
+    status: ready
     goal: "助理通过独立普通任务对话调用专业技能，持续跟进并回收可验证结果。"
     scope:
       in: ["skills/delegate-and-verify/SKILL.md 与宿主委派执行器、独立子任务会话和可续聊消息", "只读评估核验与用户授权的专业执行", "任务归档、完成通知、取消超时、审批和重启未知结果恢复"]
