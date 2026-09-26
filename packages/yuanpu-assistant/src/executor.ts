@@ -31,6 +31,7 @@ export interface AssistantTurnResult {
   sessionId: string;
   runId: string;
   message: string;
+  costUsd: number;
 }
 
 export interface AssistantSession {
@@ -38,12 +39,15 @@ export interface AssistantSession {
   readonly skillNames: readonly string[];
   prompt(message: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
   invokeSkill(name: string, instructions?: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
+  verifyDelegation(taskId: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
   close(): Promise<void>;
 }
 
 export interface AssistantExecutor {
   readonly paths: AssistantHomePaths;
   openSession(sessionId?: string, options?: { createIfMissing?: boolean }): Promise<AssistantSession>;
+  linkDelegationEvidence(taskId: string, sessionId: string,
+    checks: Array<{ criterion: string; evidenceRefs: string[] }>): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -77,14 +81,17 @@ async function completeTurn(lane: AgentLane, sessionId: string, run: ReturnType<
     throw new Error(`Assistant run ended ${result.value.status}${detail}.`);
   }
   if (!result.value.tipId) throw new Error('Assistant run completed without transcript entries.');
-  const message = lastAssistantText(await lane.findEntries({
+  const entries = await lane.findEntries({
     start: result.value.tipId,
     ...(result.value.fromTipId ? { stopAtId: result.value.fromTipId } : {}),
     type: 'message',
     order: 'newestFirst',
-  }, BACKGROUND_CONTEXT));
+  }, BACKGROUND_CONTEXT);
+  const message = lastAssistantText(entries);
   if (!message) throw new Error('Assistant run completed without a text reply.');
-  return { sessionId, runId: result.value.operationId, message };
+  const costUsd = entries.reduce((sum, entry) => entry.type === 'message'
+    && entry.message.role === 'assistant' ? sum + entry.message.usage.cost.total : sum, 0);
+  return { sessionId, runId: result.value.operationId, message, costUsd };
 }
 
 /** Owns only assistant Sessions. Caller must keep one executor per assistant Home writer. */
@@ -140,8 +147,9 @@ export async function createAssistantExecutor(options: {
           };
           await writeFile(snapshotFile, JSON.stringify(frozen), { flag: 'wx', mode: 0o600 });
         }
+        let automationTaskId: string | undefined;
         const delegationTool = delegationCoordinator
-          ? createAssistantDelegationTool(delegationCoordinator, sessionId) : undefined;
+          ? createAssistantDelegationTool(delegationCoordinator, sessionId, () => automationTaskId) : undefined;
         const { harness } = await AgentHarness.create({
           session,
           models,
@@ -179,6 +187,19 @@ export async function createAssistantExecutor(options: {
             }
             return serialize(() => completeTurn(lane, sessionId, lane.skill(name, instructions, BACKGROUND_CONTEXT)), signal);
           },
+          verifyDelegation(taskId, signal) {
+            if (!delegationCoordinator || !/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
+              return Promise.reject(new Error('Invalid delegation verification task.'));
+            }
+            return serialize(async () => {
+              automationTaskId = taskId;
+              try {
+                return await completeTurn(lane, sessionId, lane.skill('delegate-and-verify',
+                  `A delegated task changed state. Query only task ID ${taskId}. This is a proposal phase: do not call link_evidence. If completed, return only JSON {"checks":[{"criterion":"...","evidenceRefs":["..."]}]} with one entry per actual completion criterion and only returned evidence references. For any other state, return only JSON {"checks":[]}. Do not start or follow up another task.`,
+                  BACKGROUND_CONTEXT));
+              } finally { automationTaskId = undefined; }
+            }, signal);
+          },
           async close() {
             if (sessionClosed) return;
             sessionClosed = true;
@@ -206,6 +227,10 @@ export async function createAssistantExecutor(options: {
   return {
     paths,
     openSession,
+    linkDelegationEvidence(taskId, sessionId, checks) {
+      if (!delegationCoordinator) return Promise.reject(new Error('Delegation host is unavailable.'));
+      return delegationCoordinator.linkEvidence(taskId, sessionId, checks);
+    },
     async close() {
       if (closed) return;
       closed = true;

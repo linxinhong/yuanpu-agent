@@ -149,12 +149,17 @@ const parameters = Type.Object({
 
 /** One tool per Assistant Session; task IDs derive from durable tool-call IDs for replay safety. */
 export function createAssistantDelegationTool(coordinator: AssistantDelegationCoordinator,
-  assistantSessionId: string): AgentHarnessTool<object | undefined, typeof parameters> {
+  assistantSessionId: string,
+  automationTaskId?: () => string | undefined): AgentHarnessTool<object | undefined, typeof parameters> {
   return {
     name: 'delegate_and_verify', label: 'Delegate and verify',
     description: 'Delegate a bounded professional task to an isolated executor. Start requires a skill, goal, completion criteria, scoped references and authorization. Query or follow up using the same task ID. Completed execution is not proof that the work is verified.',
     parameters, replay: 'never',
     async execute(toolCallId: string, input: Static<typeof parameters>) {
+      const scopedTaskId = automationTaskId?.();
+      if (scopedTaskId && (input.action !== 'status' || input.taskId !== scopedTaskId)) {
+        throw new Error('Automation may only inspect its original delegated task before budget approval.');
+      }
       if (input.action === 'start') {
         if (!input.skillName || !input.goal || !input.completionCriteria?.length) throw new Error('Incomplete delegation brief.');
         const taskId = createHash('sha256').update(`${assistantSessionId}:${toolCallId}`).digest('hex');

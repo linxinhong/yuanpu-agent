@@ -9,6 +9,16 @@ import test from 'node:test';
 
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
 
+async function eventually(check, label, timeoutMs = 10_000) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    try { const value = await check(); if (value) return value; }
+    catch { /* The Worker may still be committing its state. */ }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw new Error(`Timed out awaiting ${label}.`);
+}
+
 async function home(t) {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-assistant-worker-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -257,6 +267,7 @@ test('Worker runs a real assistant turn, persists result, and does not replay th
 test('Worker delegates through its separate IPC channel and preserves the accepted task ID', async (t) => {
   const assistantHome = await home(t);
   let modelCalls = 0;
+  let hostRecord;
   const server = createServer(async (request, response) => {
     for await (const _chunk of request) { /* consume request */ }
     modelCalls++;
@@ -270,15 +281,22 @@ test('Worker delegates through its separate IPC channel and preserves the accept
           skillName: 'reviewer', goal: 'Review a bounded source.', completionCriteria: ['Cite evidence'],
           contextRefs: ['source:one'], readOnly: true }) } }] });
       send({}, 'tool_calls');
-    } else { send({ role: 'assistant', content: 'Delegation accepted.' }); send({}, 'stop'); }
+    } else if (modelCalls === 3) {
+      send({ role: 'assistant', tool_calls: [{ index: 0, id: 'verify-status', type: 'function',
+        function: { name: 'delegate_and_verify', arguments: JSON.stringify({ action: 'status',
+          taskId: hostRecord.taskId }) } }] });
+      send({}, 'tool_calls');
+    } else { send({ role: 'assistant', content: modelCalls === 4
+      ? JSON.stringify({ checks: [{ criterion: 'Cite evidence', evidenceRefs: ['source:one'] }] })
+      : 'Delegation accepted.' }); send({}, 'stop'); }
     response.end('data: [DONE]\n\n');
   });
   await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
   t.after(() => new Promise((resolveClose) => { server.closeAllConnections(); server.close(resolveClose); }));
-  const worker = startWorker(assistantHome);
+  let worker = startWorker(assistantHome);
   t.after(() => stopWorker(worker.child));
   const submitted = [];
-  worker.child.on('message', (message) => {
+  const respond = (message) => {
     if (message.kind === 'model-request') {
       worker.child.send({ kind: 'model', id: message.id, config: {
         model: { id: 'assistant-loopback', name: 'Assistant loopback', provider: 'assistant-loopback',
@@ -287,14 +305,16 @@ test('Worker delegates through its separate IPC channel and preserves the accept
           contextWindow: 128000, maxTokens: 1024 }, auth: { apiKey: 'loopback-test-key' },
       } });
     } else if (message.kind === 'delegation-request') {
-      assert.equal(message.method, 'start');
-      const brief = message.args[0];
-      submitted.push(brief.taskId);
-      worker.child.send({ kind: 'delegation-result', id: message.id, value: { ...brief,
-        status: 'accepted', followUps: [], createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString() } });
+      if (message.method === 'start') {
+        const brief = message.args[0];
+        submitted.push(brief.taskId);
+        hostRecord = { ...brief, status: 'accepted', followUps: [],
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      } else assert.equal(message.method, 'status');
+      worker.child.send({ kind: 'delegation-result', id: message.id, value: hostRecord });
     }
-  });
+  };
+  worker.child.on('message', respond);
   await nextMessage(worker.child, (message) => message.kind === 'ready');
   const result = nextMessage(worker.child, (message) => message.kind === 'result'
     && message.correlationId === 'delegated');
@@ -306,6 +326,28 @@ test('Worker delegates through its separate IPC channel and preserves the accept
   const archive = JSON.parse(await readFile(join(assistantHome, 'delegations', `${submitted[0]}.json`), 'utf8'));
   assert.equal(archive.record.status, 'accepted');
   assert.equal(modelCalls, 2);
+  hostRecord = { ...hostRecord, status: 'completed', updatedAt: new Date().toISOString(),
+    result: { status: 'completed', resultRef: 'opaque:result', evidenceRefs: ['source:one'] } };
+  worker.child.send({ kind: 'delegation-event', record: hostRecord });
+  const verified = await eventually(async () => {
+    const value = JSON.parse(await readFile(join(assistantHome, 'delegations', `${submitted[0]}.json`), 'utf8'));
+    return value.verification?.evidenceByCriterion?.['Cite evidence']?.[0] === 'source:one' ? value : undefined;
+  }, 'Worker verified original delegated task', 20_000);
+  assert.equal(verified.record.status, 'completed');
+  const database = new DatabaseSync(join(assistantHome, 'state.sqlite'));
+  try {
+    assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM automation_jobs
+      WHERE kind='verify-delegation' AND status='completed'`).get().n, 1);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_effect_attempts').get().n, 1);
+  } finally { database.close(); }
+  assert.equal(modelCalls, 4);
+  await stopWorker(worker.child);
+  worker = startWorker(assistantHome);
+  worker.child.on('message', respond);
+  await nextMessage(worker.child, (message) => message.kind === 'ready');
+  worker.child.send({ kind: 'delegation-event', record: hostRecord });
+  await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+  assert.equal(modelCalls, 4, 'a completed notification is not replayed after Worker restart');
 });
 
 test('a killed Worker leaves its accepted task identifiable as interrupted after restart', async (t) => {

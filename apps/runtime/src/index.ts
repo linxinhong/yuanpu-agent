@@ -77,6 +77,7 @@ export { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
 export { AssistantDelegationService } from './assistant-delegation-service.js';
 export { createProfessionalSession, createProfessionalTools, LocalProfessionalAdapter } from './assistant-delegation-local.js';
+export { assistantAutomationHandler } from './assistant-automation-handler.js';
 import { runAssistantWorker } from './assistant-worker.js';
 import { createWorkspaceDirectory, resolveSelectedWorkspaceDirectory } from './workspace-directory.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';

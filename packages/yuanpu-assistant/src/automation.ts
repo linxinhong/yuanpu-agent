@@ -68,6 +68,10 @@ const schema = `
     effect_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES automation_jobs(job_id),
     snapshot_json TEXT NOT NULL, checked_at TEXT NOT NULL
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS automation_effect_attempts (
+    effect_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES automation_jobs(job_id),
+    started_at TEXT NOT NULL
+  ) STRICT;
 `;
 
 const priorities: Record<AutomationKind, number> = {
@@ -321,6 +325,18 @@ export class AssistantAutomationStore {
 
   hasCheckpoint(effectId: string): boolean {
     return Boolean(this.database.prepare('SELECT 1 FROM automation_checkpoints WHERE effect_id=?').get(effectId));
+  }
+
+  hasEffectAttempt(effectId: string): boolean {
+    return Boolean(this.database.prepare('SELECT 1 FROM automation_effect_attempts WHERE effect_id=?').get(effectId));
+  }
+
+  /** Written before an Assistant model turn; restart must not replay an uncertain turn. */
+  beginEffectAttempt(job: AutomationJob): boolean {
+    const result = this.database.prepare(`INSERT OR IGNORE INTO automation_effect_attempts(effect_id,job_id,started_at)
+      SELECT ?,job_id,? FROM automation_jobs WHERE job_id=? AND status='running'`)
+      .run(job.effectId, this.now().toISOString(), job.jobId);
+    return result.changes === 1;
   }
 
   recordCheckpoint(job: AutomationJob, snapshot: unknown): void {
