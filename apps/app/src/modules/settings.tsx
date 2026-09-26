@@ -3,6 +3,33 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ConnectionManagement } from '../management.js';
 import { ModelSettingsPanel } from './model-settings.js';
 import { applyThemePreference, readThemePreference, type RendererTheme } from '../shared/theme-preference.js';
+import {
+  applyFontPreference,
+  readFontPreference,
+  FONT_CONTENT_SIZES,
+  type FontFamilyPreset,
+  type FontPreference,
+  type FontUiScale,
+} from '../shared/font-preference.js';
+
+const UI_SCALE_OPTIONS: Array<{ id: FontUiScale; label: string }> = [
+  { id: 'compact', label: '紧凑 90%' },
+  { id: 'standard', label: '标准 100%' },
+  { id: 'large', label: '大 110%' },
+  { id: 'xlarge', label: '特大 125%' },
+];
+
+const CONTENT_SIZE_LABELS: Record<number, string> = { 13: '小 13', 14: '标准 14', 15: '大 15', 16: '特大 16', 17: '超大 17' };
+
+const CONTENT_SIZE_OPTIONS = FONT_CONTENT_SIZES.map((size) => ({ size, label: CONTENT_SIZE_LABELS[size] ?? String(size) }));
+
+const FONT_FAMILY_OPTIONS: Array<{ id: FontFamilyPreset; label: string }> = [
+  { id: 'system', label: '系统默认' },
+  { id: 'pingfang', label: '苹方·思源黑体' },
+  { id: 'yahei', label: '微软雅黑' },
+  { id: 'songti', label: '宋体（衬线）' },
+  { id: 'custom', label: '自定义…' },
+];
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -52,6 +79,11 @@ export function SettingsPage({ active, configRoot }: { active: boolean; configRo
     applyThemePreference(nextTheme);
     setTheme(nextTheme);
   };
+  const [font, setFont] = useState<FontPreference>(readFontPreference);
+  const selectFont = (nextPreference: FontPreference) => {
+    applyFontPreference(nextPreference);
+    setFont(nextPreference);
+  };
   return <section className={`settings-page ${active ? '' : 'view-hidden'}`} aria-hidden={!active}>
     <aside className="settings-navigation"><span className="eyebrow">YUANPU / SETTINGS</span><h1>设置</h1>
       <button type="button" className={section === 'general' ? 'selected' : ''} onClick={() => setSection('general')}>通用</button>
@@ -65,6 +97,29 @@ export function SettingsPage({ active, configRoot }: { active: boolean; configRo
             <button type="button" aria-pressed={theme === 'yuanpu-light'} onClick={() => selectTheme('yuanpu-light')}>浅色</button>
             <button type="button" aria-pressed={theme === 'yuanpu-dark'} onClick={() => selectTheme('yuanpu-dark')}>深色</button>
             <button type="button" aria-pressed={theme === 'mindlink'} onClick={() => selectTheme('mindlink')}>MindLink 测试主题</button>
+          </div>
+        </div>
+        <div className="theme-setting"><h3>界面字体大小</h3><p>仅缩放界面文字，不影响聊天正文；档位不改变布局尺寸。</p>
+          <div className="theme-options" role="group" aria-label="界面字体大小">
+            {UI_SCALE_OPTIONS.map((option) => <button key={option.id} type="button" aria-pressed={font.uiScale === option.id}
+              onClick={() => selectFont({ ...font, uiScale: option.id })}>{option.label}</button>)}
+          </div>
+        </div>
+        <div className="theme-setting"><h3>正文字体大小</h3><p>调整聊天消息正文、输入框及其标题、表格等衍生文字。</p>
+          <div className="theme-options" role="group" aria-label="正文字体大小">
+            {CONTENT_SIZE_OPTIONS.map((option) => <button key={option.size} type="button" aria-pressed={font.contentSize === option.size}
+              onClick={() => selectFont({ ...font, contentSize: option.size })}>{option.label}</button>)}
+          </div>
+        </div>
+        <div className="theme-setting"><h3>界面字型</h3><p>选择界面与正文使用的字体族；自定义可填入浏览器可识别的 font-family 值。</p>
+          <div className="font-family-row">
+            <select aria-label="界面字型" value={font.fontFamily}
+              onChange={(event) => selectFont({ ...font, fontFamily: event.target.value as FontFamilyPreset })}>
+              {FONT_FAMILY_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+            {font.fontFamily === 'custom' && <input aria-label="自定义字型" value={font.customFontFamily}
+              placeholder={'例如 \'PingFang SC\', sans-serif'}
+              onChange={(event) => selectFont({ ...font, customFontFamily: event.target.value })} />}
           </div>
         </div>
         <p>当前配置目录</p><code>{configRoot}</code>
