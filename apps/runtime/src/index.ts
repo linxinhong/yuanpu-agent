@@ -65,11 +65,18 @@ import { promisify } from 'node:util';
 
 import { smokeBuiltinAgentTools } from './agent-tools-smoke.js';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { AssistantHostService } from './assistant-host.js';
 import { RuntimeAssistantSourceHost } from './assistant-source-host.js';
+import { AssistantDelegationService } from './assistant-delegation-service.js';
+import { LocalProfessionalAdapter } from './assistant-delegation-local.js';
+import { createReadOnlyProfessionalTaskHost } from './assistant-delegation-host.js';
+export { createReadOnlyProfessionalTaskHost } from './assistant-delegation-host.js';
 export { RuntimeAssistantSourceHost } from './assistant-source-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
+export { AssistantDelegationService } from './assistant-delegation-service.js';
+export { createProfessionalSession, createProfessionalTools, LocalProfessionalAdapter } from './assistant-delegation-local.js';
 import { runAssistantWorker } from './assistant-worker.js';
 import { createManagedWorkspaceDirectory, removeUncommittedWorkspaceDirectory } from './workspace-directory.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
@@ -608,10 +615,34 @@ async function serve(): Promise<void> {
       model: home.config.model,
     },
   });
-  const assistantWorker = new AssistantWorkerManager({
+  const assistantSources = new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
+    metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md'));
+  const professionalAdapter = new LocalProfessionalAdapter({
+    root: join(home.workflowsPath, 'professional-tasks'),
+    assistantHome: join(home.root, 'assistant'),
+    skillsRoot: join(home.agentPath, 'skills'),
+    host: createReadOnlyProfessionalTaskHost(assistantSources),
+    resolveModel: async () => {
+      const modelRuntime = await ModelRuntime.create({
+        authPath: join(home.appPath, 'auth.json'),
+        modelsPath: join(home.appPath, 'models.json'),
+        modelsStorePath: join(home.agentPath, 'models-store.json'),
+      });
+      const model = modelRuntime.getModel(home.config.provider, home.config.model);
+      if (!model) throw new Error('Professional task model is unavailable.');
+      return { model, modelRuntime };
+    },
+  });
+  let assistantWorker: AssistantWorkerManager;
+  const delegations = new AssistantDelegationService(
+    join(home.workflowsPath, 'delegation-ledger'), professionalAdapter,
+    (record) => assistantWorker?.notifyDelegation(record),
+  );
+  await delegations.open();
+  assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
-    sources: new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
-      metadata.assistantSourceLifecycle, join(home.agentPath, 'memory', 'MEMORY.md')),
+    sources: assistantSources,
+    delegations,
     model: {
       appPath: home.appPath,
       agentPath: home.agentPath,
@@ -1976,6 +2007,7 @@ async function serve(): Promise<void> {
         assistantHost.close();
         await assistantWorker.stop();
         await assistantHost.drain();
+        await delegations.close();
       },
       closeChannels: () => closeWecomChannels(wecomChannels),
       closeScheduler: () => scheduler.close(),

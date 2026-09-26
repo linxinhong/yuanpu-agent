@@ -31,7 +31,8 @@
     "@earendil-works/pi-coding-agent": "0.86.1",
     "@yuanpu-agent/assistant": "workspace:*",
     "@yuanpu-agent/runtime-kit": "workspace:*",
-    "@yuanpu-agent/protocol": "workspace:*"
+    "@yuanpu-agent/protocol": "workspace:*",
+    "typebox": "1.3.27"
   },
   "devDependencies": {
     "postject": "1.0.0-alpha.6"

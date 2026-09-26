@@ -123,6 +123,32 @@ export class RuntimeAssistantSourceHost implements AssistantSourceHost {
     return this.assistant.currentSourceChange(sourceId);
   }
 
+  /** Bind a delegated source to the exact version visible at task authorization. */
+  async delegatedSourceVersion(sourceId: string): Promise<string> {
+    if (!sourceId || sourceId.length > 300) throw new Error('Invalid delegated source reference.');
+    const current = await this.latest(sourceId);
+    if (!current || current.kind === 'deleted' || current.audience.kind !== 'personal'
+      || current.audience.id !== 'local-user' || !current.contentRef) {
+      throw new Error('Delegated source is unavailable to this audience.');
+    }
+    return current.sourceVersion;
+  }
+
+  /** Revalidate audience and version before each delegated read. */
+  async readDelegatedSource(sourceId: string, expectedVersion: string): Promise<string> {
+    if (!expectedVersion || expectedVersion.length > 300) throw new Error('Invalid delegated source version.');
+    const currentVersion = await this.delegatedSourceVersion(sourceId);
+    if (currentVersion !== expectedVersion) throw new Error('Delegated source changed after authorization.');
+    const current = await this.latest(sourceId);
+    if (!current || !current.contentRef || current.sourceVersion !== expectedVersion) {
+      throw new Error('Delegated source changed after authorization.');
+    }
+    const result = await this.readSource(current.contentRef, current.sourceId,
+      current.sourceVersion, current.audience, 32_000);
+    if (result.status !== 'available') throw new Error('Delegated source changed or became unavailable.');
+    return result.text;
+  }
+
   async currentSource(sourceId: string, audience: AssistantAudience): Promise<AssistantSourceState> {
     personal(audience);
     const current = await this.latest(sourceId);

@@ -105,6 +105,11 @@ function validAudience(audience: AssistantAudience): void {
   validIdentity(audience.id, 'source audience ID');
 }
 
+function canonicalFeed(feedId: string): string {
+  if (feedId === 'work-evidence' || feedId === 'work-deletions') return 'work';
+  return feedId.endsWith('-deletions') ? feedId.slice(0, -'-deletions'.length) : feedId;
+}
+
 function normalized(value: string): string { return value.normalize('NFKC').toLocaleLowerCase('und'); }
 
 /** Unicode bigrams retain two-character Chinese searches; ASCII words remain whole tokens. */
@@ -188,8 +193,7 @@ export class AssistantSourceStore {
     try {
       if (this.cursor(feedId) !== expectedCursor) throw new Error('Source cursor changed.');
       let inserted = 0;
-      const originatingFeed = feedId.endsWith('-deletions')
-        ? feedId.slice(0, -'-deletions'.length) : feedId;
+      const originatingFeed = canonicalFeed(feedId);
       for (const event of page.events) {
         const change = event.change;
         validIdentity(event.eventId, 'source event ID');
@@ -201,7 +205,7 @@ export class AssistantSourceStore {
         const owner = this.database.prepare(`SELECT feed_id FROM source_events WHERE source_id = ?
           UNION SELECT feed_id FROM source_current WHERE source_id = ? LIMIT 1`)
           .get(change.sourceId, change.sourceId) as { feed_id: string } | undefined;
-        if (owner && owner.feed_id.replace(/-deletions$/u, '') !== originatingFeed) {
+        if (owner && canonicalFeed(owner.feed_id) !== originatingFeed) {
           throw new Error('Source ID belongs to another feed.');
         }
         const existing = this.database.prepare('SELECT * FROM source_events WHERE feed_id = ? AND event_id = ?')
@@ -334,8 +338,7 @@ export class AssistantSourceStore {
     const change = event.change;
     const previous = this.database.prepare('SELECT feed_id FROM source_current WHERE source_id = ?')
       .get(change.sourceId) as { feed_id: string } | undefined;
-    const originatingFeed = event.feedId.endsWith('-deletions')
-      ? event.feedId.slice(0, -'-deletions'.length) : event.feedId;
+    const originatingFeed = canonicalFeed(event.feedId);
     if (previous && previous.feed_id !== originatingFeed) throw new Error('Source ID belongs to another feed.');
     this.database.exec('BEGIN IMMEDIATE');
     try {
