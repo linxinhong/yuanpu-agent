@@ -2232,7 +2232,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-062
     title: "接通用户撤销助理来源与权威删除事件"
-    status: ready
+    status: in_progress
     goal: "用户撤销一条 Work 或助理来源后，宿主权威地记录删除事件，助理撤回只由该来源支持的认识，重启后不会重新导入。"
     scope:
       in: ["助理界面的来源撤销操作与版本化服务契约", "宿主单事务登记 tombstone、来源读权限变化及事件投递", "Work/助理已保存来源的幂等重启恢复和端到端验收"]
@@ -2256,15 +2256,14 @@ tasks:
     investigation_hints: ["TASK-043 的 RuntimeAssistantSourceHost.markDeleted 与 AssistantSourceLifecycleStore 是生产接缝，但当前没有用户操作调用它", "从 TASK-049 已接入的来源详情与版本化记忆服务扩展撤销入口；验证旧 Work 保存回合与助理回合各一条", "先测试宿主 tombstone 与读权限的一致性，再测 Worker 消费、重启和界面状态"]
     escalation_conditions: ["若原始来源本身将来支持物理删除，应先确定该删除事务与 tombstone 的先后及失败恢复，不以 UI 隐藏代替", "若无法证明受众和所属身份，拒绝撤销而不发事件"]
     result:
-      owner: null
+      owner: "root-assistant-source-revoke-10414-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T23:29:27.872Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-062-assistant-source-revoke"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-063
     title: "内置浏览器标签与 agent 共享会话"
     status: in_progress
