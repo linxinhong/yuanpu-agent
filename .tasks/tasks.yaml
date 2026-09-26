@@ -2029,7 +2029,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-057
     title: "实现工作文件夹与会话内容搜索"
-    status: in_progress
+    status: done
     goal: "用户按文件夹名、会话名、标签或已保存的消息正文找到会话，结果带可定位的树路径与消息位置。"
     scope:
       in: ["Work 管理搜索契约、Runtime 查询和分页/边界限制", "Pi JSONL 可见用户/助理消息的检索或可重建本地索引", "归档筛选、祖先路径、摘要和结果定位标识"]
@@ -2054,14 +2054,19 @@ tasks:
       owner: "conversation-search-sol-10677"
       attempts: 0
       claimed_at: "2026-09-26T18:53:11.475Z"
-      completed_at: null
+      completed_at: "2026-09-26T19:56:12.408Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/conversation-search-sol"
       branch: "task/task-057-work-search"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-057 search implementation, tests and memory merged into main at 566605d after TASK-056 v6; protocol v7."}
+        - {type: "test", check: "integrated pnpm check", status: "passed", summary: "Node 24.15.0/pnpm 11.22.0; pnpm check passed on main 566605d, including 114 Runtime tests. Only unrelated .zcode plan remained unstaged."}
+        - {type: "review", check: "independent search wiring review", status: "passed", summary: "Independent reviewer found no P1/P2 in scope, read leases, Desktop IPC and protocol v7; earlier cursor and missing-file findings fixed."}
+        - {type: "document", check: "task memory", status: "passed", summary: ".tasks/memory/TASK-057.md records source revision, entry points, verification and limits."}
+        - {type: "boundary", check: "renderer and platform", status: "unverified", summary: "Renderer search and scrolling belong to TASK-059; Windows/Linux, native, real user DB and large interactive search latency not tested."}
       follow_up_candidates: []
   - id: TASK-058
     title: "工作会话文件树后端阶段验证"
-    status: pending
+    status: ready
     goal: "独立验证文件夹管理、真实磁盘移动、Pi 会话恢复与内容搜索在失败和重启后仍保持同一工作事实。"
     scope:
       in: ["独立验证者使用临时 Home 的真实 Runtime/SQLite/Pi JSONL 走新建、移动、重启、搜索和归档恢复", "注入目录冲突、迁移中断、无权路径与索引失效，核对权威状态", "记录 revision、环境、fixture/真实模式及 pass/fail/unverified"]
