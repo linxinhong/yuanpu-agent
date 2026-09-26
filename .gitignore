@@ -11,9 +11,5 @@ __pycache__/
 .DS_Store
 packages/ai/src/providers/data/
 
-/.tasks/*
-!/.tasks/tasks.yaml
-!/.tasks/README.md
-!/.tasks/architecture.md
 .worktrees/
 .zvec-grep/

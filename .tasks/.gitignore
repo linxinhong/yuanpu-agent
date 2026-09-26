@@ -1,0 +1,10 @@
+**/node_modules/
+**/.git/
+**/__pycache__/
+**/.DS_Store
+**/.venv/
+**/out/
+**/rendered/
+**/exports/
+ui/
+research/
