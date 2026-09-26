@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
+import { parseWorkReviewProposal, type WorkReviewProposal } from '@yuanpu-agent/assistant';
 import type { AssistantMemoryRepository, AssistantAutomationStore, AutomationHandler,
-  AutomationJob, AutomationProposal } from '@yuanpu-agent/assistant';
+  AutomationJob, AutomationProposal, AssistantWorkReviewStore, WorkReviewSnapshot } from '@yuanpu-agent/assistant';
 import type { AssistantDelegationRecord } from '@yuanpu-agent/protocol';
 
 export interface DelegationAutomationHost {
@@ -8,6 +10,25 @@ export interface DelegationAutomationHost {
     beforeModel: () => boolean): Promise<{ costUsd: number; message: string }>;
   linkEvidence(record: AssistantDelegationRecord,
     checks: Array<{ criterion: string; evidenceRefs: string[] }>): Promise<void>;
+}
+
+export interface WorkReviewAutomationHost {
+  store: AssistantWorkReviewStore;
+  review(snapshot: WorkReviewSnapshot, signal: AbortSignal,
+    beforeModel: () => boolean): Promise<{ costUsd: number; message: string }>;
+}
+
+function reviewFingerprint(snapshot: WorkReviewSnapshot): string {
+  return createHash('sha256').update(JSON.stringify({ workId: snapshot.workId,
+    materials: snapshot.materials.map((item) => [item.sourceId, item.sourceVersion]),
+    unavailable: snapshot.unavailable, truncated: snapshot.truncated })).digest('hex');
+}
+
+function unverifiedReview(reason: string): WorkReviewProposal {
+  return { goal: 'Work goal requires verification', constraints: [], judgment: 'unverified',
+    findings: [], unresolved: [reason],
+    followUp: ['Review again when new evidence arrives.'], memoryCandidates: [],
+    ledgerCandidates: [] };
 }
 
 function parseEvidenceProposal(message: string): Array<{ criterion: string; evidenceRefs: string[] }> {
@@ -24,9 +45,14 @@ function parseEvidenceProposal(message: string): Array<{ criterion: string; evid
 
 /** Worker-owned periodic check and one-shot, crash-conservative delegation wake. */
 export function assistantAutomationHandler(memory: AssistantMemoryRepository,
-  store: AssistantAutomationStore, delegations?: DelegationAutomationHost): AutomationHandler {
+  store: AssistantAutomationStore, delegations?: DelegationAutomationHost,
+  reviews?: WorkReviewAutomationHost): AutomationHandler {
   return {
     async lookup(job) {
+      if (job.kind === 'review-work') {
+        if (store.hasCheckpoint(job.effectId)) return 'applied';
+        return reviews?.store.snapshot(job) ? 'absent' : 'deferred';
+      }
       if (job.kind === 'verify-delegation') {
         if (store.hasCheckpoint(job.effectId)) return 'applied';
         if (store.preparedProposal(job)) return 'absent';
@@ -41,6 +67,41 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
     },
     async prepare(job: AutomationJob, signal: AbortSignal): Promise<AutomationProposal> {
       if (signal.aborted) throw signal.reason;
+      if (job.kind === 'review-work') {
+        if (!reviews) throw new Error('Work review host is unavailable.');
+        const snapshot = reviews.store.snapshot(job);
+        if (!snapshot) throw new Error('Work review source is unavailable.');
+        const prepared = store.preparedProposal(job);
+        if (prepared) {
+          if ((prepared.value as { fingerprint?: string }).fingerprint === reviewFingerprint(snapshot)) {
+            return prepared;
+          }
+          return { costUsd: 0, value: { fingerprint: reviewFingerprint(snapshot),
+            parsed: unverifiedReview('Source material changed after the previous model review.') } };
+        }
+        if (store.hasEffectAttempt(job.effectId)) {
+          // A lost read-only model result must become visible as unknown, without another billed turn.
+          return { costUsd: 0, value: { fingerprint: reviewFingerprint(snapshot),
+            parsed: unverifiedReview('The previous review model result was interrupted or lost.') } };
+        }
+        signal.throwIfAborted();
+        const billed = await reviews.review(snapshot, signal, () => store.beginEffectAttempt(job));
+        signal.throwIfAborted();
+        let parsed: WorkReviewProposal;
+        try {
+          parsed = parseWorkReviewProposal(billed.message);
+          const known = new Set(snapshot.materials.map((material) => material.sourceId));
+          if (parsed.findings.some((finding) => finding.evidenceRefs.some((ref) => !known.has(ref)))) {
+            throw new Error('Review cited unknown evidence.');
+          }
+        } catch {
+          parsed = unverifiedReview('The model review was invalid or cited unknown evidence.');
+        }
+        const fingerprint = reviewFingerprint(snapshot);
+        const proposal = { costUsd: billed.costUsd, value: { parsed, fingerprint } };
+        store.savePreparedProposal(job, proposal);
+        return proposal;
+      }
       if (job.kind === 'verify-delegation') {
         const prepared = store.preparedProposal(job);
         if (prepared) return prepared;
@@ -66,6 +127,19 @@ export function assistantAutomationHandler(memory: AssistantMemoryRepository,
         availableSourceCount: sources.available ?? 0, activeMemoryCount: memories.total } };
     },
     async apply(job, proposal, commit, signal) {
+      if (job.kind === 'review-work') {
+        if (!reviews) throw new Error('Work review host is unavailable.');
+        signal.throwIfAborted();
+        const snapshot = reviews.store.snapshot(job);
+        if (!snapshot || reviewFingerprint(snapshot) !== (proposal.value as { fingerprint?: string }).fingerprint) {
+          throw new Error('Work review materials changed before commit.');
+        }
+        const parsed = (proposal.value as { parsed: WorkReviewProposal }).parsed;
+        const committed = reviews.store.record(job, snapshot, parsed, commit,
+          (value) => store.recordCheckpoint(job, value));
+        if (committed) await reviews.store.flushPending();
+        return;
+      }
       if (job.kind === 'verify-delegation') {
         if (!delegations || !job.delegationId) throw new Error('Delegation automation host is unavailable.');
         const value = proposal.value as { taskId: string; status: string; updatedAt: string;

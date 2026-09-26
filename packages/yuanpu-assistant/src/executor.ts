@@ -39,7 +39,8 @@ export interface AssistantSession {
   readonly sessionId: string;
   readonly skillNames: readonly string[];
   prompt(message: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
-  invokeSkill(name: string, instructions?: string, signal?: AbortSignal): Promise<AssistantTurnResult>;
+  invokeSkill(name: string, instructions?: string, signal?: AbortSignal,
+    beforeModel?: () => boolean): Promise<AssistantTurnResult>;
   verifyDelegation(taskId: string, signal?: AbortSignal,
     beforeModel?: () => boolean): Promise<AssistantTurnResult>;
   close(): Promise<void>;
@@ -47,7 +48,8 @@ export interface AssistantSession {
 
 export interface AssistantExecutor {
   readonly paths: AssistantHomePaths;
-  openSession(sessionId?: string, options?: { createIfMissing?: boolean }): Promise<AssistantSession>;
+  openSession(sessionId?: string, options?: { createIfMissing?: boolean;
+    reviewOnly?: boolean }): Promise<AssistantSession>;
   linkDelegationEvidence(taskId: string, sessionId: string,
     checks: Array<{ criterion: string; evidenceRefs: string[] }>): Promise<unknown>;
   close(): Promise<void>;
@@ -120,14 +122,23 @@ export async function createAssistantExecutor(options: {
     ? new AssistantDelegationCoordinator(paths.root, options.delegations) : undefined;
   let closed = false;
 
-  const openSession = async (selectedId?: string, openOptions: { createIfMissing?: boolean } = {}): Promise<AssistantSession> => {
+  const openSession = async (selectedId?: string, openOptions: { createIfMissing?: boolean;
+    reviewOnly?: boolean } = {}): Promise<AssistantSession> => {
     if (closed) throw new Error('Assistant executor is closed.');
+    if (openOptions.reviewOnly && selectedId) {
+      throw new Error('Background review requires a new isolated Session.');
+    }
     const sessionId = selectedId ?? randomUUID();
     const existing = openSessions.get(sessionId);
     if (existing) return existing;
     const opening = (async () => {
       const { models, model } = await options.host.resolveModel();
-      const skills = await loadAssistantSkills(paths);
+      const availableSkills = await loadAssistantSkills(paths);
+      const skills = openOptions.reviewOnly
+        ? availableSkills.filter((skill) => skill.name === 'review-work') : availableSkills;
+      if (openOptions.reviewOnly && skills.length !== 1) {
+        throw new Error('Background review skill is unavailable.');
+      }
       const metadata = selectedId
         ? (await repo.list({ cwd: paths.root }, BACKGROUND_CONTEXT)).find((item) => item.id === selectedId)
         : undefined;
@@ -153,7 +164,7 @@ export async function createAssistantExecutor(options: {
           await writeFile(snapshotFile, JSON.stringify(frozen), { flag: 'wx', mode: 0o600 });
         }
         let automationTaskId: string | undefined;
-        const delegationTool = delegationCoordinator
+        const delegationTool = delegationCoordinator && !openOptions.reviewOnly
           ? createAssistantDelegationTool(delegationCoordinator, sessionId, () => automationTaskId) : undefined;
         const { harness } = await AgentHarness.create({
           session,
@@ -186,14 +197,28 @@ export async function createAssistantExecutor(options: {
             if (!message.trim()) return Promise.reject(new TypeError('Assistant message must not be empty.'));
             return serialize(() => completeTurn(lane, sessionId, lane.prompt(message, undefined, BACKGROUND_CONTEXT)), signal);
           },
-          invokeSkill(name, instructions, signal) {
+          invokeSkill(name, instructions, signal, beforeModel) {
             if (!skills.some((skill) => skill.name === name)) {
               return Promise.reject(new Error(`Unknown assistant skill: ${name}`));
             }
-            return serialize(() => completeTurn(lane, sessionId, lane.skill(name, instructions, BACKGROUND_CONTEXT)), signal);
+            return serialize(async () => {
+              if (signal?.aborted) throw new Error('Assistant skill was preempted before model dispatch.');
+              if (beforeModel && !beforeModel()) throw new Error('Assistant skill is no longer current.');
+              if (signal?.aborted) throw new Error('Assistant skill was preempted during model dispatch.');
+              const result = await completeTurn(lane, sessionId,
+                lane.skill(name, instructions, BACKGROUND_CONTEXT));
+              if (beforeModel && !result.usageKnown && [model.cost.input, model.cost.output,
+                model.cost.cacheRead, model.cost.cacheWrite,
+                ...(model.cost.tiers ?? []).flatMap((tier) => [tier.input, tier.output,
+                  tier.cacheRead, tier.cacheWrite])].some((rate) => rate > 0)) {
+                throw new Error('Assistant skill model usage is unknown.');
+              }
+              return result;
+            }, signal);
           },
           verifyDelegation(taskId, signal, beforeModel) {
-            if (!delegationCoordinator || !/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
+            if (openOptions.reviewOnly || !delegationCoordinator
+              || !/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
               return Promise.reject(new Error('Invalid delegation verification task.'));
             }
             return serialize(async () => {
