@@ -36,9 +36,11 @@ export function readSavedWorkMessages(cwd: string, piSessionId: string, director
       return { status: 'unreadable', messages: [], bytesRead: 0 };
     }
     names = readdirSync(directory).filter((name) => name.endsWith('.jsonl')).sort();
-  } catch {
-    return { status: 'unreadable', messages: [], bytesRead: 0 };
+  } catch (error) {
+    return { status: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable',
+      messages: [], bytesRead: 0 };
   }
+  let sawUnreadableFile = false;
   for (const name of names) {
     const path = join(directory, name);
     const namedSession = name.endsWith(`_${piSessionId}.jsonl`);
@@ -90,9 +92,11 @@ export function readSavedWorkMessages(cwd: string, piSessionId: string, director
         const branch = SessionManager.inMemory(cwd, { id: piSessionId }, entries as Parameters<typeof SessionManager.inMemory>[2]).getBranch();
         return { status: 'ok', messages: branch.flatMap((entry, position) => visibleText(entry, position) ?? []), bytesRead: count };
       } catch { return { status: 'corrupt', messages: [], bytesRead: count }; }
-    } catch {
-      return { status: 'unreadable', messages: [], bytesRead: 0 };
+    } catch (error) {
+      if (namedSession) return { status: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable',
+        messages: [], bytesRead: 0 };
+      sawUnreadableFile = true;
     } finally { if (fd !== undefined) closeSync(fd); }
   }
-  return { status: 'missing', messages: [], bytesRead: 0 };
+  return { status: sawUnreadableFile ? 'unreadable' : 'missing', messages: [], bytesRead: 0 };
 }

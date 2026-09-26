@@ -75,11 +75,16 @@ export function searchWorkConversations(store: WorkConversationStore, input: Wor
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error('Search page size must be 1 to 50.');
   const fingerprint = createHash('sha256').update(JSON.stringify([input.workspaceId, query, archive])).digest('hex');
   let after = '';
+  let expectedResultDigest: string | undefined;
   if (input.cursor) {
     try {
-      const parsed = JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8')) as { fingerprint: string; after: string };
-      if (parsed.fingerprint !== fingerprint || typeof parsed.after !== 'string') throw new Error();
+      const parsed = JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8')) as {
+        fingerprint: string; after: string; resultDigest: string;
+      };
+      if (parsed.fingerprint !== fingerprint || typeof parsed.after !== 'string'
+        || typeof parsed.resultDigest !== 'string') throw new Error();
       after = parsed.after;
+      expectedResultDigest = parsed.resultDigest;
     } catch { throw new Error('Invalid search cursor.'); }
   }
   const folders = new Map(store.listFolders(input.workspaceId).map((item) => [item.id, item]));
@@ -112,10 +117,16 @@ export function searchWorkConversations(store: WorkConversationStore, input: Wor
         messageEntryId: message.entryId, messagePosition: message.position, role: message.role, at: message.at });
     }
   }
-  items.sort((a, b) => itemKey(a).localeCompare(itemKey(b), 'en'));
-  const page = items.filter((item) => itemKey(item) > after).slice(0, limit + 1);
+  const compareKeys = (a: string, b: string) => a.localeCompare(b, 'en');
+  items.sort((a, b) => compareKeys(itemKey(a), itemKey(b)));
+  const resultDigest = createHash('sha256').update(JSON.stringify({ items, contentFailures })).digest('hex');
+  if (expectedResultDigest && expectedResultDigest !== resultDigest) {
+    throw new Error('Search results changed; restart pagination.');
+  }
+  const page = items.filter((item) => compareKeys(itemKey(item), after) > 0).slice(0, limit + 1);
   const hasMore = page.length > limit;
   if (hasMore) page.pop();
-  return { items: page, ...(hasMore ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: itemKey(page.at(-1)!) })).toString('base64url') } : {}),
+  return { items: page, ...(hasMore ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, resultDigest,
+    after: itemKey(page.at(-1)!) })).toString('base64url') } : {}),
     contentFailures };
 }

@@ -65,6 +65,8 @@ test('searches scoped Work metadata and only visible saved text with stable Pi e
   assert.ok(firstPage.nextCursor);
   assert.equal(search('needle', { limit: 1, cursor: firstPage.nextCursor }).items[0].messageEntryId, assistantId);
   assert.throws(() => search('launch', { cursor: firstPage.nextCursor }), /Invalid search cursor/);
+  db.workConversations.updateConversation(scope, conversation.id, { title: 'Renamed Q4 launch' });
+  assert.throws(() => search('needle', { limit: 1, cursor: firstPage.nextCursor }), /Search results changed/);
   assert.throws(() => search(' '), /Search query/);
   assert.throws(() => search('x'.repeat(201)), /Search query/);
   assert.throws(() => search('needle', { limit: 51 }), /Search page size/);
@@ -85,5 +87,7 @@ test('searches scoped Work metadata and only visible saved text with stable Pi e
     [{ conversationId: conversation.id, reason: 'corrupt' }]);
   await rm(file);
   assert.deepEqual(search('launch', { archive: 'all' }).contentFailures,
+    [{ conversationId: conversation.id, reason: 'missing' }]);
+  assert.deepEqual(search('launch', { archive: 'all', sessionsDirectory: join(root, 'missing-sessions') }).contentFailures,
     [{ conversationId: conversation.id, reason: 'missing' }]);
 });
