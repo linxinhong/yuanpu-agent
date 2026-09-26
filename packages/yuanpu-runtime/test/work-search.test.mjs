@@ -10,6 +10,8 @@ import { SessionManager } from '@earendil-works/pi-coding-agent';
 register();
 const { openYuanpuMetadataDatabase } = await import('../src/persistence/index.ts');
 const { searchWorkConversations } = await import('../src/persistence/work-search.ts');
+const { readSavedWorkMessageWindow } = await import('../src/pi/work-message-search.ts');
+const { summarizeTranscript } = await import('../src/pi/transcript-summary.ts');
 
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -90,4 +92,33 @@ test('searches scoped Work metadata and only visible saved text with stable Pi e
     [{ conversationId: conversation.id, reason: 'missing' }]);
   assert.deepEqual(search('launch', { archive: 'all', sessionsDirectory: join(root, 'missing-sessions') }).contentFailures,
     [{ conversationId: conversation.id, reason: 'missing' }]);
+});
+
+test('an early search hit remains addressable beyond the default 100-message transcript', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-search-window-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const sessions = join(root, 'sessions');
+  await mkdir(sessions);
+  const db = openYuanpuMetadataDatabase(join(root, 'metadata.sqlite'));
+  context.after(() => db.close());
+  const scope = join(root, 'workspace');
+  const conversation = db.workConversations.create(scope, join(root, 'chat'));
+  const sessionId = db.workConversations.sessionId(scope, conversation.id);
+  const session = SessionManager.create(conversation.workingDirectory, sessions, { id: sessionId });
+  const earlyId = session.appendMessage({ role: 'user', content: 'early needle', timestamp: Date.now() });
+  for (let index = 0; index < 110; index++) {
+    session.appendMessage({ role: 'user', content: `later ${index}`, timestamp: Date.now() });
+  }
+  session.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'saved' }],
+    api: 'fixture', provider: 'fixture', model: 'fixture', stopReason: 'stop', usage, timestamp: Date.now() });
+  assert.equal(summarizeTranscript(session.getBranch()).some((item) => item.id === earlyId), false);
+  const found = searchWorkConversations(db.workConversations,
+    { workspaceId: scope, sessionsDirectory: sessions, query: 'early needle' });
+  assert.deepEqual(found.contentFailures, []);
+  assert.equal(found.items[0].messageEntryId, earlyId);
+  const window = readSavedWorkMessageWindow(conversation.workingDirectory, sessionId, sessions, earlyId, 3);
+  assert.equal(window.status, 'ok');
+  assert.equal(window.messages[window.targetIndex].entryId, earlyId);
+  assert.equal(window.hasAfter, true);
+  assert.equal(readSavedWorkMessageWindow(conversation.workingDirectory, sessionId, sessions, 'unknown').status, 'not_found');
 });

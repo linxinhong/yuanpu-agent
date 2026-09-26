@@ -16,6 +16,10 @@ export type SavedWorkMessages =
   | { status: 'ok'; messages: SavedWorkMessage[]; bytesRead: number }
   | { status: 'missing' | 'unreadable' | 'corrupt' | 'too_large'; messages: []; bytesRead: number };
 
+export type SavedWorkMessageWindow =
+  | { status: 'ok'; messages: SavedWorkMessage[]; targetIndex: number; hasBefore: boolean; hasAfter: boolean }
+  | { status: Exclude<SavedWorkMessages['status'], 'ok'> | 'not_found'; messages: [] };
+
 function visibleText(entry: SessionEntry, position: number): SavedWorkMessage | undefined {
   if (entry.type !== 'message') return undefined;
   const message = entry.message;
@@ -99,4 +103,22 @@ export function readSavedWorkMessages(cwd: string, piSessionId: string, director
     } finally { if (fd !== undefined) closeSync(fd); }
   }
   return { status: sawUnreadableFile ? 'unreadable' : 'missing', messages: [], bytesRead: 0 };
+}
+
+/** Return a bounded visible transcript window around a stable Pi entry ID. */
+export function readSavedWorkMessageWindow(
+  cwd: string, piSessionId: string, directory: string, entryId: string, radius = 20,
+): SavedWorkMessageWindow {
+  if (typeof entryId !== 'string' || !entryId || entryId.length > 128
+    || !Number.isInteger(radius) || radius < 1 || radius > 50) {
+    throw new Error('Invalid Work message locator.');
+  }
+  const saved = readSavedWorkMessages(cwd, piSessionId, directory);
+  if (saved.status !== 'ok') return { status: saved.status, messages: [] };
+  const targetIndex = saved.messages.findIndex((message) => message.entryId === entryId);
+  if (targetIndex < 0) return { status: 'not_found', messages: [] };
+  const start = Math.max(0, targetIndex - radius);
+  const end = Math.min(saved.messages.length, targetIndex + radius + 1);
+  return { status: 'ok', messages: saved.messages.slice(start, end), targetIndex: targetIndex - start,
+    hasBefore: start > 0, hasAfter: end < saved.messages.length };
 }
