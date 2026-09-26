@@ -357,8 +357,7 @@ export function ChatPanel({
   useEffect(() => {
     const dialog = activityDialog.current;
     if (activityOpen && active && dialog) {
-      if (surface === 'work' && window.matchMedia('(max-width: 560px)').matches) dialog.showModal();
-      else dialog.open = true;
+      dialog.open = true;
       return () => dialog.close();
     }
     if (!activityOpen && active && restoreActivityFocus.current) {

@@ -93,3 +93,11 @@
   .chat-panel.list-open .conversation-list-preview { width: min(300px, 90%) !important; }
   .work-tree-more { opacity: 1; }
 }
+@media (max-width: 560px) {
+  .chat-panel.work-mode.list-open.activity-closed,
+  .chat-panel.work-mode.list-open.activity-open { grid-template-columns: minmax(0, 1fr); }
+  .chat-panel.work-mode.list-open .conversation-list-preview { position: absolute; z-index: 11; top: 50px; bottom: 0; left: 0; width: min(300px, 90%); }
+  .chat-panel.work-mode.list-open .chat-main,
+  .chat-panel.work-mode.list-open.activity-open .activity-panel { grid-column: 1; }
+  .chat-panel.work-mode.activity-open .activity-panel { position: fixed; inset: 50px 0 0 auto; height: calc(100dvh - 50px); }
+}
