@@ -1311,7 +1311,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-039
     title: "隔离工作会话并保留历史"
-    status: ready
+    status: in_progress
     goal: "新建工作从独立上下文开始，历史可读且回合形成可靠来源。"
     scope:
       in: ["Work conversation/session 创建、列表与后续回合路由", "取消全局长期记忆注入；旧 default 只读历史", "落盘后来源事件与重复补扫支持；现有 Work 页接入新建与历史"]
@@ -1333,15 +1333,14 @@ tasks:
     investigation_hints: ["入口 apps/runtime/src/index.ts 的 desktop submit/transcript、packages/yuanpu-runtime/src/pi/index.ts、src/persistence；UI apps/app/src/modules/chat.tsx", "预检不要误删工作区已新增 subagent/builtin 工具和 transcript-summary；保留原子授权边界", "最近测试 agent-service.test.mjs、persistence.test.mjs、pi.test.mjs、apps/runtime/test/runtime.test.mjs；先 focused，再 pnpm check", "共享宿主装配文件与后续进程/渠道卡由一个集成写入者顺序落地"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "work-conversations-sol1"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T13:19:56.043Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/work-conversations"
+      branch: "task/task-039-work-conversations"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-040
     title: "接入助理进程与 SEA 生命周期"
     status: pending
