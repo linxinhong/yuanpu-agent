@@ -23,6 +23,11 @@ export interface ChannelRouterOptions {
   store: ChannelStore;
   agent: AgentService;
   transport: ChannelTransport;
+  assistant?: {
+    ownsWecomMessage(message: NormalizedChannelMessage): boolean;
+    handleWecom(message: NormalizedChannelMessage, transport: ChannelTransport): Promise<ChannelInboundReceipt>;
+    recoverWecom(connectionId: string, transport: ChannelTransport): void;
+  };
   now?: () => Date;
   createId?: () => string;
 }
@@ -43,6 +48,7 @@ export class ChannelRouter {
   readonly #store: ChannelStore;
   readonly #agent: AgentService;
   readonly #transport: ChannelTransport;
+  readonly #assistant?: ChannelRouterOptions['assistant'];
   readonly #now: () => Date;
   readonly #createId: () => string;
   readonly #watching = new Set<string>();
@@ -58,6 +64,7 @@ export class ChannelRouter {
     this.#store = options.store;
     this.#agent = options.agent;
     this.#transport = options.transport;
+    this.#assistant = options.assistant;
     this.#now = options.now ?? (() => new Date());
     this.#createId = options.createId ?? randomUUID;
   }
@@ -171,6 +178,11 @@ export class ChannelRouter {
       'message',
       message.providerMessageId,
     );
+    if (message.messageType === 'text' && this.#assistant?.ownsWecomMessage(message)
+      && !this.#store.hasInbound('wecom', this.#config.connectionId, providerMessageDigest)) {
+      // Authentication and pairing stay in this host-owned channel boundary.
+      return this.#assistant.handleWecom(message, this.#transport);
+    }
     if (message.messageType !== 'text') {
       await this.#handleUnsupported(message, providerMessageDigest, senderDigest, conversationDigest);
       return { accepted: false, code: 'unsupported_message' };
@@ -290,6 +302,9 @@ export class ChannelRouter {
 
   async #recoverAfterReady(): Promise<void> {
     if (this.#closed) return;
+    if (this.#assistant) {
+      this.#assistant.recoverWecom(this.#config.connectionId, this.#transport);
+    }
     for (const inbound of this.#store.recoverableUnsupported('wecom', this.#config.connectionId)) {
       await this.#deliverUnsupported(inbound);
     }

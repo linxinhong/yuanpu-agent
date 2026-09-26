@@ -104,6 +104,8 @@ Hermes 的小文件字符上限是为了限制每次提示词成本，不是 Yua
 
 此探针证明本地传输和离线模型回合可组合，尚未证明真实企微账号、模型、SEA Worker 生命周期或进程崩溃恢复；这些由 TASK-040、TASK-041 和阶段验收覆盖。`JsonlSessionRepo` 用独立助理目录，不能与现有 `SessionManager` 同写。若后续 Pi 实验接口变化，保持上述助理 v1 业务契约，替换 Yuanpu 的窄传输层及 Session 路由适配，先重跑此探针再迁移生产连接。
 
+TASK-041 本地实现采用 Runtime 宿主 HTTP/Electron IPC 接入桌面，以及现有企业微信 SDK/ChannelRouter 接入私聊；宿主用持久身份、会话、请求和交付账本转发到单个 `AssistantWorkerManager`，由 Worker 持有独立 Pi Session。此实现没有将 Pi client/server 的 attach/订阅接口接入生产路径。TASK-037 的 Pi server/client 实验仍仅是可行性证据；在本地单宿主双入口阶段，现有私有 HTTP/IPC 和持久业务 ID 足以实现重连查询与原路回复。以后替换通信层时，保持助理请求契约及宿主鉴权/去重/投递边界，通过 `AssistantHostService` 与 Worker manager 的窄接口切换传输；不得把实验探针当成生产验收。
+
 ## 多渠道助理服务
 
 用户最新确认本轮仅实现本地与企业微信，其他平台暂不考虑，不建立其占位实现、设置页面或验收任务。助理仍是由多个入口访问的长期个人服务，本地 UI 是其中一个入口；保留窄渠道接口即可，不预建通用多平台网关。

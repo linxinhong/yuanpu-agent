@@ -63,6 +63,7 @@ import { promisify } from 'node:util';
 import { smokeBuiltinAgentTools } from './agent-tools-smoke.js';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { AssistantWorkerManager } from './assistant-worker-manager.js';
+import { AssistantHostService } from './assistant-host.js';
 export { AssistantWorkerManager } from './assistant-worker-manager.js';
 import { runAssistantWorker } from './assistant-worker.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
@@ -517,6 +518,16 @@ async function serve(): Promise<void> {
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
   const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
   const workConversations = metadata.workConversations;
+  const scanLegacyAssistantArchives = () => {
+    for (const sessionId of metadata.assistantLink.legacySessionIds()) {
+      try {
+        metadata.assistantHost.recordLegacyArchive(sessionId,
+          readYuanpuChatTranscript(home.config.workingDirectory, sessionId, home.sessionsPath,
+            Number.MAX_SAFE_INTEGER));
+      } catch (error) { console.warn('[assistant-source]', error); }
+    }
+  };
+  scanLegacyAssistantArchives();
   const scanSavedWorkTurns = (conversationId?: string) => {
     for (const item of workConversations.listExisting(home.config.workingDirectory)) {
       if (conversationId && item.id !== conversationId) continue;
@@ -527,7 +538,10 @@ async function serve(): Promise<void> {
     }
   };
   scanSavedWorkTurns();
-  const workScanTimer = setInterval(() => { try { scanSavedWorkTurns(); } catch (error) { console.warn('[work-source]', error); } }, 60_000);
+  const workScanTimer = setInterval(() => {
+    try { scanSavedWorkTurns(); scanLegacyAssistantArchives(); }
+    catch (error) { console.warn('[work-source]', error); }
+  }, 60_000);
   workScanTimer.unref();
   metadata.assistantLink.markInterruptedMirrorsUnknown();
   const agentExecutor = new RuntimeAgentExecutor({
@@ -552,7 +566,8 @@ async function serve(): Promise<void> {
     },
     onError: (error) => console.warn(`[assistant-worker] ${error.message}`),
   });
-  let onAssistantRunChanged: (run: AgentRunRecord) => void = () => undefined;
+  const assistantHost = new AssistantHostService(metadata.assistantHost, assistantWorker,
+    home.config.workingDirectory);
   const agentService = await PersistentAgentService.open({
     store: metadata.agentRuns,
     executor: agentExecutor,
@@ -561,7 +576,6 @@ async function serve(): Promise<void> {
     maximumQueuedRuns: 100,
     onRunStateChanged: (run) => {
       requestRecordedTerminalRunNotification(notificationRouter, metadata.schedules, run);
-      onAssistantRunChanged(run);
       if (run.owner.entryPoint === 'desktop' && run.status === 'succeeded'
         && run.context.conversation.conversationId.startsWith('work:')) {
         try {
@@ -580,51 +594,18 @@ async function serve(): Promise<void> {
       authenticatedBy: 'electron',
     },
     authorizeWorkspace: (workspaceId) => workspaceId === home.config.workingDirectory,
-    authorizeConversation: (conversation) => conversation.namespace === 'desktop'
-      && conversation.conversationId !== 'default',
+    authorizeConversation: (conversation) => conversation.namespace === 'desktop',
     authorizeDelivery: (delivery) => delivery.kind === 'desktop' || delivery.kind === 'none',
   };
+  const desktopSubmitCaller: AuthenticatedAgentCaller = {
+    ...desktopCaller,
+    authorizeConversation: (conversation) => conversation.namespace === 'desktop'
+      && conversation.conversationId !== 'default'
+      && conversation.conversationId !== 'assistant'
+      && !conversation.conversationId.startsWith('assistant:')
+      && !conversation.conversationId.startsWith('asst_'),
+  };
   const wecomChannels: ChannelRouter[] = [];
-  let mirrorWorker: Promise<void> | undefined;
-  let mirrorRequested = false;
-  const processAssistantMirrors = (): Promise<void> => {
-    if (mirrorWorker) { mirrorRequested = true; return mirrorWorker; }
-    mirrorWorker = (async () => {
-      for (const mirror of metadata.assistantLink.pendingMirrors()) {
-        if (!mirror.content) continue;
-        if (mirror.part === 'assistant'
-          && metadata.assistantLink.mirror(mirror.runId, 'user')?.status !== 'accepted') continue;
-        if (!metadata.assistantLink.claimMirror(mirror.mirrorId)) continue;
-        const channel = wecomChannels.find((item) => item.canDeliverScheduled(mirror.targetId));
-        const result = channel
-          ? await channel.sendScheduled(mirror.targetId, mirror.content, AbortSignal.timeout(15_000))
-            .catch(() => ({ status: 'unknown' as const, code: 'transport_uncertain' }))
-          : { status: 'failed' as const, code: 'target_unavailable' };
-        metadata.assistantLink.finishMirror(
-          mirror.mirrorId,
-          result.status === 'accepted' ? 'accepted' : result.status === 'unknown' ? 'unknown' : 'failed',
-          result.status === 'accepted' ? undefined : 'code' in result ? result.code : 'connection_unavailable',
-        );
-      }
-    })().finally(() => {
-      mirrorWorker = undefined;
-      if (mirrorRequested) {
-        mirrorRequested = false;
-        void processAssistantMirrors().catch(() => undefined);
-      }
-    });
-    return mirrorWorker;
-  };
-  onAssistantRunChanged = (run) => {
-    if (run.owner.entryPoint !== 'desktop' || run.context.conversation.conversationId !== 'assistant'
-      || run.status !== 'succeeded' || !run.output?.message) return;
-    try {
-      const link = metadata.assistantLink.current();
-      if (!link) return;
-      metadata.assistantLink.queueMirror(run.runId, 'assistant', link.targetId, run.output.message);
-      void processAssistantMirrors().catch(() => undefined);
-    } catch { /* A revoked link cannot receive a mirrored message. */ }
-  };
   let wecomStartupDiagnostic: WecomConnectionSummary['diagnostic'] | undefined;
   let wecomReconfiguring = false;
   const wecomDiagnosticFor = (error: unknown): WecomConnectionSummary['diagnostic'] => {
@@ -647,6 +628,7 @@ async function serve(): Promise<void> {
         workspaceId: home.config.workingDirectory,
         store: metadata.channels,
         agent: agentService,
+        assistant: assistantHost,
         log: writeWecomDiagnostic,
       }));
       wecomStartupDiagnostic = undefined;
@@ -666,6 +648,7 @@ async function serve(): Promise<void> {
       workspaceId: home.config.workingDirectory,
       store: metadata.channels,
       agent: agentService,
+      assistant: assistantHost,
       connectionIds: [connectionId],
       log: writeWecomDiagnostic,
     });
@@ -732,6 +715,17 @@ async function serve(): Promise<void> {
     return diagnostics.filter((diagnostic) => diagnostic.path.startsWith(plugin.installPath));
   };
   const waitForDesktopRun = async (runId: string) => {
+    if (runId.startsWith('asst_')) {
+      while (true) {
+        const run = await assistantHost.getDesktopRun(runId);
+        if (!run) throw new Error('Assistant request is not available.');
+        if (['succeeded', 'failed', 'cancelled', 'interrupted'].includes(run.status)) {
+          if (run.status === 'succeeded' && run.output) return run.output;
+          throw new Error(run.failure?.message ?? `Assistant request ended ${run.status}.`);
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+      }
+    }
     for await (const run of agentService.subscribe(desktopCaller, runId)) {
       if (run.status === 'succeeded') {
         if (!run.output) throw new Error('Agent run completed without a live output.');
@@ -767,27 +761,24 @@ async function serve(): Promise<void> {
     if (body.surface !== 'assistant' && (!workConversationId || !workConversations.row(home.config.workingDirectory, workConversationId))) {
       return { error: 'Unknown or archived Work conversation.' } as const;
     }
-    let assistantLink;
-    try {
-      assistantLink = body.surface === 'assistant' ? metadata.assistantLink.current() : undefined;
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) } as const;
+    if (body.surface === 'assistant') {
+      if (body.clientMessageId !== undefined && (typeof body.clientMessageId !== 'string'
+        || !/^[A-Za-z0-9_-]{1,128}$/.test(body.clientMessageId))) {
+        return { error: 'Invalid assistant message ID.' } as const;
+      }
+      return { receipt: assistantHost.submitDesktop(body.message.trim(), body.clientMessageId) } as const;
     }
-    const submission = await agentService.submit(desktopCaller, {
+    const submission = await agentService.submit(desktopSubmitCaller, {
       contractVersion: AGENT_CONTRACT_VERSION,
       entryPoint: 'desktop',
       identity: desktopCaller.identity,
       workspaceId: home.config.workingDirectory,
-      conversation: { namespace: 'desktop', conversationId: body.surface === 'assistant' ? 'assistant' : workConversationId! },
+      conversation: { namespace: 'desktop', conversationId: workConversationId! },
       input: { type: 'text', text: body.message.trim() },
       idempotencyKey: randomUUID(),
       delivery: { kind: 'desktop' },
     });
     if (!submission.accepted) return { error: submission.message } as const;
-    if (assistantLink && !submission.duplicate) {
-      metadata.assistantLink.queueMirror(submission.runId, 'user', assistantLink.targetId, body.message.trim());
-      void processAssistantMirrors().catch(() => undefined);
-    }
     return { receipt: submission } as const;
   };
 
@@ -1095,22 +1086,18 @@ async function serve(): Promise<void> {
           response.end(JSON.stringify({ error: 'Unknown desktop conversation surface.' }));
           return;
         }
-        if (surface !== 'work') {
-          try {
-            const link = metadata.assistantLink.current();
-            if (surface === 'assistantArchive' && !link) throw new Error('原桌面会话归档仅在绑定期间可查看。');
-          } catch (error) {
-            response.statusCode = 409;
-            response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
-            return;
-          }
+        if (surface === 'assistant') {
+          response.end(JSON.stringify(assistantHost.transcript()));
+          return;
+        }
+        if (surface === 'assistantArchive') {
+          response.end(JSON.stringify(metadata.assistantLink.legacySessionIds().flatMap((id) =>
+            readYuanpuChatTranscript(home.config.workingDirectory, id, home.sessionsPath,
+              Number.MAX_SAFE_INTEGER))));
+          return;
         }
         const workId = url.searchParams.get('conversationId') ?? workConversations.current(home.config.workingDirectory).id;
-        const piSessionId = surface === 'work'
-          ? workConversations.sessionId(home.config.workingDirectory, workId)
-          : surface === 'assistantArchive'
-          ? metadata.assistantLink.archivedAssistantSessionId()
-          : metadata.assistantLink.sessionId('assistant');
+        const piSessionId = workConversations.sessionId(home.config.workingDirectory, workId);
         if (surface === 'work' && !piSessionId) {
           response.statusCode = 404;
           response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
@@ -1125,9 +1112,9 @@ async function serve(): Promise<void> {
       if (url.pathname === RUNTIME_ROUTES.assistantLink) {
         try {
           if (request.method === 'GET') {
-            const link = metadata.assistantLink.current();
+            const link = assistantHost.link;
             response.end(JSON.stringify(link
-              ? { linked: true, contactId: link.contactId, connectionId: link.connectionId }
+              ? { linked: true, contactId: link.contactId, connectionId: link.accountId }
               : { linked: false }));
             return;
           }
@@ -1136,14 +1123,12 @@ async function serve(): Promise<void> {
             if (!isRecord(body) || typeof body.contactId !== 'string' || body.contactId.length > 200) {
               throw new Error('Invalid contact id.');
             }
-            const link = metadata.assistantLink.bind(body.contactId, home.config.workingDirectory);
-            agentExecutor.reset();
-            response.end(JSON.stringify({ linked: true, contactId: link.contactId, connectionId: link.connectionId }));
+            const link = await assistantHost.linkContact(body.contactId);
+            response.end(JSON.stringify({ linked: true, contactId: link.contactId, connectionId: link.accountId }));
             return;
           }
           if (request.method === 'DELETE') {
-            metadata.assistantLink.unbind();
-            agentExecutor.reset();
+            await assistantHost.unlinkContact();
             response.end(JSON.stringify({ linked: false }));
             return;
           }
@@ -1156,7 +1141,7 @@ async function serve(): Promise<void> {
 
       if (url.pathname === RUNTIME_ROUTES.assistantMirrors && request.method === 'GET') {
         const runId = url.searchParams.get('runId') ?? '';
-        const run = runId.length <= 200 ? await agentService.get(desktopCaller, runId) : undefined;
+        const run = runId.length <= 200 ? metadata.agentRuns.get(runId) : undefined;
         if (!run || run.owner.entryPoint !== 'desktop' || run.context.conversation.conversationId !== 'assistant') {
           response.statusCode = 404;
           response.end(JSON.stringify({ error: 'Assistant run not found.' }));
@@ -1171,29 +1156,13 @@ async function serve(): Promise<void> {
       }
       const mirrorRetry = url.pathname.match(/^\/v1\/assistant\/mirrors\/([^/]+)\/retry$/);
       if (mirrorRetry && request.method === 'POST') {
-        const mirror = metadata.assistantLink.mirrorById(decodeURIComponent(mirrorRetry[1]!));
-        const run = mirror ? await agentService.get(desktopCaller, mirror.runId) : undefined;
-        const link = metadata.assistantLink.current();
-        if (!mirror || !run || run.owner.entryPoint !== 'desktop'
-          || run.context.conversation.conversationId !== 'assistant'
-          || !link || mirror.targetId !== link.targetId) {
-          response.statusCode = 404;
-          response.end(JSON.stringify({ error: 'Mirror delivery is unavailable.' }));
-          return;
-        }
-        if (!metadata.assistantLink.retryMirror(mirror.mirrorId)) {
-          response.statusCode = 409;
-          response.end(JSON.stringify({ error: 'Only confirmed failures can be retried.' }));
-          return;
-        }
-        void processAssistantMirrors().catch(() => undefined);
-        response.end(JSON.stringify({ mirrorId: mirror.mirrorId, runId: mirror.runId,
-          part: mirror.part, status: 'pending' }));
+        response.statusCode = 410;
+        response.end(JSON.stringify({ error: 'Legacy mirror delivery is read-only.' }));
         return;
       }
 
       if (url.pathname === RUNTIME_ROUTES.agentRuns && request.method === 'POST') {
-        const submission = await agentService.submit(desktopCaller, await readJsonBody(request));
+        const submission = await agentService.submit(desktopSubmitCaller, await readJsonBody(request));
         if (!submission.accepted) {
           response.statusCode = submission.code === 'queue_full'
             ? 429
@@ -1229,18 +1198,21 @@ async function serve(): Promise<void> {
         ? url.pathname.slice(RUNTIME_ROUTES.agentRuns.length + 1).split('/')
         : undefined;
       if (agentRunPath?.length === 1 && request.method === 'GET') {
-        const run = await getDesktopNavigableRun(
-          agentService,
-          decodeURIComponent(agentRunPath[0]!),
-          desktopCaller,
-          schedulerCaller,
-        );
+        const runId = decodeURIComponent(agentRunPath[0]!);
+        const run = runId.startsWith('asst_') ? await assistantHost.getDesktopRun(runId)
+          : await getDesktopNavigableRun(agentService, runId, desktopCaller, schedulerCaller);
         response.statusCode = run ? 200 : 404;
         response.end(JSON.stringify(run ?? { error: 'Agent run not found.' }));
         return;
       }
       if (agentRunPath?.length === 2 && agentRunPath[1] === 'cancel' && request.method === 'POST') {
         const runId = decodeURIComponent(agentRunPath[0]!);
+        if (runId.startsWith('asst_')) {
+          const receipt = assistantHost.cancelDesktop(runId);
+          response.statusCode = receipt.result === 'not_found' ? 404 : 200;
+          response.end(JSON.stringify(receipt));
+          return;
+        }
         const run = await getDesktopNavigableRun(agentService, runId, desktopCaller, schedulerCaller);
         const caller = run?.owner.entryPoint === 'scheduler' ? schedulerCaller : desktopCaller;
         const receipt = await agentService.cancel(
@@ -1743,7 +1715,11 @@ async function serve(): Promise<void> {
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () => {
     cleanupPromise ??= cleanupRuntimeResources({
-      closeAssistantWorker: () => assistantWorker.stop(),
+      closeAssistantWorker: async () => {
+        assistantHost.close();
+        await assistantWorker.stop();
+        await assistantHost.drain();
+      },
       closeChannels: () => closeWecomChannels(wecomChannels),
       closeScheduler: () => scheduler.close(),
       closeNotificationRouter: () => notificationRouter.close(),
@@ -1814,9 +1790,9 @@ async function serve(): Promise<void> {
   try {
     parentMonitor = installParentProcessMonitor(parentPid, shutdown);
     await assistantWorker.start();
+    assistantHost.recover();
     try {
       await reloadWecomChannels();
-      void processAssistantMirrors().catch(() => undefined);
     } catch (error) {
       console.warn(`[wecom] ${wecomDiagnosticFor(error)}`);
     }

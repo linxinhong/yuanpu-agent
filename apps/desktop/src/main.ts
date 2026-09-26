@@ -117,7 +117,8 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('runtime:recovery-notice', trustedHandler(() => runtimeRecoveryNotice));
   ipcMain.handle('runtime:greeting', trustedHandler((name: string) => runtime.greeting(name)));
   ipcMain.handle('runtime:chat', trustedHandler((message: string) => runtime.chat(message)));
-  ipcMain.handle('runtime:chat:submit', trustedHandler((message: string, surface?: 'work' | 'assistant', conversationId?: string) => runtime.submitDesktopMessage(message, surface, conversationId)));
+  ipcMain.handle('runtime:chat:submit', trustedHandler((message: string, surface?: 'work' | 'assistant', conversationId?: string,
+    clientMessageId?: string) => runtime.submitDesktopMessage(message, surface, conversationId, clientMessageId)));
   ipcMain.handle('desktop:transcript', trustedHandler((surface: 'work' | 'assistant' | 'assistantArchive', conversationId?: string) => runtime.getDesktopTranscript(surface, conversationId)));
   ipcMain.handle('work:conversations:list', trustedHandler(() => runtime.listWorkConversations()));
   ipcMain.handle('work:conversations:create', trustedHandler(() => runtime.createWorkConversation()));

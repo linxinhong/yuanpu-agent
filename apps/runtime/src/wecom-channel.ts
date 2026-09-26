@@ -106,6 +106,12 @@ export interface StartConfiguredWecomChannelOptions {
   workspaceId: string;
   store: ChannelStore;
   agent: AgentService;
+  assistant?: {
+    ownsWecomMessage(message: import('@yuanpu-agent/runtime-kit').NormalizedChannelMessage): boolean;
+    handleWecom(message: import('@yuanpu-agent/runtime-kit').NormalizedChannelMessage,
+      transport: ChannelTransport): Promise<import('@yuanpu-agent/runtime-kit').ChannelInboundReceipt>;
+    recoverWecom(connectionId: string, transport: ChannelTransport): void;
+  };
   connectionIds?: readonly string[];
   resolveCredential?: (reference: string) => Promise<string>;
   createTransport?: (input: {
@@ -349,6 +355,7 @@ export async function startConfiguredWecomChannels(
         },
         store: options.store,
         agent: options.agent,
+        assistant: options.assistant,
         transport,
       });
       routers.push(router);

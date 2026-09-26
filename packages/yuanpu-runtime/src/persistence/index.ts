@@ -4,15 +4,17 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { AgentRunStore } from './agent-run-store.js';
 import { AssistantLinkStore } from './assistant-link-store.js';
+import { AssistantHostStore } from './assistant-host-store.js';
 import { WorkConversationStore } from './work-conversation-store.js';
 import { ChannelStore } from '../channels/store.js';
 import { SchedulerStore } from '../scheduler/store.js';
 
 export * from './agent-run-store.js';
 export * from './assistant-link-store.js';
+export * from './assistant-host-store.js';
 export * from './work-conversation-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 7;
+export const YUANPU_METADATA_SCHEMA_VERSION = 8;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -329,6 +331,68 @@ const migrations: readonly Migration[] = [{
       PRIMARY KEY (conversation_id, turn_id)
     ) STRICT;
   `,
+}, {
+  version: 8,
+  sql: `
+    CREATE TABLE yp_assistant_bindings (
+      channel TEXT NOT NULL CHECK (channel IN ('desktop', 'wecom')),
+      account_id TEXT NOT NULL,
+      external_user_id TEXT NOT NULL,
+      external_conversation_id TEXT NOT NULL,
+      principal_id TEXT NOT NULL,
+      assistant_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL UNIQUE,
+      session_id TEXT NOT NULL UNIQUE,
+      contact_id TEXT,
+      generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (channel, account_id, external_user_id, external_conversation_id)
+    ) STRICT;
+    CREATE UNIQUE INDEX yp_assistant_active_wecom
+      ON yp_assistant_bindings(channel) WHERE channel = 'wecom' AND active = 1;
+    CREATE TABLE yp_assistant_requests (
+      request_id TEXT PRIMARY KEY,
+      dedup_key TEXT NOT NULL UNIQUE,
+      channel TEXT NOT NULL CHECK (channel IN ('desktop', 'wecom')),
+      conversation_id TEXT NOT NULL REFERENCES yp_assistant_bindings(conversation_id),
+      session_id TEXT NOT NULL,
+      principal_id TEXT NOT NULL,
+      binding_generation INTEGER NOT NULL,
+      account_id TEXT NOT NULL,
+      external_user_id TEXT NOT NULL,
+      external_conversation_id TEXT NOT NULL,
+      external_message_id TEXT NOT NULL,
+      provider_request_id TEXT,
+      text TEXT NOT NULL,
+      cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
+      status TEXT NOT NULL CHECK (status IN ('accepted', 'running', 'completed', 'failed', 'cancelled', 'interrupted')),
+      response_text TEXT,
+      error_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX yp_assistant_requests_conversation
+      ON yp_assistant_requests(conversation_id, created_at);
+    CREATE TABLE yp_assistant_deliveries (
+      request_id TEXT PRIMARY KEY REFERENCES yp_assistant_requests(request_id),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'accepted', 'failed', 'unknown')),
+      failure_code TEXT,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE yp_assistant_sources (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT UNIQUE REFERENCES yp_assistant_requests(request_id),
+      source_id TEXT NOT NULL,
+      source_version TEXT NOT NULL,
+      content_ref TEXT NOT NULL UNIQUE,
+      audience_id TEXT NOT NULL,
+      legacy_content_json TEXT,
+      occurred_at TEXT NOT NULL,
+      UNIQUE (source_id, source_version),
+      CHECK ((request_id IS NULL) <> (legacy_content_json IS NULL))
+    ) STRICT;
+  `,
 }];
 
 function applyMigrations(database: DatabaseSync): number {
@@ -369,6 +433,7 @@ export class YuanpuMetadataDatabase {
   readonly schemaVersion: number;
   readonly agentRuns: AgentRunStore;
   readonly assistantLink: AssistantLinkStore;
+  readonly assistantHost: AssistantHostStore;
   readonly workConversations: WorkConversationStore;
   readonly channels: ChannelStore;
   readonly schedules: SchedulerStore;
@@ -377,6 +442,7 @@ export class YuanpuMetadataDatabase {
     this.schemaVersion = applyMigrations(database);
     this.agentRuns = new AgentRunStore(database);
     this.assistantLink = new AssistantLinkStore(database);
+    this.assistantHost = new AssistantHostStore(database);
     this.workConversations = new WorkConversationStore(database);
     this.channels = new ChannelStore(database);
     this.schedules = new SchedulerStore(database);

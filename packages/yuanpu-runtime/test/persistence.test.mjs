@@ -42,7 +42,11 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_agent_run_outputs',
     'yp_agent_run_queue_payloads',
     'yp_agent_runs',
+    'yp_assistant_bindings',
+    'yp_assistant_deliveries',
     'yp_assistant_mirror',
+    'yp_assistant_requests',
+    'yp_assistant_sources',
     'yp_channel_connections',
     'yp_channel_inbound',
     'yp_channel_outbound',
@@ -163,6 +167,10 @@ test('upgrades populated schema v4 metadata without losing pairings', async (con
   openYuanpuMetadataDatabase(path).close();
   const v4 = new DatabaseSync(path);
   v4.exec(`
+    DROP TABLE yp_assistant_sources;
+    DROP TABLE yp_assistant_deliveries;
+    DROP TABLE yp_assistant_requests;
+    DROP TABLE yp_assistant_bindings;
     DROP TABLE yp_work_turn_sources;
     DROP TABLE yp_work_conversations;
     DROP TABLE yp_assistant_mirror;
