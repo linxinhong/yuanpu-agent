@@ -125,12 +125,18 @@ export function ChatPanel({
   navigationTarget,
   onReturnToSchedules,
   scheduleOrigin,
+  assistantWorkConversationId,
+  clearAssistantWorkConversation,
+  onOpenWorkConversation,
 }: {
   active: boolean;
   surface: 'work' | 'assistant';
   navigationTarget?: NotificationNavigationTarget;
   onReturnToSchedules: () => void;
   scheduleOrigin: boolean;
+  assistantWorkConversationId?: string;
+  clearAssistantWorkConversation?: () => void;
+  onOpenWorkConversation?: (conversationId: string) => void;
 }) {
   const [messages, setMessages] = useState(() => surface === 'assistant'
     ? [{ ...initialMessages[0]!, text: assistantGreeting }]
@@ -181,6 +187,7 @@ export function ChatPanel({
   const [bridgeError, setBridgeError] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [workConversationId, setWorkConversationId] = useState<string>();
+  const sourceNavigationRef = useRef<string | undefined>(undefined);
   const [renameRequest, setRenameRequest] = useState(0);
   const [searchWindow, setSearchWindow] = useState<{ conversationId: string; entryId: string; result: Extract<WorkMessageWindowResult, { status: 'ok' }> }>();
   const [searchLocationError, setSearchLocationError] = useState('');
@@ -568,6 +575,21 @@ export function ChatPanel({
       return true;
     } catch (error) { setWorkListError(formatError(error)); return false; }
   }
+
+  useEffect(() => {
+    if (!assistantWorkConversationId) { sourceNavigationRef.current = undefined; return; }
+    if (surface !== 'work' || !active || !desktop || !workConversationsQuery.data
+      || sourceNavigationRef.current === assistantWorkConversationId) return;
+    sourceNavigationRef.current = assistantWorkConversationId;
+    const item = workConversationsQuery.data.find((candidate) => candidate.id === assistantWorkConversationId);
+    if (!item) {
+      setWorkListError('对应的工作会话不可用。');
+      clearAssistantWorkConversation?.();
+      return;
+    }
+    void openWorkConversation(item).finally(() => clearAssistantWorkConversation?.());
+  }, [active, assistantWorkConversationId, clearAssistantWorkConversation,
+    desktop, surface, workConversationsQuery.data]);
 
   async function newWorkConversation(folderId?: string) {
     if (!desktop || workTreeLocked) return;
@@ -1171,6 +1193,7 @@ export function ChatPanel({
           {surface === 'assistant' ? imagePreviewRequest
             ? <ImagePreviewPanel image={imagePreviewRequest} onClose={() => setImagePreviewRequest(undefined)} />
             : <AssistantHome active={active && activityOpen} link={assistantLinkQuery.data}
+            onOpenWorkConversation={onOpenWorkConversation ?? (() => undefined)}
             linkLoading={assistantLinkQuery.isLoading} linkError={assistantLinkQuery.error} retryLink={() => void assistantLinkQuery.refetch()}
             activity={{
               runId: visibleRun?.runId ?? (navigationTarget?.runId ? undefined : activeRunId),

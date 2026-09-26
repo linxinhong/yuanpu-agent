@@ -4,6 +4,7 @@ import { isSea } from 'node:sea';
 import { resolveAssistantModelConfig, type AssistantModelSelection } from './assistant-model.js';
 import type { AssistantSourceHost } from '@yuanpu-agent/assistant';
 import type { AssistantSuggestion } from '@yuanpu-agent/assistant';
+import type { AssistantMemoryView, AssistantWorkspaceSnapshot } from '@yuanpu-agent/protocol';
 import type { AssistantDelegationBrief, AssistantDelegationRecord,
   AssistantEvidenceRef } from '@yuanpu-agent/protocol';
 import type { AssistantDelegationService } from './assistant-delegation-service.js';
@@ -134,7 +135,8 @@ export class AssistantWorkerManager {
               result = host.status(args[0]);
             } else if (request.method === 'followUp' && args.length === 3
               && args.every((arg) => typeof arg === 'string')) {
-              result = host.followUp(args[0] as string, args[1] as string, args[2] as string);
+              result = host.followUp(args[0] as string, args[1] as string, args[2] as string,
+                args[3] as string);
             } else if (request.method === 'cancel' && args.length === 2
               && args.every((arg) => typeof arg === 'string')) {
               result = host.cancel(args[0] as string, args[1] as string);
@@ -171,7 +173,8 @@ export class AssistantWorkerManager {
           void delivery.then((value) => child.send?.({ kind: 'suggestion-delivery-result', id, value }),
             (error) => child.send?.({ kind: 'suggestion-delivery-result', id,
               error: error instanceof Error ? error.message : String(error) }));
-        } else if (message.kind === 'suggestion-result' && typeof message.correlationId === 'string') {
+        } else if ((message.kind === 'suggestion-result' || message.kind === 'workspace-result')
+          && typeof message.correlationId === 'string') {
           const pending = this.suggestionPending.get(message.correlationId);
           if (!pending) return;
           this.suggestionPending.delete(message.correlationId);
@@ -273,6 +276,36 @@ export class AssistantWorkerManager {
   }
   suggestionRead(id: string): Promise<AssistantSuggestion> {
     return this.suggestionOperation({ kind: 'suggestion-read', id }) as Promise<AssistantSuggestion>;
+  }
+  workspace(memoryLimit?: number): Promise<AssistantWorkspaceSnapshot> {
+    return this.suggestionOperation({ kind: 'workspace-snapshot', memoryLimit }) as
+      Promise<AssistantWorkspaceSnapshot>;
+  }
+  correctMemory(id: string, expectedVersion: number, text: string,
+    revisionId: string): Promise<AssistantMemoryView> {
+    return this.suggestionOperation({ kind: 'workspace-correct', id, expectedVersion, text, revisionId }) as
+      Promise<AssistantMemoryView>;
+  }
+  forgetMemory(id: string): Promise<{ forgottenIds: string[] }> {
+    return this.suggestionOperation({ kind: 'workspace-forget', id }) as
+      Promise<{ forgottenIds: string[] }>;
+  }
+  importSavedMemory(savedId: string, surface: 'work' | 'assistant', text: string,
+    savedAt: string): Promise<AssistantMemoryView> {
+    return this.suggestionOperation({ kind: 'workspace-import', savedId, surface, text, savedAt }) as
+      Promise<AssistantMemoryView>;
+  }
+  pauseOrganizing(until?: string): Promise<{ organizingPausedUntil?: string }> {
+    return this.suggestionOperation({ kind: 'workspace-pause', until }) as
+      Promise<{ organizingPausedUntil?: string }>;
+  }
+  followUpDelegation(id: string, text: string): Promise<AssistantDelegationRecord> {
+    return this.suggestionOperation({ kind: 'workspace-delegation', id, action: 'follow-up', text }) as
+      Promise<AssistantDelegationRecord>;
+  }
+  cancelDelegation(id: string): Promise<AssistantDelegationRecord> {
+    return this.suggestionOperation({ kind: 'workspace-delegation', id, action: 'cancel' }) as
+      Promise<AssistantDelegationRecord>;
   }
   cancel(id: string): void { if (this.ready) this.child?.send({ kind: 'cancel', id }); }
   notifyDelegation(record: AssistantDelegationRecord): void {

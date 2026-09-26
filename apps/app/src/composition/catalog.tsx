@@ -15,14 +15,22 @@ interface PageContext {
   notificationTarget?: NotificationNavigationTarget;
   selectedScheduleId?: string;
   openScheduledRun: (runId: string, conversationId: string, scheduleId: string) => void;
+  assistantWorkConversationId?: string;
+  openAssistantWorkConversation: (conversationId: string) => void;
+  clearAssistantWorkConversation: () => void;
   navigate: (view: AppView) => void;
 }
 
 export const uiRegistry = createUiRegistry<(context: PageContext) => ReactNode>();
-uiRegistry.register({ id: 'work', label: '工作', order: 10, render: ({ active, notificationTarget, selectedScheduleId, navigate }) =>
-  <ChatPanel active={active} surface="work" navigationTarget={notificationTarget} scheduleOrigin={Boolean(selectedScheduleId)} onReturnToSchedules={() => navigate('schedules')} /> });
-uiRegistry.register({ id: 'assistant', label: '助理', order: 20, render: ({ active }) =>
-  <ChatPanel active={active} surface="assistant" scheduleOrigin={false} onReturnToSchedules={() => undefined} /> });
+uiRegistry.register({ id: 'work', label: '工作', order: 10, render: ({ active, notificationTarget, selectedScheduleId,
+  assistantWorkConversationId, clearAssistantWorkConversation, navigate }) =>
+  <ChatPanel active={active} surface="work" navigationTarget={notificationTarget}
+    assistantWorkConversationId={assistantWorkConversationId}
+    clearAssistantWorkConversation={clearAssistantWorkConversation}
+    scheduleOrigin={Boolean(selectedScheduleId)} onReturnToSchedules={() => navigate('schedules')} /> });
+uiRegistry.register({ id: 'assistant', label: '助理', order: 20, render: ({ active, openAssistantWorkConversation }) =>
+  <ChatPanel active={active} surface="assistant" scheduleOrigin={false}
+    onOpenWorkConversation={openAssistantWorkConversation} onReturnToSchedules={() => undefined} /> });
 uiRegistry.register({ id: 'skills', label: '技能', order: 30, render: ({ active }) => <SkillPage active={active} /> });
 uiRegistry.register({ id: 'schedules', label: '定时任务', order: 40, render: ({ active, selectedScheduleId, openScheduledRun }) =>
   <ScheduleManagement active={active} requestedScheduleId={selectedScheduleId} onOpenRun={openScheduledRun} /> });

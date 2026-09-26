@@ -797,6 +797,48 @@ export class RuntimeManager {
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'read', id }) });
   }
 
+  getAssistantWorkspace(memoryLimit?: number): Promise<import('@yuanpu-agent/protocol').AssistantWorkspaceSnapshot> {
+    return this.request(memoryLimit === undefined ? RUNTIME_ROUTES.assistantWorkspace
+      : `${RUNTIME_ROUTES.assistantWorkspace}?memoryLimit=${encodeURIComponent(memoryLimit)}`);
+  }
+
+  correctAssistantMemory(id: string, expectedVersion: number, text: string,
+    revisionId: string): Promise<import('@yuanpu-agent/protocol').AssistantMemoryView> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'correct-memory', id, expectedVersion, text, revisionId }) });
+  }
+
+  forgetAssistantMemory(id: string): Promise<{ forgottenIds: string[] }> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'forget-memory', id }) });
+  }
+
+  importAssistantSavedMemory(savedId: string, surface: 'work' | 'assistant', text: string,
+    savedAt: string): Promise<import('@yuanpu-agent/protocol').AssistantMemoryView> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'import-saved', savedId, surface, text, savedAt }) });
+  }
+
+  setAssistantOrganizingPaused(until?: string): Promise<{ organizingPausedUntil?: string }> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'pause-organizing', until }) });
+  }
+
+  followUpAssistantDelegation(taskId: string, text: string): Promise<import('@yuanpu-agent/protocol').AssistantDelegationRecord> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'follow-up-delegation', id: taskId, text }) });
+  }
+
+  cancelAssistantDelegation(taskId: string): Promise<import('@yuanpu-agent/protocol').AssistantDelegationRecord> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel-delegation', id: taskId }) });
+  }
+
   searchPlugins(query: string): Promise<PluginSearchResult[]> {
     return this.request(`${RUNTIME_ROUTES.pluginSearch}?q=${encodeURIComponent(query)}`);
   }

@@ -1,7 +1,8 @@
 export const PROTOCOL_VERSION = 7;
 
 import type { NotificationNavigationTarget } from './host-events.js';
-import type { AssistantSuggestion, AssistantSuggestionInbox } from './assistant.js';
+import type { AssistantMemoryView, AssistantSuggestion, AssistantSuggestionInbox,
+  AssistantWorkspaceSnapshot, AssistantDelegationRecord } from './assistant.js';
 import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
 import type {
   ScheduleHistoryRecord,
@@ -46,6 +47,7 @@ export const RUNTIME_ROUTES = {
   assistantLink: '/v1/assistant/link',
   assistantMirrors: '/v1/assistant/mirrors',
   assistantSuggestions: '/v1/assistant/suggestions',
+  assistantWorkspace: '/v1/assistant/workspace',
   desktopTranscript: '/v1/desktop/transcript',
   workConversations: '/v1/work/conversations',
   workFolders: '/v1/work/folders',
@@ -527,6 +529,15 @@ export interface DesktopBridge {
     snoozedUntil?: string): Promise<AssistantSuggestion>;
   setAssistantSuggestionsPaused(until?: string): Promise<{ pausedUntil?: string }>;
   markAssistantSuggestionRead(id: string): Promise<AssistantSuggestion>;
+  getAssistantWorkspace(memoryLimit?: number): Promise<AssistantWorkspaceSnapshot>;
+  correctAssistantMemory(id: string, expectedVersion: number, text: string,
+    revisionId: string): Promise<AssistantMemoryView>;
+  forgetAssistantMemory(id: string): Promise<{ forgottenIds: string[] }>;
+  importAssistantSavedMemory(savedId: string, surface: 'work' | 'assistant', text: string,
+    savedAt: string): Promise<AssistantMemoryView>;
+  setAssistantOrganizingPaused(until?: string): Promise<{ organizingPausedUntil?: string }>;
+  followUpAssistantDelegation(taskId: string, text: string): Promise<AssistantDelegationRecord>;
+  cancelAssistantDelegation(taskId: string): Promise<AssistantDelegationRecord>;
   getAgentRun(runId: string): Promise<AgentRunRecord>;
   getPrivateImRunSummary(runId: string): Promise<PrivateImRunSummary>;
   cancelAgentRun(runId: string): Promise<AgentRunCancellationReceipt>;

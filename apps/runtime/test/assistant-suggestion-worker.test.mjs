@@ -103,9 +103,27 @@ test('real Assistant Worker routes one opted-in suggestion through paired host a
   assert.equal(sends, 1);
   assert.equal((await manager.suggestions()).items[0].readAt, undefined);
   assert.equal(metadata.assistantHost.proactiveDelivery(suggestionId).status, 'accepted');
+  const imported = await manager.importSavedMemory('old-bookmark-one', 'work',
+    'The user prefers a short report.', when);
+  assert.match(imported.context, /旧本地工作收藏（手动导入）/);
+  assert.equal((await manager.workspace()).memories.find((item) => item.id === imported.id)?.text,
+    'The user prefers a short report.');
+  const corrected = await manager.correctMemory(imported.id, imported.version,
+    'The user prefers a concise written report.', 'old-bookmark-correction');
+  await assert.rejects(manager.correctMemory(imported.id, imported.version,
+    'Stale correction', 'stale-correction'), /version conflict/);
+  assert.equal(corrected.version, imported.version + 1);
+  assert.deepEqual((await manager.forgetMemory(imported.id)).forgottenIds, [imported.id]);
+  assert.equal((await manager.workspace()).memories.some((item) => item.id === imported.id), false);
+  const pausedUntil = new Date(Date.now() + 86_400_000).toISOString();
+  assert.equal((await manager.pauseOrganizing(pausedUntil)).organizingPausedUntil, pausedUntil);
   await manager.stop();
   await manager.start();
   await new Promise((resolveWait) => setTimeout(resolveWait, 400));
   assert.equal(sends, 1, 'a restarted Worker does not replay an accepted host receipt');
+  assert.equal((await manager.workspace()).memories.some((item) => item.id === imported.id), false,
+    'forgotten memory is still absent after Worker restart');
+  assert.equal((await manager.workspace()).organizingPausedUntil, pausedUntil,
+    'organizing pause survives Worker restart');
   current = { status: 'deleted', sourceVersion: 'v1' };
 });

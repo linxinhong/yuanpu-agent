@@ -7,6 +7,7 @@ import { AssistantAutomationEngine, AssistantAutomationStore, AssistantMemoryRep
   AssistantUserUnderstanding,
   AssistantWorkOrganization,
   AssistantSuggestionStore,
+  AssistantWorkspaceService,
   redactReviewText,
   assertSafeDirectory, createAssistantExecutor, resolveAssistantHome, readAssistantHomeFile,
   type AssistantDelegationHost, type AssistantSession, type AssistantSourceHost } from '@yuanpu-agent/assistant';
@@ -41,6 +42,15 @@ type HostMessage =
       action: 'ignored' | 'snoozed' | 'accepted'; snoozedUntil?: string }
   | { kind: 'suggestion-pause'; correlationId: string; until?: string }
   | { kind: 'suggestion-read'; correlationId: string; id: string }
+  | { kind: 'workspace-snapshot'; correlationId: string; memoryLimit?: number }
+  | { kind: 'workspace-correct'; correlationId: string; id: string;
+      expectedVersion: number; text: string; revisionId: string }
+  | { kind: 'workspace-forget'; correlationId: string; id: string }
+  | { kind: 'workspace-import'; correlationId: string; savedId: string;
+      surface: 'work' | 'assistant'; text: string; savedAt: string }
+  | { kind: 'workspace-pause'; correlationId: string; until?: string }
+  | { kind: 'workspace-delegation'; correlationId: string; id: string;
+      action: 'follow-up' | 'cancel'; text?: string }
   | { kind: 'shutdown' };
 
 function send(message: Record<string, unknown>): void {
@@ -142,8 +152,11 @@ export async function runAssistantWorker(): Promise<void> {
   let understanding: AssistantUserUnderstanding | undefined;
   let organization: AssistantWorkOrganization | undefined;
   let suggestions: AssistantSuggestionStore | undefined;
+  let workspace: AssistantWorkspaceService | undefined;
   let deliveryRun: Promise<void> | undefined;
   let suggestionMutations = 0;
+  let workspaceMutations = 0;
+  let workspaceQueue: Promise<void> = Promise.resolve();
   let automationEngine: AssistantAutomationEngine | undefined;
   let automationRun: Promise<unknown> | undefined;
   const pendingDelegationEvents = new Map<string, AssistantDelegationRecord>();
@@ -242,7 +255,8 @@ export async function runAssistantWorker(): Promise<void> {
   delegationHost = {
     start: (brief) => delegationRequest('start', [brief]) as ReturnType<AssistantDelegationHost['start']>,
     status: (taskId) => delegationRequest('status', [taskId]) as ReturnType<AssistantDelegationHost['status']>,
-    followUp: (taskId, sessionId, text) => delegationRequest('followUp', [taskId, sessionId, text]) as
+    followUp: (taskId, sessionId, text, requestId) =>
+      delegationRequest('followUp', [taskId, sessionId, text, requestId]) as
       ReturnType<AssistantDelegationHost['followUp']>,
     cancel: (taskId, sessionId) => delegationRequest('cancel', [taskId, sessionId]) as
       ReturnType<AssistantDelegationHost['cancel']>,
@@ -318,7 +332,7 @@ export async function runAssistantWorker(): Promise<void> {
     delegationScanOffset = (delegationScanOffset + count) % names.length;
   };
   const pumpSources = (): void => {
-    if (closed || sourcePump) return;
+    if (closed || sourcePump || (workspaceMutations > 0 && workspace)) return;
     sourcePump = (async () => {
       memory ??= await AssistantMemoryRepository.open(paths.root);
       automation ??= new AssistantAutomationStore(memory.sources.database);
@@ -326,9 +340,12 @@ export async function runAssistantWorker(): Promise<void> {
       understanding ??= new AssistantUserUnderstanding(memory);
       organization ??= new AssistantWorkOrganization(memory, workReviews);
       suggestions ??= new AssistantSuggestionStore(memory);
+      workspace ??= new AssistantWorkspaceService(paths.root, memory, workReviews, delegationHost);
       await workReviews.reconcileSources();
-      await understanding.reconcile();
-      await organization.reconcile();
+      if (!workspace.isOrganizingPaused()) {
+        await understanding.reconcile();
+        await organization.reconcile();
+      }
       automationEngine ??= new AssistantAutomationEngine(automation,
         assistantAutomationHandler(memory, automation, {
           current: (taskId) => delegationHost.status(taskId),
@@ -388,6 +405,7 @@ export async function runAssistantWorker(): Promise<void> {
           },
         }));
       automationEngine.setForeground(active.size > 0);
+      automationEngine.setPaused(workspace.isOrganizingPaused());
       automation.scheduleActivePeriods();
       for (const record of pendingDelegationEvents.values()) await queueCurrentDelegation(record.taskId);
       pendingDelegationEvents.clear();
@@ -410,20 +428,23 @@ export async function runAssistantWorker(): Promise<void> {
           if (event.feedId === 'legacy-memory' && event.status === 'processed') {
             const audience = { kind: 'personal' as const, id: 'local-user' };
             const text = memory.sources.sourceText(event.change.sourceId, audience);
-            if (text?.trim()) await memory.importLegacyMemory({ id: 'legacy-memory', text,
+            if (text?.trim() && text.trim() !== '# YuanpuAgent memory\n\nAdd durable preferences and working context here.') {
+              await memory.importLegacyMemory({ id: 'legacy-memory', text,
               source: { sourceId: event.change.sourceId,
                 sourceVersion: event.change.sourceVersion, observedAt: event.change.occurredAt },
-              audience, context: '旧版助理记忆（只读导入，待核实）' });
+                audience, context: '旧版助理记忆（只读导入，待核实）' });
+            }
           }
         }
         if (!closed && !memory.sources.nextEvent()) await memory.processNext(sourceHost, true);
         if (!closed) await workReviews.reconcileSources();
-        if (!closed) await understanding.reconcile();
-        if (!closed) await organization.reconcile();
+        if (!closed && !workspace.isOrganizingPaused()) await understanding.reconcile();
+        if (!closed && !workspace.isOrganizingPaused()) await organization.reconcile();
         if (!closed) await suggestions.reconcileSources();
       } catch (error) { send({ kind: 'source-error', error: String(error) }); }
       if (closed) return;
       automation.reconcileProcessedSources(100);
+      automationEngine.setPaused(workspace.isOrganizingPaused());
       await reconcileDelegations();
       automationEngine.preemptInvalidated();
       const ready = automation.next();
@@ -591,6 +612,66 @@ export async function runAssistantWorker(): Promise<void> {
         })().then((value) => send({ kind: 'suggestion-result', correlationId: message.correlationId, value }),
           (error) => send({ kind: 'suggestion-result', correlationId: message.correlationId,
             error: String(error) })).finally(() => { if (mutating) suggestionMutations--; });
+        return;
+      }
+      if (message.kind === 'workspace-snapshot' || message.kind === 'workspace-correct'
+        || message.kind === 'workspace-forget' || message.kind === 'workspace-import'
+        || message.kind === 'workspace-pause' || message.kind === 'workspace-delegation') {
+        if (!workspace) pumpSources();
+        const mutating = message.kind !== 'workspace-snapshot';
+        if (mutating) { workspaceMutations++; suggestionMutations++; automationEngine?.setForeground(true); }
+        const operation = workspaceQueue.then(async () => {
+          await sourcePump;
+          if (!workspace || !memory) throw new Error('Assistant workspace is not ready.');
+          if (!mutating) return workspace.snapshot(message.memoryLimit);
+          automationEngine?.setForeground(true);
+          await automationRun?.catch(() => undefined);
+          await deliveryRun?.catch(() => undefined);
+          if (message.kind === 'workspace-correct') {
+            return workspace.correctMemory(message.id, message.expectedVersion,
+              message.text, message.revisionId);
+          }
+          if (message.kind === 'workspace-forget') {
+            const result = await workspace.forgetMemory(message.id);
+            await memory.reconcileDeletedSources();
+            await workReviews?.reconcileSources();
+            if (!workspace.isOrganizingPaused()) {
+              await understanding?.reconcile();
+              await organization?.reconcile();
+            }
+            await suggestions?.reconcileSources();
+            return result;
+          }
+          if (message.kind === 'workspace-pause') {
+            const result = workspace.pauseOrganizing(message.until);
+            automationEngine?.setPaused(workspace.isOrganizingPaused());
+            return result;
+          }
+          if (message.kind === 'workspace-import') {
+            return workspace.importLegacySaved(message.savedId, message.surface,
+              message.text, message.savedAt);
+          }
+          if (message.kind === 'workspace-delegation') {
+            const record = message.action === 'cancel'
+              ? await workspace.cancelDelegation(message.id)
+              : await workspace.followUpDelegation(message.id, message.text ?? '');
+            queueDelegation(record);
+            return record;
+          }
+          throw new Error('Invalid Assistant workspace request.');
+        });
+        workspaceQueue = operation.then(() => undefined, () => undefined);
+        void operation.then((value) => send({ kind: 'workspace-result',
+          correlationId: message.correlationId, value }),
+        (error) => send({ kind: 'workspace-result', correlationId: message.correlationId,
+          error: String(error) })).finally(() => {
+          if (mutating) {
+            workspaceMutations--;
+            suggestionMutations--;
+            automationEngine?.setForeground(active.size > 0);
+            pumpSources();
+          }
+        });
         return;
       }
       if (message.kind !== 'prompt') return;

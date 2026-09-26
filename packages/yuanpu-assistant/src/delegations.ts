@@ -8,7 +8,8 @@ import { Type, type Static } from 'typebox';
 export interface AssistantDelegationHost {
   start(brief: AssistantDelegationBrief): Promise<AssistantDelegationRecord>;
   status(taskId: string): Promise<AssistantDelegationRecord | undefined>;
-  followUp(taskId: string, assistantSessionId: string, text: string): Promise<AssistantDelegationRecord>;
+  followUp(taskId: string, assistantSessionId: string, text: string,
+    requestId: string): Promise<AssistantDelegationRecord>;
   cancel(taskId: string, assistantSessionId: string): Promise<AssistantDelegationRecord>;
 }
 
@@ -97,9 +98,10 @@ export class AssistantDelegationCoordinator {
     return record;
   }
 
-  async followUp(taskId: string, assistantSessionId: string, text: string): Promise<AssistantDelegationRecord> {
+  async followUp(taskId: string, assistantSessionId: string, text: string,
+    requestId: string): Promise<AssistantDelegationRecord> {
     const archive = await this.owned(taskId, assistantSessionId);
-    const record = await this.host.followUp(taskId, assistantSessionId, text);
+    const record = await this.host.followUp(taskId, assistantSessionId, text, requestId);
     await this.save({ ...archive, record, verification: undefined });
     return record;
   }
@@ -176,7 +178,8 @@ export function createAssistantDelegationTool(coordinator: AssistantDelegationCo
       if (input.action === 'cancel') return result(await coordinator.cancel(input.taskId, assistantSessionId));
       if (input.action === 'follow_up') {
         if (!input.text) throw new Error('Follow-up text is required.');
-        return result(await coordinator.followUp(input.taskId, assistantSessionId, input.text));
+        const requestId = createHash('sha256').update(`${assistantSessionId}:${toolCallId}`).digest('hex');
+        return result(await coordinator.followUp(input.taskId, assistantSessionId, input.text, requestId));
       }
       if (!input.checks) throw new Error('Evidence checks are required.');
       return result(await coordinator.linkEvidence(input.taskId, assistantSessionId, input.checks));
