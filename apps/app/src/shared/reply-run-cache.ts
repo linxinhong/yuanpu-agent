@@ -1,15 +1,9 @@
-import type { AgentRunRecord } from '@yuanpu-agent/protocol';
+import type { AgentRunRecord, DesktopReplyRunInfo } from '@yuanpu-agent/protocol';
 
-export type ReplyRunInfo = {
-  runId: string;
-  status: AgentRunRecord['status'];
-  createdAt: string;
-  updatedAt: string;
-  events: Array<{ id: number; title: string; detail?: string; at: string }>;
-  tools: Array<{ name: string; status: 'completed' | 'failed' }>;
-};
+export type ReplyRunInfo = DesktopReplyRunInfo;
 
 type CachedReplyRun = ReplyRunInfo & {
+  runId: string;
   surface: 'work' | 'assistant';
   text: string;
   transcriptId?: string;
@@ -39,7 +33,7 @@ export function cacheReplyRun(
   run: AgentRunRecord,
   events: ReplyRunInfo['events'],
 ): ReplyRunInfo {
-  const info: ReplyRunInfo = {
+  const info: ReplyRunInfo & { runId: string } = {
     runId: run.runId,
     status: run.status,
     createdAt: run.createdAt,

@@ -28,6 +28,11 @@
   --yp-redaction-active: #70d69a;
   --yp-user-bubble: #273d4a;
   --yp-user-text: #eaf4fa;
+  --yp-on-accent: #14261b;
+  --yp-assistant-gradient-start: #243e34;
+  --yp-assistant-gradient-middle: #242e2d;
+  --yp-assistant-gradient-end: #3b302b;
+  --yp-assistant-card-surface: rgb(27 34 36 / 84%);
 }
 :root[data-yuanpu-theme='yuanpu-dark'] .nav-item { color: var(--yp-text-muted); }
 :root[data-yuanpu-theme='yuanpu-dark'] .nav-item:hover { background: var(--yp-action-hover); }

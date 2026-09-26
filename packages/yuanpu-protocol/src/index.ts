@@ -12,6 +12,7 @@ import type {
 export * from './agent.js';
 export * from './assistant.js';
 export * from './host-events.js';
+export * from './hotkeys.js';
 export * from './scheduler.js';
 
 export const RUNTIME_ROUTES = {
@@ -45,9 +46,12 @@ export const RUNTIME_ROUTES = {
   assistantMirrors: '/v1/assistant/mirrors',
   desktopTranscript: '/v1/desktop/transcript',
   workConversations: '/v1/work/conversations',
+  workFiles: '/v1/work/files',
+  workFileContent: '/v1/work/files/content',
   modelSettings: '/v1/settings/models',
   modelSettingsDelete: '/v1/settings/models/delete',
   modelCatalog: '/v1/settings/models/catalog',
+  hotkeySettings: '/v1/settings/hotkeys',
 } as const;
 
 export type ModelApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
@@ -122,9 +126,34 @@ export interface WorkConversation {
   id: string;
   createdAt: string;
   updatedAt: string;
+  workingDirectory: string;
   current: boolean;
   archived: boolean;
 }
+
+export interface WorkFileEntry {
+  name: string;
+  /** Workspace-relative path with POSIX separators. Never an absolute path. */
+  path: string;
+  kind: 'file' | 'directory';
+  size?: number;
+  updatedAt?: string;
+}
+
+export interface WorkDirectoryListing {
+  /** Normalized workspace-relative directory ('' is the workspace root). */
+  path: string;
+  entries: WorkFileEntry[];
+  /** Present on recursive listings: entry growth hit the server-side cap. */
+  truncated?: boolean;
+}
+
+/** Read-only preview of one workspace file. Never carries the absolute workspace path. */
+export type WorkFilePreview =
+  | { kind: 'text'; path: string; content: string; truncated: boolean; size: number; updatedAt: string }
+  | { kind: 'image'; path: string; mediaType: string; base64: string; size: number; updatedAt: string }
+  | { kind: 'pdf'; path: string; base64: string; size: number; updatedAt: string }
+  | { kind: 'unsupported'; path: string; reason: string; size?: number };
 
 /** Public execution summary. Never includes reasoning, tool arguments or results. */
 export interface DesktopReplyRunInfo {
@@ -370,6 +399,8 @@ export interface PluginConfigValidation {
 
 export interface DesktopBridge {
   runtimeInfo(): Promise<RuntimeInfo>;
+  getHotkeySettings(): Promise<import('./hotkeys.js').HotkeySettings>;
+  saveHotkeySetting(input: import('./hotkeys.js').SaveHotkeyInput): Promise<import('./hotkeys.js').HotkeySettings>;
   getModelSettings(): Promise<ModelSettings>;
   getModelCatalog(provider?: string): Promise<ModelCatalog>;
   saveModelSettings(input: SaveModelSettingsInput): Promise<ModelSettings>;
@@ -381,8 +412,10 @@ export interface DesktopBridge {
     clientMessageId?: string): Promise<AgentRunReceipt>;
   getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
   listWorkConversations(): Promise<WorkConversation[]>;
-  createWorkConversation(): Promise<WorkConversation>;
+  createWorkConversation(workingDirectory?: string): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string): Promise<WorkConversation>;
+  listWorkFiles(conversationId: string, dirPath?: string, options?: { recursive?: boolean }): Promise<WorkDirectoryListing>;
+  readWorkFile(conversationId: string, filePath: string): Promise<WorkFilePreview>;
   getAssistantLink(): Promise<AssistantLinkStatus>;
   bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;
   unbindAssistantContact(): Promise<AssistantLinkStatus>;

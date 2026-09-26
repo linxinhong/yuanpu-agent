@@ -1569,7 +1569,7 @@ tasks:
         expect: "记录密钥不得进入笔记；注入内容不能更改行为指令；评估失败不阻断 Work，不在 Work 页插入建议"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-043", "TASK-051"]
+    dependencies: ["TASK-043", "TASK-051", "TASK-061"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["packages/evals/README.md、src/harness.ts 仅作离线评分/证据方法参考，不修改上游或依赖其生产 runner", "新增 yuanpu-assistant review 模块与技能；输入来自已验证来源仓库，专业核验接口可先返回待委派状态", "临时文件与 loopback 模型验证真实写入；费用上限/取消/新版本重试/误报完成是最近行为测试，再 pnpm check"]
@@ -1811,7 +1811,7 @@ tasks:
 
   - id: TASK-052
     title: "工作对话右侧栏文件预览"
-    status: in_progress
+    status: done
     goal: "用户在工作对话右侧「文件」栏浏览当前工作区目录树并预览文本/Markdown/图片/PDF；聊天消息中的文件路径可点击直达预览。"
     scope:
       in: ["protocol 文件清单/读取契约、路由与 DesktopBridge 方法", "runtime sidecar 工作区只读文件路由与路径安全（containment + realpath）", "desktop runtime-manager/main/preload 三处接线", "renderer 文件树、预览组件、聊天内路径点击（仅 work surface）", "pdfjs-dist 渲染 PDF"]
@@ -1838,12 +1838,15 @@ tasks:
       owner: "zcode-80975"
       attempts: 0
       claimed_at: "2026-09-26T15:16:49.231Z"
-      completed_at: null
+      completed_at: "2026-09-26T17:08:16.307Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/file-preview"
       branch: "task/task-052-file-preview"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated implementation", status: "passed", summary: "TASK-052 owner commits 9e3717a/206913b/4e82a70/ebc77a0 merged into main via 0b26465; c004683 adapts file routes to per-conversation working_directory, converts preview styles to rem and switches shiki to a single dual-theme tokenization. Pre-merge working-tree increments preserved in aadf6f8."}
+        - {type: "test", check: "unit, route and contract tests", status: "passed", summary: "apps/runtime: workspace-files 10 unit tests (containment, .., absolute paths, symlink escape/cycles, truncation cap) + loopback route test against the built sidecar (recursive listing, 400/404/401). apps/app 35 tests incl. unified-diff generator, version cache, shiki mapping, theme contract (rem) and composition boundary. Full pnpm check green on merged main (Node 24.15.0, pnpm 11.22.0)."}
+        - {type: "boundary", check: "UI browser smoke", status: "passed", summary: "Vite preview with a stubbed desktop bridge verified: pierre tree over the recursive listing with auto-expansion, review-style tab strip (tree tab + closable file tabs + reopen), toolbar (最终内容/替换效果 toggle, +N -N stats, locate/copy/refresh), shiki tokens carrying --shiki-light/--shiki-dark and the @pierre/diffs replacement view rendering added hunks; screenshots captured."}
+        - {type: "boundary", check: "limits", status: "unverified", summary: "Diff compares only the last-viewed version (no on-disk history); PDF viewport-adjacent rendering, per-tab scroll restoration and dsh-style lazy tree deferred; live Electron interaction and real WeCom flows not exercised in this pass."}
       follow_up_candidates: []
-
   - id: TASK-053
     title: "设置全局字体配置"
     status: done
@@ -1928,7 +1931,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-055
     title: "建立工作会话文件夹与标签管理契约"
-    status: pending
+    status: ready
     goal: "用户可用稳定 ID 管理任意层级文件夹、会话名称与图标、标签及可恢复归档；新会话在选定文件夹下拥有独立工作目录。"
     scope:
       in: ["Work 文件夹/会话/标签的 SQLite 元数据、兼容迁移与排序", "Runtime 管理路由、Yuanpu 协议 DTO、DesktopBridge/IPC 接线", "新建文件夹与会话、服务端重命名、图标、标签、归档/恢复、同级排序的服务行为"]
@@ -2120,6 +2123,41 @@ tasks:
     recommended_model: "gpt-6 sol"
     investigation_hints: ["从 .tasks/ui/conversation-management/prototype-v003.md 的新建、树移动、搜索、归档旅程出发；对比工作对话右侧栏文件预览（TASK-052）的验收结果", "复用 .tasks/verification/TASK-058/results.md 的真实后端/故障证据，只新增 UI、主题、键盘、重启组合场景；用 pnpm check 守仓库门禁"]
     escalation_conditions: ["若当前环境无法运行 Electron，记录浏览器 UI 与 Runtime 真实服务各自证据及未验证的桌面组合，不标整体完成", "发现迁移后 Pi 历史或文件丢失立即停止后续移动，退回安全搬迁工作会话及文件夹的磁盘目录（TASK-056）修复"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+
+  - id: TASK-061
+    title: "建立工作工具结果与产物的助理来源契约"
+    status: pending
+    goal: "助理能以稳定、授权且可撤回的来源引用读取已保存工作过程中的工具结果和产物，而不依赖文件路径猜测。"
+    scope:
+      in: ["Work 运行提交时登记有界工具结果和明确产物 ID、版本、受众、所属 run 与不透明引用", "宿主受权解析、暂不可用/删除事件和助理持久来源队列接入", "既有 Pi 会话的只读可恢复补扫与无法确定的历史产物标记"]
+      out: ["抓取工作目录内所有文件或任意外部服务数据", "修改 Pi 上游包、云端同步和新的渠道接入"]
+    constraints: ["以实现来源与可修订记忆存储（TASK-043）的单写入队列和 Host 来源接口为接缝；保留 Work/Pi 原件", "产物必须由工具或宿主显式登记，稳定 ID 不含绝对路径；读取时重新检查身份、所属 run、受众、路径包含和大小预算", "未登记产物不得从模型文本中的路径推断；已保存正文及工具结果和产物引用分别保留来源版本"]
+    forbidden: ["让 Assistant Worker 直接打开 Work 目录或 Pi JSONL", "把工具名称与成功状态当成工具结果或产物内容", "无法读取的旧产物伪装成已核实证据"]
+    acceptance:
+      - type: assertion
+        expect: "真实 Work 回合含工具结果及显式登记产物时，Host 提供稳定不透明引用，助理来源队列在重启/重复补扫后各接收一次；同一 run 的正文、工具结果、产物能分别定位原始证据"
+      - type: assertion
+        expect: "受众错误、未登记引用、根外与符号链接目标被拒绝；文件搬迁或来源暂不可用不误报删除，明确删除会撤回只由该证据支持的审阅和记忆"
+      - type: assertion
+        expect: "既有 Pi 会话仅只读补扫可确定的工具结果；无法建立稳定引用的旧产物标为 unavailable，不能臆造文件路径或宣称完整回填"
+      - type: assertion
+        expect: "临时 Home 的真实 Runtime/Pi 回合、结构化产物与拒绝路径测试通过；独立复核者确认授权边界和迁移/重启行为"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-043"]
+    risk_level: "L4"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["当前 yp_work_turn_sources 只存用户/助理文本，yp_agent_run_outputs.output_json 只保留 message 与工具名称/状态；从 Work 执行和 Pi JSONL 权威来源确定可稳定登记的最小结构", "复用 TASK-043 的 AssistantSourceHost 与 contentRef 读取，不给 Worker 本机路径；参照 TASK-052 文件预览的路径包含检查但不复用 renderer 授权", "先保存/读取/拒绝行为测试，再做 v10+ schema 升级、旧会话补扫和 native smoke"]
+    escalation_conditions: ["若工具 API 无法提供可证明身份的产物 ID，先定义显式登记契约并把对应工具保留为无产物，不扫描任意目录", "如迁移号与工作会话树分支冲突，先由单一集成 writer 协调"]
     result:
       owner: null
       attempts: 0

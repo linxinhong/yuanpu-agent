@@ -36,7 +36,16 @@ test('new Work sessions remain isolated and selected across restart while defaul
   assert.notEqual(first.id, second.id);
   assert.notEqual(database.workConversations.sessionId(workspace, first.id),
     database.workConversations.sessionId(workspace, second.id));
+  assert.equal(first.workingDirectory, workspace);
   assert.equal(database.workConversations.current(workspace).id, second.id);
+  const isolated = database.workConversations.create(workspace, join(root, 'isolated'));
+  assert.equal(isolated.workingDirectory, join(root, 'isolated'));
+  assert.equal(database.workConversations.hasWorkingDirectory(workspace, isolated.workingDirectory), true);
+  const isolatedBindingDb = new DatabaseSync(path);
+  const isolatedBinding = isolatedBindingDb.prepare('SELECT workspace_id FROM yp_conversation_bindings WHERE conversation_id = ?')
+    .get(isolated.id);
+  assert.equal(isolatedBinding.workspace_id, isolated.workingDirectory);
+  isolatedBindingDb.close();
   assert.equal(database.workConversations.sessionId(workspace, 'default'), 'legacy-pi-session');
   assert.equal(database.workConversations.list(workspace).find((item) => item.id === 'default').archived, true);
   assert.throws(() => database.workConversations.select(workspace, 'default'), /Unknown Work conversation/);
@@ -47,7 +56,7 @@ test('new Work sessions remain isolated and selected across restart while defaul
   const reopened = openYuanpuMetadataDatabase(path);
   assert.equal(reopened.workConversations.current(workspace).id, first.id);
   assert.deepEqual(reopened.workConversations.list(workspace).map((item) => item.id).sort(),
-    [first.id, second.id, 'default'].sort());
+    [first.id, second.id, isolated.id, 'default'].sort());
   assert.deepEqual(readYuanpuChatTranscript(workspace, 'legacy-pi-session', sessions).map((item) => item.text),
     ['old Work question', 'old Work answer']);
   reopened.close();
@@ -94,6 +103,13 @@ test('only saved complete turns produce stable source events on repeated scans',
   assert.deepEqual(JSON.parse(JSON.stringify(sourceChanges)), sourceChanges);
   assert.deepEqual(sourceChanges[0].audience, { kind: 'personal', id: 'local-user' });
   assert.equal(sourceChanges[0].sourceId, sources[0].sourceId);
+  const page = database.workConversations.sourcePage(0, 1);
+  assert.equal(page.length, 1);
+  assert.deepEqual(page[0].change, sourceChanges[0]);
+  assert.deepEqual(database.workConversations.sourcePage(page[0].eventId, 1), []);
+  fixture.exec('VACUUM');
+  assert.deepEqual(database.workConversations.sourcePage(0, 1), page,
+    'durable source cursor must survive SQLite row reorganization');
   assert.equal(database.workConversations.resolveContentRef(sourceChanges[0].contentRef).runId, 'run-one');
   fixture.close();
   database.close();
@@ -106,5 +122,16 @@ test('only saved complete turns produce stable source events on repeated scans',
   assert.equal(reopened.workConversations.recordSavedTurns(conversation.id, messages), 0);
   assert.deepEqual(reopened.workConversations.sources(conversation.id), sources);
   assert.deepEqual(reopened.workConversations.sourceChanges(conversation.id), sourceChanges);
+  assert.deepEqual(reopened.workConversations.sourcePage(0, 1), page);
+  reopened.database.prepare('DELETE FROM yp_work_turn_sources WHERE content_ref = ?')
+    .run(sourceChanges[0].contentRef);
+  reopened.database.prepare(`INSERT INTO yp_work_turn_sources(conversation_id,turn_id,run_id,
+    content_ref,source_version,committed_at,user_text,assistant_text)
+    VALUES (?,?,?,?,?,?,?,?)`).run(conversation.id, 'assistant-new', 'run-new', 'work-content:new',
+      'new-hash', '2026-09-27T00:00:00Z', 'new user', 'new answer');
+  const afterDelete = reopened.workConversations.sourcePage(page[0].eventId, 1);
+  assert.equal(afterDelete.length, 1);
+  assert.ok(afterDelete[0].eventId > page[0].eventId,
+    'deleting the maximum event must not recycle an acknowledged cursor');
   reopened.close();
 });

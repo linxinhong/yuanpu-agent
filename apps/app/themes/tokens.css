@@ -32,6 +32,11 @@
 
   --yp-user-bubble: #eaf4ff;
   --yp-user-text: #1e2c3d;
+  --yp-on-accent: #fff;
+  --yp-assistant-gradient-start: #c8ded2;
+  --yp-assistant-gradient-middle: #e7eee7;
+  --yp-assistant-gradient-end: #f7e6d3;
+  --yp-assistant-card-surface: rgb(255 255 255 / 76%);
 
   /* 全局字体偏好：三套主题共享默认值，运行时由 font-preference 以内联样式覆盖。 */
   --yp-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
