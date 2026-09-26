@@ -1728,7 +1728,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-048
     title: "实现助理主动回顾与建议投递"
-    status: in_progress
+    status: done
     goal: "助理根据工作评估与用户目标主动跟进，在合适的入口提供有依据的建议。"
     scope:
       in: ["skills/reflect-and-suggest/SKILL.md 消费助理内部每日/每周检查，形成独立回顾会话、漏触发合并和预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
@@ -1757,14 +1757,19 @@ tasks:
       owner: "root-assistant-suggestions-048-10414-10414"
       attempts: 0
       claimed_at: "2026-09-26T21:51:16.718Z"
-      completed_at: null
+      completed_at: "2026-09-26T22:41:53.083Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
       branch: "task/task-048-assistant-suggestions"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-048 integrated main", status: "passed", summary: "Implementation 858fda8 merged into main a383014 after TASK-059. See .tasks/memory/TASK-048.md."}
+        - {type: "test", check: "assistant suggestion behavior and real Worker process", status: "passed", summary: "Assistant tests passed in 1790462149257445000.log; real Worker with temporary Home and paired controllable WeCom transport sent once and did not replay after restart in 1790461984779382000.log. Source withdrawal, feedback, snooze, paid reflection recovery, token rejection and interrupted reads covered."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Branch runner 1790462201534629000.log and integrated main a383014 runner 1790462430022189000.log exited 0 with Node 24.15.0 and pnpm 11.22.0. First integrated run overlapped another build and failed while resolving a temporarily rebuilt protocol dist; clean rerun passed."}
+        - {type: "command", check: "native build and smoke", status: "passed", summary: "Node 24.15.0 and pnpm 11.22.0 on macOS arm64; build:native 1790462159700842000.log and smoke:native 1790462171700887000.log exited 0."}
+        - {type: "boundary", check: "real proactive WeCom and external model quality", status: "unverified", summary: "Earlier real paired WeCom private reply was confirmed by user; this card's proactive send used a controlled transport and no actual proactive message was sent to the test account. External model suggestion quality, Windows/Linux and cloud remain unverified for TASK-050 or later."}
       follow_up_candidates: []
   - id: TASK-049
     title: "接通助理记忆工作评估与任务界面"
-    status: pending
+    status: ready
     goal: "在已确认的助理双面板中展示真实理解、工作评估、委派与连接，并支持纠正和跟进。"
     scope:
       in: ["复用今日/任务/记忆/连接页面，接入真实助理服务", "来源导航、工作评估详情、编辑纠正/遗忘、暂停整理与同步状态", "委派详情/取消/继续追问与可信投递状态；旧本地保存记忆迁移入口"]
