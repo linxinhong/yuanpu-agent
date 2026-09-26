@@ -1769,7 +1769,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-049
     title: "接通助理记忆工作评估与任务界面"
-    status: in_progress
+    status: done
     goal: "在已确认的助理双面板中展示真实理解、工作评估、委派与连接，并支持纠正和跟进。"
     scope:
       in: ["复用今日/任务/记忆/连接页面，接入真实助理服务", "来源导航、工作评估详情、编辑纠正/遗忘、暂停整理与同步状态", "委派详情/取消/继续追问与可信投递状态；旧本地保存记忆迁移入口"]
@@ -1798,10 +1798,15 @@ tasks:
       owner: "root-assistant-ui-049-10414"
       attempts: 0
       claimed_at: "2026-09-26T22:42:09.226Z"
-      completed_at: null
+      completed_at: "2026-09-26T23:29:14.376Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
       branch: "task/task-049-assistant-ui"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-049 integrated implementation and memory", status: "passed", summary: "Implementation bc89d1f and task memory/screenshots 174c6de merged to main at 6b28010. See .tasks/memory/TASK-049.md and docs/frontend/evidence/task-049/results.md."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Node 24.15.0, pnpm 11.22.0, macOS arm64. Branch runner 1790465110862907000.log exited 0; integrated main 6b28010 runner 1790465271840429000.log exited 0."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "Task branch native build 1790465018088663000.log and smoke 1790465029136612000.log exited 0."}
+        - {type: "test", check: "Assistant workspace real Worker/HTTP and browser adapter", status: "passed", summary: "Focused delegation idempotency, worker and authenticated HTTP tests passed; browser adapter exercised suggestion read, source navigation, correction, forget, explicit legacy import, draft retention, pause, refresh, keyboard/narrow layout. Browser used fictitious data and is labeled in docs/frontend/evidence/task-049/results.md."}
+        - {type: "boundary", check: "real user and external channel journey", status: "unverified", summary: "User confirmed one ordinary WeCom private reply of 收到. Real desktop memory/work-review/delegation workflow, proactive real WeCom suggestion delivery, model quality, Windows/Linux and cloud remain for TASK-050; authoritative source revocation is TASK-062."}
       follow_up_candidates: []
   - id: TASK-050
     title: "独立助理完整业务验收"
@@ -2227,7 +2232,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-062
     title: "接通用户撤销助理来源与权威删除事件"
-    status: pending
+    status: ready
     goal: "用户撤销一条 Work 或助理来源后，宿主权威地记录删除事件，助理撤回只由该来源支持的认识，重启后不会重新导入。"
     scope:
       in: ["助理界面的来源撤销操作与版本化服务契约", "宿主单事务登记 tombstone、来源读权限变化及事件投递", "Work/助理已保存来源的幂等重启恢复和端到端验收"]
