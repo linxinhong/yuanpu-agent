@@ -215,14 +215,14 @@ export class WorkConversationStore {
     }));
   }
 
-  /** Row IDs are append-only acknowledgement positions, independent of turn timestamps. */
+  /** Explicit event IDs survive VACUUM and are independent of turn timestamps. */
   sourcePage(afterRowId: number, limit: number): Array<{ eventId: number; change: AssistantSourceChange }> {
     if (!Number.isSafeInteger(afterRowId) || afterRowId < 0
       || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
       throw new Error('Invalid Work source page boundary.');
     }
-    const rows = this.database.prepare(`SELECT rowid AS event_id,* FROM yp_work_turn_sources
-      WHERE rowid > ? ORDER BY rowid LIMIT ?`).all(afterRowId, limit) as unknown as
+    const rows = this.database.prepare(`SELECT * FROM yp_work_turn_sources
+      WHERE event_id > ? ORDER BY event_id LIMIT ?`).all(afterRowId, limit) as unknown as
       Array<SourceRow & { event_id: number }>;
     return rows.map((row) => {
       const source = this.sourceFromRow(row);
@@ -239,5 +239,12 @@ export class WorkConversationStore {
     const row = this.database.prepare('SELECT * FROM yp_work_turn_sources WHERE content_ref = ?')
       .get(contentRef) as unknown as SourceRow | undefined;
     return row ? this.sourceFromRow(row) : undefined;
+  }
+
+  sourceById(sourceId: string): WorkTurnSource | undefined {
+    if (!sourceId.startsWith('work-turn:')) return undefined;
+    const contentRef = `work-content:${createHash('sha256').update(sourceId).digest('hex')}`;
+    const source = this.resolveContentRef(contentRef);
+    return source?.sourceId === sourceId ? source : undefined;
   }
 }

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { isSea } from 'node:sea';
 import { resolveAssistantModelConfig, type AssistantModelSelection } from './assistant-model.js';
+import type { AssistantSourceHost } from '@yuanpu-agent/assistant';
 
 export interface AssistantTaskRecord {
   id: string;
@@ -17,6 +18,7 @@ interface WorkerCommand { executable: string; args: string[] }
 export interface AssistantWorkerManagerOptions {
   home: string;
   model: AssistantModelSelection;
+  sources?: AssistantSourceHost;
   command?: WorkerCommand;
   startupTimeoutMs?: number;
   shutdownGraceMs?: number;
@@ -89,6 +91,26 @@ export class AssistantWorkerManager {
             (error) => child.send?.({ kind: 'model', id: message.id,
               error: error instanceof Error ? error.message : String(error) }),
           );
+        } else if (message.kind === 'source-request' && typeof message.id === 'string') {
+          const request = message as { id: string; method?: unknown; args?: unknown };
+          const args = Array.isArray(request.args) ? request.args : [];
+          let result: Promise<unknown>;
+          const host = this.options.sources;
+          try {
+            if (!host) throw new Error('Assistant source host is unavailable.');
+            if (request.method === 'listChanges' && args.length === 3) {
+              result = host.listChanges(args[0], args[1], args[2]);
+            } else if (request.method === 'currentSource' && args.length === 2) {
+              result = host.currentSource(args[0], args[1]);
+            } else if (request.method === 'readSource' && args.length === 5) {
+              result = host.readSource(args[0], args[1], args[2], args[3], args[4]);
+            } else throw new Error('Invalid Assistant source request.');
+          } catch (error) { result = Promise.reject(error); }
+          void result.then((value) => child.send?.({ kind: 'source-result', id: request.id, value }),
+            (error) => child.send?.({ kind: 'source-result', id: request.id,
+              error: error instanceof Error ? error.message : String(error) }));
+        } else if (message.kind === 'source-error' && typeof message.error === 'string') {
+          this.report(new Error(`Assistant source scan: ${message.error}`));
         } else if ((message.kind === 'result' || message.kind === 'task') && typeof message.correlationId === 'string') {
           const pending = this.pending.get(message.correlationId);
           if (!pending) return;

@@ -98,6 +98,9 @@ test('only saved complete turns produce stable source events on repeated scans',
   assert.equal(page.length, 1);
   assert.deepEqual(page[0].change, sourceChanges[0]);
   assert.deepEqual(database.workConversations.sourcePage(page[0].eventId, 1), []);
+  fixture.exec('VACUUM');
+  assert.deepEqual(database.workConversations.sourcePage(0, 1), page,
+    'durable source cursor must survive SQLite row reorganization');
   assert.equal(database.workConversations.resolveContentRef(sourceChanges[0].contentRef).runId, 'run-one');
   fixture.close();
   database.close();
@@ -111,5 +114,15 @@ test('only saved complete turns produce stable source events on repeated scans',
   assert.deepEqual(reopened.workConversations.sources(conversation.id), sources);
   assert.deepEqual(reopened.workConversations.sourceChanges(conversation.id), sourceChanges);
   assert.deepEqual(reopened.workConversations.sourcePage(0, 1), page);
+  reopened.database.prepare('DELETE FROM yp_work_turn_sources WHERE content_ref = ?')
+    .run(sourceChanges[0].contentRef);
+  reopened.database.prepare(`INSERT INTO yp_work_turn_sources(conversation_id,turn_id,run_id,
+    content_ref,source_version,committed_at,user_text,assistant_text)
+    VALUES (?,?,?,?,?,?,?,?)`).run(conversation.id, 'assistant-new', 'run-new', 'work-content:new',
+      'new-hash', '2026-09-27T00:00:00Z', 'new user', 'new answer');
+  const afterDelete = reopened.workConversations.sourcePage(page[0].eventId, 1);
+  assert.equal(afterDelete.length, 1);
+  assert.ok(afterDelete[0].eventId > page[0].eventId,
+    'deleting the maximum event must not recycle an acknowledged cursor');
   reopened.close();
 });

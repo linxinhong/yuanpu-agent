@@ -368,6 +368,34 @@ export class AssistantHostStore {
     } }));
   }
 
+  sourcePage(afterEventId: number, limit: number): Array<{ eventId: number; change: AssistantSourceChange }> {
+    if (!Number.isSafeInteger(afterEventId) || afterEventId < 0
+      || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error('Invalid Assistant source page boundary.');
+    }
+    const rows = this.database.prepare(`SELECT s.event_id, s.source_id, s.source_version, s.content_ref,
+      s.audience_id, s.occurred_at, EXISTS(SELECT 1 FROM yp_assistant_sources p
+        WHERE p.source_id = s.source_id AND p.event_id < s.event_id) AS prior
+      FROM yp_assistant_sources s WHERE s.event_id > ? ORDER BY s.event_id LIMIT ?`)
+      .all(afterEventId, limit) as Array<{ event_id: number; source_id: string; source_version: string;
+        content_ref: string; audience_id: string; occurred_at: string; prior: number }>;
+    return rows.map((row) => ({ eventId: row.event_id, change: {
+      sourceId: row.source_id, sourceVersion: row.source_version, kind: row.prior ? 'updated' : 'created',
+      audience: { kind: 'personal', id: row.audience_id }, occurredAt: row.occurred_at,
+      contentRef: row.content_ref,
+    } }));
+  }
+
+  currentSourceChange(sourceId: string): AssistantSourceChange | undefined {
+    const row = this.database.prepare(`SELECT source_id,source_version,content_ref,audience_id,occurred_at
+      FROM yp_assistant_sources WHERE source_id = ? ORDER BY event_id DESC LIMIT 1`)
+      .get(sourceId) as { source_id: string; source_version: string; content_ref: string;
+        audience_id: string; occurred_at: string } | undefined;
+    return row ? { sourceId: row.source_id, sourceVersion: row.source_version,
+      kind: 'updated', audience: { kind: 'personal', id: row.audience_id },
+      occurredAt: row.occurred_at, contentRef: row.content_ref } : undefined;
+  }
+
   resolveContentRef(ref: string, principalId: string):
     { userText: string; assistantText: string } | { transcript: DesktopTranscriptMessage[] } | undefined {
     const row = this.database.prepare(`SELECT r.text, r.response_text, s.legacy_content_json

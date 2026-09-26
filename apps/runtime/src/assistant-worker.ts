@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { assertSafeDirectory, createAssistantExecutor, resolveAssistantHome, type AssistantSession } from '@yuanpu-agent/assistant';
+import { AssistantMemoryRepository, assertSafeDirectory, createAssistantExecutor, resolveAssistantHome,
+  type AssistantSession, type AssistantSourceHost } from '@yuanpu-agent/assistant';
 import { assistantModelHost, type AssistantModelConfig } from './assistant-model.js';
 import { bundledAssistantSkillFiles } from './assistant-skill-assets.generated.js';
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
@@ -19,6 +20,7 @@ interface TaskRecord {
 type HostMessage =
   | { kind: 'bootstrap'; home: string; parentPid: number }
   | { kind: 'model'; id: string; config?: AssistantModelConfig; error?: string }
+  | { kind: 'source-result'; id: string; value?: unknown; error?: string }
   | { kind: 'prompt'; id: string; correlationId: string; sessionId?: string; text: string; deadlineAt: number }
   | { kind: 'cancel'; id: string }
   | { kind: 'task'; id: string; correlationId: string }
@@ -90,8 +92,42 @@ export async function runAssistantWorker(): Promise<void> {
   let monitor: ParentProcessMonitor | undefined;
   let closed = false;
   const pendingModels = new Map<string, { resolve(value: AssistantModelConfig): void; reject(error: Error): void }>();
+  const pendingSources = new Map<string, { resolve(value: unknown): void; reject(error: Error): void;
+    timeout: NodeJS.Timeout }>();
   const active = new Map<string, { cancel(): Promise<void>; result: Promise<TaskRecord> }>();
   const tasks = join(paths.root, 'tasks');
+  let memory: AssistantMemoryRepository | undefined;
+  let sourceTimer: NodeJS.Timeout | undefined;
+  let sourcePump: Promise<void> | undefined;
+  const sourceRequest = (method: string, args: unknown[]): Promise<unknown> => new Promise((resolve, reject) => {
+    const id = randomUUID();
+    const timeout = setTimeout(() => {
+      pendingSources.delete(id);
+      reject(new Error('Assistant source host timed out.'));
+    }, 10_000);
+    pendingSources.set(id, { resolve, reject, timeout });
+    send({ kind: 'source-request', id, method, args });
+  });
+  const sourceHost: AssistantSourceHost = {
+    listChanges: (feedId, afterCursor, limit) => sourceRequest('listChanges',
+      [feedId, afterCursor, limit]) as ReturnType<AssistantSourceHost['listChanges']>,
+    currentSource: (sourceId, audience) => sourceRequest('currentSource',
+      [sourceId, audience]) as ReturnType<AssistantSourceHost['currentSource']>,
+    readSource: (contentRef, sourceId, sourceVersion, audience, maxCharacters) => sourceRequest(
+      'readSource', [contentRef, sourceId, sourceVersion, audience, maxCharacters]) as
+      ReturnType<AssistantSourceHost['readSource']>,
+  };
+  const pumpSources = (): void => {
+    if (closed || sourcePump) return;
+    sourcePump = (async () => {
+      memory ??= await AssistantMemoryRepository.open(paths.root);
+      for (const feed of ['work', 'assistant']) await memory.sources.sync(sourceHost, feed, 100);
+      for (let count = 0; count < 50; count++) {
+        if (closed || !await memory.processNext(sourceHost)) break;
+      }
+    })().catch((error) => send({ kind: 'source-error', error: String(error) }))
+      .finally(() => { sourcePump = undefined; });
+  };
   let executor;
   try { executor = await createAssistantExecutor({
     assistantHome: paths.root,
@@ -124,6 +160,14 @@ export async function runAssistantWorker(): Promise<void> {
       monitor?.dispose();
       for (const pending of pendingModels.values()) pending.reject(new Error('Assistant Worker is stopping.'));
       pendingModels.clear();
+      if (sourceTimer) clearInterval(sourceTimer);
+      for (const pending of pendingSources.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error('Assistant Worker is stopping.'));
+      }
+      pendingSources.clear();
+      await sourcePump?.catch(() => undefined);
+      memory?.close();
       for (const task of active.values()) await task.cancel().catch(() => undefined);
       await Promise.allSettled([...active.values()].map((task) => task.result));
       await executor.close();
@@ -144,6 +188,15 @@ export async function runAssistantWorker(): Promise<void> {
         pendingModels.delete(message.id);
         if (message.config) pending.resolve(message.config);
         else pending.reject(new Error(message.error ?? 'Assistant model unavailable.'));
+        return;
+      }
+      if (message.kind === 'source-result') {
+        const pending = pendingSources.get(message.id);
+        if (!pending) return;
+        pendingSources.delete(message.id);
+        clearTimeout(pending.timeout);
+        if (message.error) pending.reject(new Error(message.error));
+        else pending.resolve(message.value);
         return;
       }
       if (message.kind === 'shutdown') { void shutdown(); return; }
@@ -205,6 +258,9 @@ export async function runAssistantWorker(): Promise<void> {
       reply(result);
     });
     send({ kind: 'ready', pid: process.pid });
+    sourceTimer = setInterval(pumpSources, 5_000);
+    sourceTimer.unref();
+    pumpSources();
   } catch (error) {
     monitor?.dispose();
     await executor.close().catch(() => undefined);

@@ -62,6 +62,7 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_schedules',
     'yp_schema_migrations',
     'yp_work_conversations',
+    'yp_work_source_event_sequence',
     'yp_work_turn_sources',
   ]);
   assert.equal(
