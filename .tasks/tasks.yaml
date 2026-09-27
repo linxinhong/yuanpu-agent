@@ -2282,7 +2282,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-063
     title: "内置浏览器标签与 agent 共享会话"
-    status: in_progress
+    status: done
     goal: "用户在工作对话右侧栏打开受控浏览器标签（地址栏/导航/刷新/系统浏览器），agent 经审批链的浏览器能力驱动同一 webview 会话，人机操作同一页面。"
     scope:
       in: ["Electron webview guest 挂载与 will-attach-webview 安全加固", "main BrowserGuestManager（CDP attach/命令执行/崩溃自愈/空闲释放）", "127.0.0.1 回环控制服务（Bearer + 体积上限）", "builtin.host.browser 能力源（10 命令、R 级审批）", "viewer/browser UI（标签页、工具栏、状态）与 FileWorkspace 集成"]
@@ -2311,10 +2311,17 @@ tasks:
       owner: "zcode-63103"
       attempts: 0
       claimed_at: "2026-09-26T18:20:57.973Z"
-      completed_at: null
+      completed_at: "2026-09-27T03:18:53.807Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/browser-tab"
       branch: "task/task-063-browser-tab"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "browser integration on main", status: "passed", summary: "Browser tab integration 6bd508f and final acceptance/skill commit 95905d1 are on main through merge 15f5b53. Original task branch task/task-063-browser-tab is an ancestor of main."}
+        - {type: "verification", check: "real Electron browser and shared Work guest", status: "passed", summary: "At main 15f5b53, node apps/desktop/test/task-063-browser-app-probe.mjs passed with isolated Electron, Vite, temp Home and local model fixture: address navigation, slow loading and failure UI, back/forward/reload, external-browser handoff, drag width, tab retention and URL restore. Agent browser_navigate used the same guest; browser_screenshot produced PNG image content delivered to an image-capable model."}
+        - {type: "verification", check: "approval and guest security lifecycle", status: "passed", summary: "At main 15f5b53, Electron probe observed R2 browser_click and R3 browser_evaluate approval cards; denial left page counters unchanged. Effective guest preferences confirmed sandbox/contextIsolation on, Node integration off, web security on and no preload. HTTP popup was denied and handed to system browser; file popup stayed blocked. Page.crash rebuilt the guest and restored its URL; inactive Work conversation browser_snapshot returned a clear missing-browser error."}
+        - {type: "verification", check: "Pi built-in browser skill", status: "passed", summary: "Skill source at apps/app/src/skills/browser-control/SKILL.md loads through DefaultResourceLoader.additionalSkillPaths only for Work conversations; real Electron probe confirmed browser-control was advertised in the Pi system prompt. electron-builder extraResources maps that source directory to packaged resources/app/skills."}
+        - {type: "test", check: "browser contracts and loopback guard", status: "passed", summary: "pnpm check at main 15f5b53 passed the browser-state, builtin-browser capability/client and browser-control-service suites, including risk levels, command/error mapping, bearer token, Origin rejection and request size limit."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0, macOS arm64: pnpm check passed at main 15f5b53 after a prior parallel-run ECONNRESET in runtime-manager.test.mjs; focused runtime-manager suite passed 8/8 and full rerun passed (desktop 22/22, runtime 132/132)."}
+        - {type: "boundary", check: "packaged and cross-platform runtime", status: "unverified", summary: "No SEA/install package build or Windows/Linux run in this acceptance. Packaging copy rule is configured but packaged execution and signing remain unverified."}
       follow_up_candidates: []
   - id: TASK-064
     title: "修复旧 default 工作会话启动时的证据补扫"
