@@ -5,7 +5,7 @@ import { HtmlPreviewCard } from './html-preview-card.js';
 import { MermaidPreviewCard } from './mermaid-preview-card.js';
 import { MessageImage, type ImagePreview } from './message-image.js';
 import { completeHtmlPreview, completePreviewFence, wrappedHtmlPreview } from './preview-content.js';
-import { splitTextByFilePaths } from './work-file-links.js';
+import { splitTextByFilePaths, workspaceFileHref } from './work-file-links.js';
 
 type RenderOptions = {
   onOpenFilePath?: (path: string) => void;
@@ -14,9 +14,9 @@ type RenderOptions = {
   resolveWorkspaceImage?: (path: string) => Promise<string | null>;
 };
 
-function fileLink(path: string, options: RenderOptions, key: string): ReactNode {
+function fileLink(path: string, options: RenderOptions, key: string, label: ReactNode = path): ReactNode {
   return <button key={key} type="button" className="message-file-link"
-    title="在工作区中打开" onClick={() => options.onOpenFilePath?.(path)}>{path}</button>;
+    title="在工作区中打开" onClick={() => options.onOpenFilePath?.(path)}>{label}</button>;
 }
 
 function textWithFilePaths(text: string, options: RenderOptions, key: string): ReactNode {
@@ -46,7 +46,12 @@ function inline(tokens: Token[], options: RenderOptions): ReactNode[] {
         return <code key={key}>{code}</code>;
       }
       case 'br': return <br key={key} />;
-      case 'link': return <span key={key} className="message-link">{inline((token as Tokens.Link).tokens, options)}</span>;
+      case 'link': {
+        const link = token as Tokens.Link;
+        const path = options.onOpenFilePath ? workspaceFileHref(link.href) : null;
+        return path ? fileLink(path, options, key, inline(link.tokens, { ...options, onOpenFilePath: undefined }))
+          : <span key={key} className="message-link">{inline(link.tokens, options)}</span>;
+      }
       case 'image': {
         const image = token as Tokens.Image;
         return <MessageImage key={key} href={image.href} alt={image.text}

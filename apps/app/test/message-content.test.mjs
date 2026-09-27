@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { marked } from 'marked';
 import { register } from 'tsx/esm/api';
 
-register();
+register({ tsconfig: new URL('../tsconfig.json', import.meta.url).pathname });
 const { MessageContent } = await import('../src/shared/message-content.tsx');
 const { completeHtmlPreview, completePreviewFence, htmlPreviewDocument, safeImageSource, wrappedHtmlPreview } = await import('../src/shared/preview-content.ts');
 
@@ -19,6 +19,18 @@ test('assistant messages render Markdown structure without executing raw HTML', 
   assert.match(html, /<strong>.*一个机器人.*<\/strong>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>/);
+});
+
+test('local Markdown links and Mermaid source names open workspace previews', () => {
+  const html = renderToStaticMarkup(createElement(MessageContent, {
+    text: '[arch.png](arch.png) 和 `arch.mmd`，以及 [外部图片](https://example.com/arch.png)',
+    onOpenFilePath: () => {},
+  }));
+
+  assert.match(html, /<button[^>]*class="message-file-link"[^>]*><span>arch\.png<\/span><\/button>/);
+  assert.match(html, /<button[^>]*class="message-file-link"[^>]*>arch\.mmd<\/button>/);
+  assert.match(html, /<span class="message-link"><span>外部图片<\/span><\/span>/);
+  assert.doesNotMatch(html, /<button[^>]*>\s*<button/);
 });
 
 test('html-preview waits for the closing fence and leaves surrounding Markdown intact', () => {

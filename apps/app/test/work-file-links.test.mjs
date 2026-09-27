@@ -9,6 +9,7 @@ const {
   extractFilePathCandidates,
   normalizeWorkspacePath,
   splitTextByFilePaths,
+  workspaceFileHref,
 } = await import('../src/shared/work-file-links.ts');
 
 test('extractFilePathCandidates finds separated paths and previewable bare names', () => {
@@ -19,6 +20,16 @@ test('extractFilePathCandidates finds separated paths and previewable bare names
   assert.deepEqual(extractFilePathCandidates('输出写入 out/result.json'), ['out/result.json']);
   assert.deepEqual(extractFilePathCandidates('见 README.md 和 logo.png'), ['README.md', 'logo.png']);
   assert.deepEqual(extractFilePathCandidates('嵌套 a.b.c.ts 的引用'), ['a.b.c.ts']);
+  assert.deepEqual(extractFilePathCandidates('源码 arch.mmd 和图片 arch.png'), ['arch.mmd', 'arch.png']);
+});
+
+test('workspaceFileHref accepts local previewable links and rejects external or escaping links', () => {
+  assert.equal(workspaceFileHref('arch.png'), 'arch.png');
+  assert.equal(workspaceFileHref('./diagrams/arch.mmd'), 'diagrams/arch.mmd');
+  assert.equal(workspaceFileHref('https://example.com/arch.png'), null);
+  assert.equal(workspaceFileHref('../arch.png'), null);
+  assert.equal(workspaceFileHref('/tmp/arch.png'), null);
+  assert.equal(workspaceFileHref('arch.png?raw=1'), null);
 });
 
 test('extractFilePathCandidates ignores versions, URLs and unknown extensions', () => {

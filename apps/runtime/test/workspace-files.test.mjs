@@ -122,12 +122,20 @@ test('readWorkspaceFile reads text, markdown and empty files', async () => {
 test('readWorkspaceFile returns image and pdf base64 payloads', async () => {
   const root = await createWorkspace();
   try {
+    const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nS8AAAAASUVORK5CYII=', 'base64');
+    await writeFile(join(root, 'arch.png'), tinyPng);
     const image = await readWorkspaceFile(root, 'logo.png');
     assert.equal(image.kind, 'image');
     if (image.kind !== 'image') return;
     assert.equal(image.mediaType, 'image/png');
     const bytes = Buffer.from(image.base64, 'base64');
     assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+    assert.equal(isProbablyBinary(tinyPng), true);
+    const realImage = await readWorkspaceFile(root, 'arch.png');
+    assert.equal(realImage.kind, 'image');
+    if (realImage.kind === 'image') assert.deepEqual(Buffer.from(realImage.base64, 'base64'), tinyPng);
+    await writeFile(join(root, 'fake.png'), 'this is not a PNG');
+    assert.equal((await readWorkspaceFile(root, 'fake.png')).kind, 'unsupported');
     const pdf = await readWorkspaceFile(root, 'docs/report.pdf');
     assert.equal(pdf.kind, 'pdf');
     if (pdf.kind !== 'pdf') return;

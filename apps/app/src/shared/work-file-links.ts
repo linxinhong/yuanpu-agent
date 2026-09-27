@@ -1,7 +1,7 @@
 const LINK_TEXT_EXTENSIONS = new Set([
   'txt', 'log', 'md', 'markdown', 'json', 'csv', 'tsv', 'yaml', 'yml', 'xml', 'html', 'htm', 'css',
   'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'hpp',
-  'cs', 'php', 'sh', 'bash', 'zsh', 'toml', 'ini', 'cfg', 'conf', 'sql', 'env', 'lock',
+  'cs', 'php', 'sh', 'bash', 'zsh', 'toml', 'ini', 'cfg', 'conf', 'sql', 'env', 'lock', 'mmd',
 ]);
 
 const LINK_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico']);
@@ -42,6 +42,16 @@ export function normalizeWorkspacePath(input: string): string | null {
     segments.push(segment);
   }
   return segments.join('/');
+}
+
+/** A Markdown href can open only a local, previewable file inside the Work directory. */
+export function workspaceFileHref(href: string): string | null {
+  const trimmed = href.trim();
+  if (!trimmed || trimmed.startsWith('/') || trimmed.startsWith('~') || /[\\:#?\s\0]/.test(trimmed)
+    || trimmed.split('/').includes('..')) return null;
+  const normalized = normalizeWorkspacePath(trimmed);
+  if (!normalized || extractFilePathCandidates(normalized).includes(normalized) === false) return null;
+  return normalized;
 }
 
 /** Splits text so path candidates can render as separate interactive nodes. */

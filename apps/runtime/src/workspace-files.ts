@@ -82,6 +82,21 @@ export function isProbablyBinary(buffer: Buffer): boolean {
   return sample.length > 0 && controlChars / sample.length > 0.3;
 }
 
+function matchesImageFormat(buffer: Buffer, extension: string): boolean {
+  switch (extension) {
+    case '.png': return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case '.jpg':
+    case '.jpeg': return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    case '.gif': return buffer.subarray(0, 6).toString('ascii') === 'GIF87a'
+      || buffer.subarray(0, 6).toString('ascii') === 'GIF89a';
+    case '.webp': return buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+      && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+    case '.bmp': return buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d;
+    case '.svg': return !isProbablyBinary(buffer) && /<svg(?:\s|>)/i.test(buffer.subarray(0, 4096).toString('utf8'));
+    default: return false;
+  }
+}
+
 function fileExtension(path: string): string {
   const name = toPosixPath(path).split('/').pop() ?? '';
   const dot = name.lastIndexOf('.');
@@ -210,7 +225,7 @@ export async function readWorkspaceFile(root: string, filePath: string) {
         reason: `图片超过 ${Math.round(MAX_IMAGE_PREVIEW_BYTES / 1024 / 1024)} MB，暂不支持预览。`, size: stat.size };
     }
     const buffer = await fs.readFile(realFile);
-    if (isProbablyBinary(buffer)) {
+    if (!matchesImageFormat(buffer, fileExtension(relativePath))) {
       return { kind: 'unsupported' as const, path: relativePath, reason: '文件内容不是有效图片。', size: stat.size };
     }
     return { kind: 'image' as const, path: relativePath, mediaType: IMAGE_MEDIA_TYPES[fileExtension(relativePath)]!,
