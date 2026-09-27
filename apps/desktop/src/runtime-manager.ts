@@ -169,7 +169,7 @@ export class RuntimeManager {
     }
     const pythonRoot = resolve(this.appPath, '../python-capabilities');
     return {
-      YUANPU_BUILTIN_SKILLS_ROOT: resolve(__dirname, '../../app/src/skills'),
+      YUANPU_BUILTIN_SKILLS_ROOT: resolve(__dirname, '../../app/skills'),
       YUANPU_PYTHON_MCP_EXECUTABLE: process.platform === 'win32'
         ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
         : join(pythonRoot, '.venv', 'bin', 'python'),

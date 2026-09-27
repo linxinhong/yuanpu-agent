@@ -11,7 +11,7 @@ extraResources:
     to: app
     filter:
       - '**/*'
-  - from: ../app/src/skills
+  - from: ../app/skills
     to: app/skills
     filter:
       - '**/*'
