@@ -238,6 +238,15 @@ try {
   if (process.env.TASK_060_LEGACY === '1') {
     const legacy = SessionManager.create(workspace, join(home, 'agent', 'sessions'), { id: 'legacy-pi-session' });
     legacy.appendMessage({ role: 'user', content: 'Legacy fixture question', timestamp: Date.now() });
+    legacy.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'Legacy fixture answer' }],
+      api: 'anthropic-messages', provider: 'fixture', model: 'fixture-model', stopReason: 'stop',
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, timestamp: Date.now() });
+    const legacyFile = SessionManager.findById(workspace, 'legacy-pi-session', join(home, 'agent', 'sessions'));
+    assert.ok(legacyFile, 'Synthetic legacy JSONL was not discoverable');
+    const { readYuanpuChatTranscript } = await import('../../../packages/yuanpu-runtime/dist/index.mjs');
+    assert.match(JSON.stringify(readYuanpuChatTranscript(workspace, 'legacy-pi-session', join(home, 'agent', 'sessions'))),
+      /Legacy fixture question/, 'Synthetic legacy transcript was not readable before restart');
     const legacyDb = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'));
     legacyDb.prepare(`INSERT INTO yp_conversation_bindings
       (binding_id, entry_point, authority_id, subject_id, namespace, conversation_id,
@@ -263,7 +272,8 @@ try {
   await page.getByRole('button', { name: '发送消息' }).click();
   const resumedPrompt = await eventually(() => prompts.find((prompt) => JSON.stringify(prompt.messages).includes('Continue after restart')),
     'Restart continuation request missing');
-  await page.getByText(new RegExp('Saved reply [0-9]+\\.')).last().waitFor({ timeout: 20_000 });
+  await page.getByText(`Saved reply ${prompts.indexOf(resumedPrompt) + 1}.`).waitFor({ timeout: 20_000 });
+  await page.getByText('任务执行中').waitFor({ state: 'hidden' });
   assert.match(JSON.stringify(resumedPrompt.messages), /Remember stage needle/);
   assert.match(JSON.stringify(resumedPrompt.messages), /Continue after move/);
   await page.screenshot({ path: join(evidence, 'electron-restarted.png') });
