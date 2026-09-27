@@ -2347,7 +2347,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-065
     title: "让持续助理会话读取最新个人记忆"
-    status: ready
+    status: in_progress
     goal: "助理个人记忆被纠正、遗忘或来源撤销后，已打开的桌面与企业微信助理会话在下一次模型请求中只使用仍有效的最新版本。"
     scope:
       in: ["助理 Worker 单写入记忆库到 Pi 助理会话的动态个人记忆读取", "版本、受众、来源有效性和提示词预算边界", "同会话纠正/遗忘/重启与渠道共用路径回归"]
@@ -2369,11 +2369,11 @@ tasks:
     investigation_hints: ["TASK-050 红测 apps/runtime/test/task-050-memory-refresh-probe.mjs：真实 Worker/Pi 同 session 的第二回合未看到纠正记忆，runner 1790469379939975000.log", "packages/yuanpu-assistant/src/executor.ts 从 sessions/system-prompts 读取冻结提示词；packages/agent 的 systemPrompt 回调可按 provider request 求值；apps/runtime/src/assistant-worker.ts 持有单写入记忆库", "先让红测变绿，再加遗忘/来源撤销与受众负向回归，最后 Node24 pnpm check 和独立阶段复测"]
     escalation_conditions: ["若 Pi 请求级提示词无法保证当前版本与恢复语义，先固定最小差异并调整助理会话契约，不改 Pi 上游镜像", "若当前来源状态无法可靠核实，拒绝把该记忆用于新模型请求"]
     result:
-      owner: null
+      owner: "root-assistant-live-memory-10414-10414-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-27T00:38:56.876Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-065-assistant-live-memory"
       evidence: []
       follow_up_candidates: []
