@@ -2582,3 +2582,40 @@ tasks:
       branch: null
       evidence: []
       follow_up_candidates: []
+
+  - id: TASK-072
+    title: "工作会话审查标签：按轮次批量展示文件修改 diff"
+    status: in_progress
+    goal: "用户在工作会话右侧「审查」tab 选择上一轮或本会话，批量查看 agent 修改过的文件列表（+N -N）并展开 unified diff；机制迁移 ZCode 的「工具执行时读旧内容自产快照」，不依赖 git，不修改 Pi 上游。"
+    scope:
+      in: ["pi/index.ts 会话订阅捕获 edit/write 工具执行前后文件内容（提取可测纯函数），随 run 归档", "persistence 新迁移建 yp_work_file_changes 表与幂等读写（before/after ≤256KB 截断 + sha256）", "GET /v1/work/file-changes 路由：scope=last-run|conversation，同文件多编辑合并为首 before+末 after 重算 unified patch 与统计", "protocol 类型 + DesktopBridge + runtime-manager/main/preload 接线", "渲染端审查 tab：chat.tsx/file-tabs/review-panel（复用 @pierre/diffs PatchDiff 与 .file-diff-stats）/图标/CSS token 化，run 终态自动刷新", "store/捕获合并/路由 scope 的单测或 loopback 测试"]
+      out: ["bash/shell 间接文件修改与子代理（subagent）会话的捕获（记录为已知边界）", "git 依赖、分支对比、逐 hunk 暂存/撤销", "SSE 推送（沿用 run 终态轮询拉取）", "assistant surface 的审查入口", "修改 Pi 上游镜像；覆盖已有未提交改动"]
+    constraints: ["捕获只经 yuanpu 侧 session.subscribe 与自读文件；before=after 或工具报错不记录；捕获/读取失败不中断会话执行", "路径含界校验：工作目录外的目标不捕获；下发仅工作区相对路径，renderer 不持绝对路径", "大文件（>256KB）截断加标记，前端显示占位而非 patch", "样式只用已声明 --yp-* token（theme-contract 保持通过）；审查 tab 仅 work surface 出现", "完成需集成并在 main 验证；本轮不推送"]
+    forbidden: ["把 bash 或子代理修改冒充为已捕获范围", "在 renderer 或持久层暴露绝对路径", "新增第二套文件变更持久化或双写", "将构建成功当作 UI 验收通过"]
+    acceptance:
+      - type: assertion
+        expect: "work 会话发一轮含 edit/write 的消息后，「审查」tab 上一轮视图列出被改文件（相对路径 + 每文件 +N -N + 汇总），点开文件展示 unified diff（新增绿/删除红/上下文行），同轮多次编辑同文件只显示一条且统计为首末快照差"
+      - type: assertion
+        expect: "「本会话」视图聚合全部轮次；切换会话数据跟随；无 git 仓库的工作目录行为一致；重启应用后历史变更仍可查看"
+      - type: assertion
+        expect: "assistant surface 不出现审查 tab；右侧栏拖宽/最大化/tab 条对齐不回归；浅色/深色/MindLink 下 diff 配色正确"
+      - type: assertion
+        expect: "单测覆盖 store 幂等/游标/截断、捕获合并纯函数、路由 scope 行为；捕获失败不影响会话运行"
+      - type: command
+        run: "pnpm --filter @yuanpu-agent/app test"
+      - type: command
+        run: "pnpm check"
+    dependencies: []
+    risk_level: "L3"
+    recommended_model: "glm-5.3"
+    investigation_hints: ["捕获点 packages/yuanpu-runtime/src/pi/index.ts 的 session.subscribe（现约 462-496，闭包持 runId/conversationId/workspaceId/cwd）；edit 的 details.patch 仅作参考，主链为自读 before/after；write 后内容可用 args.content 兜底", "持久化范式 work-evidence-store.ts（BEGIN IMMEDIATE + INSERT OR IGNORE + sourcePage 游标）；迁移追加于 persistence/index.ts（当前 v15，TASK-054 已 done；若版本被占顺延并在 evidence 记录）", "diff 依赖：lockfile 已含 diff@8.0.4（coding-agent 在用），yuanpu-runtime 声明同版本即 store 命中零网络；备选内置 LCS unified-diff（参照渲染端 viewer/preview/text-diff.ts）", "渲染端现成件：viewer/preview/file-diff-view.tsx 的 PatchDiff、text-diff.ts countDiffChanges、.file-diff-stats 样式；tab 机制 viewer/files/file-tabs.tsx FileTab union + chat.tsx activityTab（约 L179）+ runContent 宿主 prop 模式；图标 app-icon.tsx 三处", "run 归属锚点：agent-runtime.ts registerWorkWriteArtifact 先例（约 88-100）；「上一轮」由路由 scope=last-run 在 runtime 解析最近 run，渲染端不传 runId", "测试范式：node:test + tsx register（apps/app/test/panel-resize.test.mjs）；apps/runtime/test/runtime.test.mjs 被主工作区增量占用时新建独立测试文件；浏览器验收可 addInitScript 注入 window.yuanpu 桩 + fixture patch 截图", "主工作区未提交增量与 chat.tsx、runtime.test.mjs 等有交集：worktree 基于提交态实施，集成按 stash→merge→pop 融合并保持对方增量未提交；complete 前先 stash 他人 WIP 防横扫"]
+    escalation_conditions: ["如迁移版本号与并行任务冲突且无法顺延解决，停止并报告，不重写既有迁移", "如 PatchDiff 在审查面板约束下不可用（性能/主题），记录证据并降级为自绘行式 diff 后完成其余验收", "如捕获必须修改 Pi 上游才能实现，停止报告，不修改镜像"]
+    result:
+      owner: "zcode-reviewtab-20260927-32374"
+      attempts: 0
+      claimed_at: "2026-09-27T05:10:55.699Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/review-tab"
+      branch: "task/task-072-review-tab"
+      evidence: []
+      follow_up_candidates: []
