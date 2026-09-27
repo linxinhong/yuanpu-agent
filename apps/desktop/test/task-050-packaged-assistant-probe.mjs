@@ -187,27 +187,57 @@ try {
   assert.equal(new Set(reviews.map((review) => review.workId)).size >= 2, true);
   const imported = await evaluate(first.page,
     "window.yuanpu.importAssistantSavedMemory('task050-controlled', 'work', 'The user prefers concise reports.', '2026-09-27T00:00:00.000Z')");
-  const corrected = await evaluate(first.page,
-    `window.yuanpu.correctAssistantMemory(${JSON.stringify(imported.id)}, ${imported.version},
-      'The user prefers a concise written report.', 'task050-correction')`);
-  assert.equal(corrected.version, imported.version + 1);
-  const source = (await evaluate(first.page, 'window.yuanpu.getAssistantWorkspace()'))
-    .sources.find((item) => item.sourceId.startsWith('work-turn:') && item.current);
-  assert.ok(source);
-  const revoked = await evaluate(first.page,
-    `window.yuanpu.revokeAssistantSource(${JSON.stringify(source.sourceId)},
-      ${JSON.stringify(source.sourceVersion)})`);
-  assert.equal(revoked.status, 'accepted');
-  await eventually(async () => (await evaluate(first.page, 'window.yuanpu.getAssistantWorkspace()'))
-    .sources.some((item) => item.sourceId === source.sourceId && item.availability === 'deleted'),
-  'Worker source withdrawal');
-  const suggestion = await eventually(async () => (await evaluate(first.page,
-    'window.yuanpu.listAssistantSuggestions()')).items.find((item) => item.feedback === 'none'),
-  'proactive suggestion', 40_000);
   await evaluate(first.page, "Array.from(document.querySelectorAll('.nav-item')).find((item) => item.textContent.includes('助理')).click()");
   await eventually(() => evaluate(first.page,
     "Boolean(document.querySelector('.assistant-home-tabs') && document.body.innerText.includes('先把重要的事'))"),
   'rendered assistant Home');
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('.assistant-home-tabs button')).find((item) => item.textContent === '记忆').click()");
+  await eventually(() => evaluate(first.page,
+    `Array.from(document.querySelectorAll('.assistant-card.assistant-item')).some((item) =>
+      item.textContent.includes(${JSON.stringify(imported.context)}))`), 'imported memory card');
+  await evaluate(first.page,
+    `Array.from(document.querySelectorAll('.assistant-card.assistant-item')).find((item) =>
+      item.textContent.includes(${JSON.stringify(imported.context)})).click()`);
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('.assistant-actions button')).find((item) => item.textContent === '纠正').click()");
+  await evaluate(first.page, "document.querySelector('#assistant-memory-correction').focus(); document.querySelector('#assistant-memory-correction').select()");
+  await first.page.command('Input.insertText', { text: 'The user prefers a concise written report.' });
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('.assistant-actions button')).find((item) => item.textContent === '保存纠正').click()");
+  const corrected = await eventually(async () => (await evaluate(first.page,
+    'window.yuanpu.getAssistantWorkspace()')).memories.find((item) => item.id === imported.id
+      && item.version === imported.version + 1 && item.text === 'The user prefers a concise written report.'),
+  'renderer memory correction');
+  assert.equal(corrected.version, imported.version + 1);
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('.assistant-section-title button')).find((item) => item.textContent === '返回全部').click()");
+  const source = (await evaluate(first.page, 'window.yuanpu.getAssistantWorkspace()'))
+    .sources.find((item) => item.sourceId.startsWith('work-turn:') && item.current);
+  assert.ok(source);
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('details.assistant-card summary')).find((item) => item.textContent.includes('助理来源')).click()");
+  await eventually(() => evaluate(first.page,
+    `Array.from(document.querySelectorAll('.assistant-source-list li')).some((item) =>
+      item.textContent.includes(${JSON.stringify(source.sourceId)}))`), 'Work source in memory page');
+  await evaluate(first.page,
+    `Array.from(document.querySelectorAll('.assistant-source-list li')).find((item) =>
+      item.textContent.includes(${JSON.stringify(source.sourceId)}))
+      .querySelector('button:last-of-type').click()`);
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('.assistant-source-detail button')).find((item) => item.textContent === '撤销助理读取').click()");
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('.assistant-source-detail button')).find((item) => item.textContent === '确认撤销').click()");
+  await eventually(async () => (await evaluate(first.page, 'window.yuanpu.getAssistantWorkspace()'))
+    .sources.some((item) => item.sourceId === source.sourceId && item.availability === 'deleted'),
+  'Worker source withdrawal');
+  await eventually(() => evaluate(first.page,
+    "document.body.innerText.includes('撤销已由宿主登记')"), 'renderer host revocation receipt');
+  const suggestion = await eventually(async () => (await evaluate(first.page,
+    'window.yuanpu.listAssistantSuggestions()')).items.find((item) => item.feedback === 'none'),
+  'proactive suggestion', 40_000);
+  await evaluate(first.page,
+    "Array.from(document.querySelectorAll('.assistant-home-tabs button')).find((item) => item.textContent === '今日').click()");
   await eventually(() => evaluate(first.page,
     `Array.from(document.querySelectorAll('.assistant-card.assistant-item')).some((item) =>
       item.textContent.includes(${JSON.stringify(suggestion.reason)}))`), 'rendered suggestion');
