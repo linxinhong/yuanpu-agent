@@ -1810,7 +1810,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-050
     title: "独立助理完整业务验收"
-    status: in_progress
+    status: done
     goal: "验证本地与企业微信个人助理从工作材料到评估、记忆、执行和主动跟进的完整闭环。"
     scope:
       in: ["真实桌面与企业微信单人私聊，记忆和工作评估生命周期", "子任务审批/取消/恢复、迁移和打包 App 生命周期", "本轮回归、未验证平台清单与最终交付证据"]
@@ -1830,7 +1830,7 @@ tasks:
         expect: "七项默认技能全部交付并从助理专属目录加载，主动回顾与前期六项技能形成真实闭环；沿用前阶段无界面/来源适配/单写入边界证据，不把本地通过宣称为云端已可部署"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-049", "TASK-062"]
+    dependencies: ["TASK-049", "TASK-062", "TASK-065"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["先复用两个阶段验证的有效证据，再执行新增 UI/主动建议组合；历史 .tasks/verification/TASK-021 可参考但不能替代新版本", "pnpm check、pnpm build:native && pnpm smoke:native、pnpm package:desktop；仅对可用平台运行，其他保持 unverified", "真人企微外发仅使用明确授权的测试目标；无需第二名真人、真实群聊或其他 IM 平台"]
@@ -1839,10 +1839,16 @@ tasks:
       owner: "root-task050-verifier-10414-10414"
       attempts: 0
       claimed_at: "2026-09-26T23:58:32.844Z"
-      completed_at: null
+      completed_at: "2026-09-27T01:27:53.542Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-e2e-verification"
       branch: "task/task-050-assistant-full-acceptance"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-050 independent acceptance integrated on main", status: "passed", summary: "Independent verifier evidence 3239d3c merged at b5cc698; final redacted handoff and backup verification at fdbdb33. See .tasks/verification/TASK-050/results.md and .tasks/memory/TASK-050.md."}
+        - {type: "command", check: "Node 24 pnpm check on integrated product tree", status: "passed", summary: "main f405cc0 runner 1790471730579155000.log exit 0. Subsequent changes through fdbdb33 affect only TASK-050 Markdown evidence and synthetic screenshot."}
+        - {type: "test", check: "Independent temporary-Home Worker/Pi memory lifecycle and packaged Desktop", status: "passed", summary: "Corrected same-session/restart/forget probe 1790471966800243000.log exit 0; native/desktop packaged build 1790472068914628000.log exit 0; packaged business UI probe 1790472132705158000.log exit 0. Synthetic model and temporary Home."}
+        - {type: "business", check: "Authorized real Desktop to paired WeCom private reply", status: "passed", summary: "Single exact inbound: request completed via wecom, reply green-paper-crane test phrase, delivery accepted without failure; user confirmed receiving the four-character reply. Desktop UI corrected v1 to v2; saved Work test-marker count 0; UI forget removed test document and revisions; App/Runtime/Worker exited."}
+        - {type: "recovery", check: "Real Home backup before test", status: "passed", summary: "Private local full backup taken after previous App stopped; assistant and work SQLite backup integrity checks both ok. Backup and identifiers remain outside repository."}
+        - {type: "limit", check: "Platform and long-term semantics", status: "unverified", summary: "External-model breadth/long-term memory quality, Windows/Linux packaging, cloud synchronization and other IM channels were outside this local acceptance."}
       follow_up_candidates: []
   - id: TASK-052
     title: "工作对话右侧栏文件预览"
@@ -2160,7 +2166,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-060
     title: "工作会话文件夹树完整业务验收"
-    status: in_progress
+    status: done
     goal: "独立确认真实桌面用户能把工作会话按文件夹组织、物理移动、安全找回、搜索和归档，而不丢失 Pi 历史或工作文件。"
     scope:
       in: ["在可用 Electron/Runtime 环境走真实 UI 与服务端持久化全旅程", "验证重启、故障恢复、旧 default、根外目录拒绝与三主题树操作", "记录截图、revision、真实/fixture 标识、失败与未验证项"]
@@ -2185,10 +2191,15 @@ tasks:
       owner: "conversation-verifier-sol-10677"
       attempts: 0
       claimed_at: "2026-09-26T22:47:14.290Z"
-      completed_at: null
+      completed_at: "2026-09-27T00:37:00.992Z"
       worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
       branch: "task/task-060-work-tree-acceptance"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "independent acceptance integrated", status: "passed", summary: "TASK-060 verifier branch task/task-060-work-tree-acceptance final b4ec590 merged into main c74ef49. Verifier did not implement TASK-059 or TASK-064 product code."}
+        - {type: "test", check: "real Electron business journey", status: "passed", summary: "Isolated Electron+preload+Runtime+Vite with temporary YUANPU_HOME and local deterministic model: 3-level folders, 2 conversations, rename/icon/tag, physical move verified against disk/SQLite/Pi JSONL, file preview and continuation, search, archive/restore, restart and themes. .tasks/verification/TASK-060/results.md and synthetic screenshots."}
+        - {type: "test", check: "legacy default and recovery", status: "passed", summary: "Initial legacy startup blocker reproduced; TASK-064 repaired it and independent verifier reran correct persisted legacy Pi fixture in real Electron. Old Q/A displays read-only. Symlink-outside move denied with original files preserved. Back-end fault/recovery scenarios retained from TASK-058."}
+        - {type: "command", check: "pnpm check integrated main", status: "passed", summary: "Full build, TypeScript and all tests passed on main c74ef49 after both repair and verifier merges; apps/runtime 128/128. Verifier also passed branch pnpm check on corrected repair revision."}
+        - {type: "limitation", check: "extended coverage", status: "unverified", summary: "Full arrow-key and drag-sort journey, high-volume trees, Windows/Linux and packaged SEA were not run in this desktop acceptance; report A60-08 records these limits."}
       follow_up_candidates: []
   - id: TASK-061
     title: "建立工作工具结果与产物的助理来源契约"
@@ -2307,7 +2318,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-064
     title: "修复旧 default 工作会话启动时的证据补扫"
-    status: in_progress
+    status: done
     goal: "已有旧 default Pi 会话和绑定时，Runtime 能启动、只读显示历史，并安全补扫工作证据，不要求旧会话伪装成新会话。"
     scope:
       in: ["修复 WorkEvidenceStore 对旧 default 的绑定核验与启动扫描兼容", "增加临时 Home 的 Runtime 启动、旧 Pi JSONL 历史和证据补扫回归测试"]
@@ -2330,8 +2341,49 @@ tasks:
       owner: "legacy-work-repair-sol-10677"
       attempts: 0
       claimed_at: "2026-09-26T23:43:47.457Z"
-      completed_at: null
+      completed_at: "2026-09-27T00:36:23.884Z"
       worktree: "/Users/linxinhong/.codex/worktrees/legacy-work-repair/yuanpu-agent"
       branch: "task/task-064-legacy-work-evidence"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "legacy Work repair integrated", status: "passed", summary: "TASK-064 implementation and regression branch task/task-064-legacy-work-evidence (89d2e64, 2f89873) merged into main at e368b7e."}
+        - {type: "test", check: "legacy binding and startup regression", status: "passed", summary: "Temporary Home tests verify exact desktop/local-user/default Pi binding, real JSONL history, Runtime startup twice, idempotent evidence backfill and rejection of wrong identity/session or absent binding; branch focused and full check passed."}
+        - {type: "test", check: "independent Electron legacy retest", status: "passed", summary: "TASK-060 independent verifier reran real isolated Electron+preload+Runtime with correctly persisted old default Pi JSONL. Legacy messages display and composer is read-only; script exited 0. Evidence .tasks/verification/TASK-060/results.md and electron-legacy-readonly.png."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Full build, TypeScript and test gate passed on main c74ef49 after repair and verification merges; apps/runtime 128/128."}
+        - {type: "limitation", check: "platform scope", status: "unverified", summary: "Electron retest executed on macOS only; Windows/Linux packaged SEA not exercised."}
+      follow_up_candidates: []
+  - id: TASK-065
+    title: "让持续助理会话读取最新个人记忆"
+    status: done
+    goal: "助理个人记忆被纠正、遗忘或来源撤销后，已打开的桌面与企业微信助理会话在下一次模型请求中只使用仍有效的最新版本。"
+    scope:
+      in: ["助理 Worker 单写入记忆库到 Pi 助理会话的动态个人记忆读取", "版本、受众、来源有效性和提示词预算边界", "同会话纠正/遗忘/重启与渠道共用路径回归"]
+      out: ["把原始 Work 对话或文件自动注入助理或新 Work", "外部模型语义质量、企微真实账号验收和云端同步"]
+    constraints: ["保持独立 Assistant Home、冻结的 SOUL/技能身份与 Work 会话隔离；只读取 personal/local-user 的已提交有效记忆", "下一次模型请求的当前记忆段读取最新版本，不从旧 session prompt 快照复活已纠正、遗忘或撤销的记忆；遗忘不物理改写既有对话历史", "记忆内容是资料而非指令，限制单回合字数/条数；无法确认有效性时拒绝注入"]
+    forbidden: ["仅在新建会话读取记忆", "直接拼入不受控的工作材料或跨受众记忆", "把已撤销来源的旧事实继续写入后续模型请求"]
+    acceptance:
+      - type: assertion
+        expect: "临时 Home 的真实 Worker/Pi 同一助理 session：导入纯测试记忆、纠正为第二版后，下一次模型请求只含第二版；重启后仍如此。"
+      - type: assertion
+        expect: "遗忘与来源撤销后，当前记忆段不再含旧文本，新会话不能从记忆取回；其他仍有效的个人记忆保留，工作/其他受众内容不注入，容量超限时有确定性的有界选择。既有聊天历史若含旧事实须单独标注边界。"
+      - type: assertion
+        expect: "桌面和企业微信入口复用该会话执行路径；离线/重复事件与重试不导致旧记忆复活；独立复核者核对读取时序与受众隔离。"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-049", "TASK-062"]
+    risk_level: "L3"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["TASK-050 红测 apps/runtime/test/task-050-memory-refresh-probe.mjs：真实 Worker/Pi 同 session 的第二回合未看到纠正记忆，runner 1790469379939975000.log", "packages/yuanpu-assistant/src/executor.ts 从 sessions/system-prompts 读取冻结提示词；packages/agent 的 systemPrompt 回调可按 provider request 求值；apps/runtime/src/assistant-worker.ts 持有单写入记忆库", "先让红测变绿，再加遗忘/来源撤销与受众负向回归，最后 Node24 pnpm check 和独立阶段复测"]
+    escalation_conditions: ["若 Pi 请求级提示词无法保证当前版本与恢复语义，先固定最小差异并调整助理会话契约，不改 Pi 上游镜像", "若当前来源状态无法可靠核实，拒绝把该记忆用于新模型请求"]
+    result:
+      owner: "root-assistant-live-memory-10414-10414-10414"
+      attempts: 0
+      claimed_at: "2026-09-27T00:38:56.876Z"
+      completed_at: "2026-09-27T01:16:56.641Z"
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-065-assistant-live-memory"
+      evidence:
+        - {type: "commit", check: "TASK-065 implementation integrated on main", status: "passed", summary: "Implementation 53786b6 and handoff 6683d69 merged at c48373c. See .tasks/memory/TASK-065.md."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Node 24.15.0, pnpm 11.22.0; branch runner 1790471575716397000.log exit 0; main c48373c runner 1790471730579155000.log exit 0."}
+        - {type: "test", check: "Request-level correction, forget, source and recovery", status: "passed", summary: "Assistant focused 1790471566742683000.log; real Worker/Pi memory probe 1790471132379238000.log; Worker refresh/backlog/pagination 1790471355685923000.log. All exited 0."}
+        - {type: "review", check: "Independent read-only TASK-065 review", status: "passed", summary: "Reviewer /root/task043_readonly_review inspected 53786b6 and found no remaining card blocker. Limits: prior conversation history, unindexed legacy file review, semantic paraphrase."}
       follow_up_candidates: []

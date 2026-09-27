@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { AssistantAutomationEngine, AssistantAutomationStore, AssistantMemoryRepository,
   AssistantWorkReviewStore,
@@ -148,6 +148,14 @@ export async function runAssistantWorker(): Promise<void> {
   const active = new Map<string, { cancel(): Promise<void>; result: Promise<TaskRecord> }>();
   const tasks = join(paths.root, 'tasks');
   let memory: AssistantMemoryRepository | undefined;
+  let memoryOpening: Promise<AssistantMemoryRepository> | undefined;
+  const ensureMemory = (): Promise<AssistantMemoryRepository> => {
+    memoryOpening ??= AssistantMemoryRepository.open(paths.root).then((opened) => {
+      memory = opened;
+      return opened;
+    });
+    return memoryOpening;
+  };
   let automation: AssistantAutomationStore | undefined;
   let workReviews: AssistantWorkReviewStore | undefined;
   let understanding: AssistantUserUnderstanding | undefined;
@@ -164,6 +172,9 @@ export async function runAssistantWorker(): Promise<void> {
   let delegationScanOffset = 0;
   let sourceTimer: NodeJS.Timeout | undefined;
   let sourcePump: Promise<void> | undefined;
+  let sourceSyncHealthy = false;
+  let sourceRefreshVersion = 0;
+  let sourceScanVersion = 0;
   const unsupportedSourceFeeds = new Set<string>();
   const sourceRequest = (method: string, args: unknown[]): Promise<unknown> => new Promise((resolve, reject) => {
     const id = randomUUID();
@@ -334,8 +345,12 @@ export async function runAssistantWorker(): Promise<void> {
   };
   const pumpSources = (): void => {
     if (closed || sourcePump || (workspaceMutations > 0 && workspace)) return;
+    sourceSyncHealthy = false;
+    sourceScanVersion += 1;
+    const scanningVersion = sourceRefreshVersion;
+    let needsAnotherScan = false;
     sourcePump = (async () => {
-      memory ??= await AssistantMemoryRepository.open(paths.root);
+      memory ??= await ensureMemory();
       automation ??= new AssistantAutomationStore(memory.sources.database);
       workReviews ??= new AssistantWorkReviewStore(memory.sources.database, memory.sources, paths.root);
       understanding ??= new AssistantUserUnderstanding(memory);
@@ -415,7 +430,10 @@ export async function runAssistantWorker(): Promise<void> {
         for (const feed of ['work', 'work-evidence', 'assistant', 'work-deletions',
           'assistant-deletions', 'legacy-memory']) {
           if (unsupportedSourceFeeds.has(feed)) continue;
-          try { await memory.sources.sync(sourceHost, feed, 100); }
+          try {
+            const page = await memory.sources.syncPage(sourceHost, feed, 100);
+            if (page.fullPage) needsAnotherScan = true;
+          }
           catch (error) {
             if (feed === 'work-evidence' && String(error).includes('Invalid source feed request')) {
               unsupportedSourceFeeds.add(feed);
@@ -442,6 +460,8 @@ export async function runAssistantWorker(): Promise<void> {
         if (!closed && !workspace.isOrganizingPaused()) await understanding.reconcile();
         if (!closed && !workspace.isOrganizingPaused()) await organization.reconcile();
         if (!closed) await suggestions.reconcileSources();
+        needsAnotherScan ||= Boolean(memory.sources.nextEvent());
+        if (scanningVersion === sourceRefreshVersion && !needsAnotherScan) sourceSyncHealthy = true;
       } catch (error) { send({ kind: 'source-error', error: String(error) }); }
       if (closed) return;
       automation.reconcileProcessedSources(100);
@@ -456,9 +476,14 @@ export async function runAssistantWorker(): Promise<void> {
       }
       deliverPendingSuggestions();
     })().catch((error) => send({ kind: 'source-error', error: String(error) }))
-      .finally(() => { sourcePump = undefined; });
+      .finally(() => {
+        sourcePump = undefined;
+        if (!closed && (scanningVersion !== sourceRefreshVersion || needsAnotherScan)) {
+          queueMicrotask(pumpSources);
+        }
+      });
   };
-  let executor: Awaited<ReturnType<typeof createAssistantExecutor>>;
+  let executor!: Awaited<ReturnType<typeof createAssistantExecutor>>;
   try { executor = await createAssistantExecutor({
     assistantHome: paths.root,
     bundledSkillFiles: bundledAssistantSkillFiles.map((file) => ({
@@ -472,7 +497,37 @@ export async function runAssistantWorker(): Promise<void> {
     })),
     delegations: delegationHost,
     workCandidates: () => organization?.verificationCandidates() ?? [],
-  }); } catch (error) {
+    currentPersonalMemory: async () => {
+      const current = await ensureMemory();
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const pendingWorkspace = workspaceQueue;
+        await pendingWorkspace;
+        const settledWorkspace = workspaceQueue;
+        const refreshVersion = sourceRefreshVersion;
+        const scanVersion = sourceScanVersion;
+        const includeSourceBacked = sourceSyncHealthy && !sourcePump;
+        const unindexed = await current.unindexedLegacyCoreFiles();
+        const notice = unindexed.length
+          ? `Legacy Assistant core files ${unindexed.map((path) => basename(path)).join(', ')} contain unindexed content. `
+            + 'Their contents are preserved but excluded from this answer until the user reviews and records them as verified personal memory.'
+          : '';
+        const facts = await current.personalPromptContext(7_700, includeSourceBacked);
+        if (pendingWorkspace === settledWorkspace && settledWorkspace === workspaceQueue
+          && refreshVersion === sourceRefreshVersion && scanVersion === sourceScanVersion
+          && includeSourceBacked === (sourceSyncHealthy && !sourcePump)) {
+          return [notice, facts].filter(Boolean).join('\n');
+        }
+      }
+      return ''; // Continuous mutation: omit all retrieved facts for this provider request.
+    },
+  });
+    await ensureMemory();
+    const unindexed = await memory!.unindexedLegacyCoreFiles();
+    if (unindexed.length) send({ kind: 'source-error',
+      error: `Unindexed legacy Assistant core files need review: ${unindexed.map((path) => basename(path)).join(', ')}` });
+  } catch (error) {
+    await executor?.close();
+    memory?.close();
     lock.exec('ROLLBACK');
     lock.close();
     throw error;
@@ -578,7 +633,12 @@ export async function runAssistantWorker(): Promise<void> {
         return;
       }
       if (message.kind === 'shutdown') { void shutdown(); return; }
-      if (message.kind === 'refresh-sources') { pumpSources(); return; }
+      if (message.kind === 'refresh-sources') {
+        sourceRefreshVersion += 1;
+        sourceSyncHealthy = false;
+        pumpSources();
+        return;
+      }
       if (message.kind === 'cancel') {
         void active.get(message.id)?.cancel();
         return;
