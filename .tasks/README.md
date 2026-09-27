@@ -47,6 +47,10 @@ YuanpuAgent 面向桌面工作场景：用户在 Electron 中与 Pi 对话，通
 
 当前源码取证基线为 main fbe7c05 及未提交增量：已有 subagents、内置工具、助理页面和协议修改，实施前必须保留并复核。检索：ZG 查询 assistant/work/runtime/subagents 与 packages/evals，命中 runtime/index、agent-runtime-contracts、evals README；再精确核对 subagents/runner、assistant-home、package.json。未创建或重建索引。卡片本身不是实现证据；既有历史 done 状态不改写，不自动领取、提交或推送。
 
+## 助理下一阶段验收（2026-09-27）
+
+用户提供 `ssh jump` 作为 Linux 云端验证环境。只读检查已确认目标机可连接，但当前无 Yuanpu/Node 部署；网络来源同步、云端权威宿主和真实迁移仍未实现。验收分为跨设备来源协议、云端唯一助理与迁移、Linux/Windows 助理打包旅程、长期语义基准和独立纵向验收；场景、环境事实及通过标准见[下一阶段验收计划](verification/assistant-next-stage-acceptance.md)，六张新卡的状态见[注册表](tasks.yaml)。其他 IM 平台仍暂缓。过去的跨平台基础 App 探针与本机助理/企微验收均不等于这些新门槛通过。
+
 ## 工作对话文件预览（2026-09-26）
 
 用户确认在工作对话右侧栏增加文件预览：入口为文件树浏览 + 聊天内路径可点击；第一版支持文本/Markdown/图片/PDF，Office 与音视频不做。通道整体只读，渲染层只持会话 ID 与工作区相对路径，路径校验在 sidecar 完成。开发卡见[工作对话右侧栏文件预览（TASK-052）](tasks.yaml)；状态与验收以注册表为准。参考实现为 ZCode 的 PreviewPane/code-viewer side pane（限流与二进制探测口径借鉴）。
