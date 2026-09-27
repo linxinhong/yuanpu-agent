@@ -30,6 +30,7 @@ export const RUNTIME_ROUTES = {
   schedules: '/v1/schedules',
   channelScheduleTargets: '/v1/channels/schedule-targets',
   wecomConnections: '/v1/connections/wecom',
+  tailscaleConnection: '/v1/connections/tailscale',
   localSkills: '/v1/skills/local',
   plugins: '/v1/plugins',
   pluginSearch: '/v1/plugins/search',
@@ -68,6 +69,15 @@ export const RUNTIME_ROUTES = {
 } as const;
 
 export type ModelApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
+
+export interface TailscaleConnectionSettings {
+  hasAuthKey: boolean;
+}
+
+export interface SaveTailscaleConnectionInput {
+  authKey?: string;
+  removeAuthKey?: boolean;
+}
 
 export interface ModelSettings {
   provider: string;
@@ -651,6 +661,8 @@ export interface DesktopBridge {
   listWecomConnections(): Promise<WecomConnectionList>;
   testWecomConnection(connectionId: string): Promise<WecomConnectionSummary>;
   saveWecomConnection(input: WecomConnectionConfigInput): Promise<WecomConnectionSummary>;
+  getTailscaleConnection(): Promise<TailscaleConnectionSettings>;
+  saveTailscaleConnection(input: SaveTailscaleConnectionInput): Promise<TailscaleConnectionSettings>;
   checkRuntimeUpdate(): Promise<RuntimeUpdateState>;
   checkDesktopUpdate(): Promise<void>;
   searchPlugins(query: string): Promise<PluginSearchResult[]>;

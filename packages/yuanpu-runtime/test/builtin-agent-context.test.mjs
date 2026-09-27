@@ -51,6 +51,7 @@ test('Work Pi session loads bundled AGENTS.md before workspace context and disco
   assert.match(systemPrompt, /html-preview/);
   assert.match(systemPrompt, /markdown-visuals/);
   assert.match(systemPrompt, /browser-control/);
+  assert.match(systemPrompt, /<name>tailscale<\/name>/);
   assert.match(systemPrompt, /Save user-facing artifacts with relative paths under cwd, not \/tmp/);
   assert.match(systemPrompt, /Do not create a file, start a server, or navigate the browser merely to display a diagram/);
   assert.ok(systemPrompt.indexOf('Yuanpu Agent conversation guide') < systemPrompt.indexOf('PROJECT_CONTEXT_MARKER'));

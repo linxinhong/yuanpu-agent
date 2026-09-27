@@ -42,6 +42,8 @@ import {
   type WecomConnectionList,
   type WecomConnectionSummary,
   type WecomConnectionConfigInput,
+  type TailscaleConnectionSettings,
+  type SaveTailscaleConnectionInput,
 } from '@yuanpu-agent/protocol';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
@@ -624,6 +626,18 @@ export class RuntimeManager {
 
   saveWecomConnection(input: WecomConnectionConfigInput): Promise<WecomConnectionSummary> {
     return this.request(RUNTIME_ROUTES.wecomConnections, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  getTailscaleConnection(): Promise<TailscaleConnectionSettings> {
+    return this.request(RUNTIME_ROUTES.tailscaleConnection);
+  }
+
+  saveTailscaleConnection(input: SaveTailscaleConnectionInput): Promise<TailscaleConnectionSettings> {
+    return this.request(RUNTIME_ROUTES.tailscaleConnection, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),

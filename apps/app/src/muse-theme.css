@@ -766,6 +766,22 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .font-family-row select, .font-family-row input { min-height: 38px; border: 1px solid var(--yp-border-control); border-radius: 8px; padding: 7px 12px; color: var(--yp-text); background: var(--yp-surface); font: inherit; }
 .font-family-row input { flex: 1 1 260px; min-width: 0; }
 .settings-connections { min-width: 0; min-height: 0; overflow: auto; }
+.settings-tailscale-view { min-width: 0; min-height: 0; overflow: auto; }
+.tailscale-settings { width: min(100%, 780px); margin: 0 auto; padding: 40px clamp(24px, 4vw, 54px) 64px; color: var(--yp-text); }
+.tailscale-settings h2 { margin: 0 0 7px; font-size: 1.5rem; font-weight: 650; }
+.tailscale-settings header p { margin: 0 0 24px; color: var(--yp-text-muted); line-height: 1.6; }
+.tailscale-settings form { display: grid; gap: 18px; border: 1px solid var(--yp-border); border-radius: 16px; padding: 24px; background: var(--yp-surface); }
+.tailscale-settings form > label:not(.tailscale-remove) { display: grid; gap: 7px; font-weight: 600; }
+.tailscale-settings label span { margin-left: 7px; color: var(--yp-text-muted); font-size: 0.75rem; font-weight: 400; }
+.tailscale-settings input:not([type="checkbox"]) { width: 100%; min-height: 38px; border: 1px solid var(--yp-border-control); border-radius: 8px; padding: 7px 11px; color: var(--yp-text); background: var(--yp-surface); font: inherit; font-weight: 400; }
+.tailscale-settings input:focus-visible { outline: 2px solid var(--yp-accent); outline-offset: 2px; }
+.tailscale-settings .tailscale-remove { display: flex; align-items: center; gap: 8px; margin-top: -9px; color: var(--yp-text-muted); font-size: 0.75rem; }
+.tailscale-settings .tailscale-file-note { margin: 2px 0 0; color: var(--yp-text-muted); font-size: 0.75rem; line-height: 1.6; }
+.tailscale-settings .tailscale-file-note code { overflow-wrap: anywhere; color: var(--yp-text); }
+.tailscale-settings [role="alert"] { color: #ad4242; }
+.tailscale-settings [role="status"] { color: var(--yp-accent-ink); }
+.tailscale-settings form > button { justify-self: start; min-height: 38px; border: 0; border-radius: 8px; padding: 0 18px; color: var(--yp-surface); background: var(--yp-text); cursor: pointer; font: inherit; font-weight: 600; }
+.tailscale-settings form > button:disabled { opacity: .5; cursor: default; }
 .hotkey-settings { width: min(100%, 950px); margin: 0 auto; padding: 40px clamp(24px, 4vw, 54px); color: var(--yp-text); }
 .hotkey-settings h2 { margin: 0 0 8px; font-size: 1.5rem; font-weight: 650; }
 .hotkey-settings > p { margin: 0 0 26px; color: var(--yp-text-muted); line-height: 1.6; }

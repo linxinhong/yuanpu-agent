@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ConnectionManagement } from '../management.js';
 import { ModelSettingsPanel } from './model-settings.js';
 import { HotkeySettingsPanel } from './hotkey-settings.js';
+import { TailscaleSettingsPanel } from './tailscale-settings.js';
 import { applyThemePreference, readThemePreference, type RendererTheme } from '../shared/theme-preference.js';
 import {
   applyFontPreference,
@@ -76,7 +77,7 @@ function AssistantLinkSettings({ active }: { active: boolean }) {
 
 export function SettingsPage({ active, configRoot }: { active: boolean; configRoot: string }) {
   const [searchParams] = useSearchParams();
-  const [section, setSection] = useState<'general' | 'models' | 'connections' | 'hotkeys'>('general');
+  const [section, setSection] = useState<'general' | 'models' | 'connections' | 'tailscale' | 'hotkeys'>('general');
   useEffect(() => {
     if (active && searchParams.get('section') === 'connections') setSection('connections');
   }, [active, searchParams]);
@@ -96,6 +97,7 @@ export function SettingsPage({ active, configRoot }: { active: boolean; configRo
       <button type="button" className={section === 'models' ? 'selected' : ''} onClick={() => setSection('models')}>模型</button>
       <button type="button" className={section === 'hotkeys' ? 'selected' : ''} onClick={() => setSection('hotkeys')}>快捷键</button>
       <button type="button" className={section === 'connections' ? 'selected' : ''} onClick={() => setSection('connections')}>企业微信连接</button>
+      <button type="button" className={section === 'tailscale' ? 'selected' : ''} onClick={() => setSection('tailscale')}>Tailscale</button>
     </aside>
     <div className="settings-content">
       <div className={`settings-general ${section === 'general' ? '' : 'view-hidden'}`} aria-hidden={section !== 'general'}><h2>通用</h2>
@@ -137,6 +139,9 @@ export function SettingsPage({ active, configRoot }: { active: boolean; configRo
       </div>
       <div className={`settings-models-view ${section === 'models' ? '' : 'view-hidden'}`} aria-hidden={section !== 'models'}>
         <ModelSettingsPanel active={active && section === 'models'} />
+      </div>
+      <div className={`settings-tailscale-view ${section === 'tailscale' ? '' : 'view-hidden'}`} aria-hidden={section !== 'tailscale'}>
+        <TailscaleSettingsPanel active={active && section === 'tailscale'} configRoot={configRoot} />
       </div>
       <div className={section === 'hotkeys' ? '' : 'view-hidden'} aria-hidden={section !== 'hotkeys'}>
         <HotkeySettingsPanel active={active && section === 'hotkeys'} />

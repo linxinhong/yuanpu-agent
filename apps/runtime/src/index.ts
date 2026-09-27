@@ -96,6 +96,7 @@ import { installParentProcessMonitor, type ParentProcessMonitor } from './proces
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
 import { WorkspaceFileAccessError, listWorkspaceFiles, listWorkspaceTree, readWorkspaceFile, resolveWorkspaceFilePath } from './workspace-files.js';
+import { readTailscaleConnectionDocument, saveTailscaleConnection, summarizeTailscaleConnection } from './tailscale-connection.js';
 import {
   closeWecomChannels,
   configuredWecomDocument,
@@ -1043,6 +1044,16 @@ async function serve(): Promise<void> {
         response.end(JSON.stringify(await listWecomConnectionSummaries(
           home.appPath, wecomChannels, wecomStartupDiagnostic,
         )));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.tailscaleConnection && request.method === 'GET') {
+        response.end(JSON.stringify(summarizeTailscaleConnection(
+          await readTailscaleConnectionDocument(home.appPath),
+        )));
+        return;
+      }
+      if (url.pathname === RUNTIME_ROUTES.tailscaleConnection && request.method === 'POST') {
+        response.end(JSON.stringify(await saveTailscaleConnection(home.appPath, await readJsonBody(request))));
         return;
       }
       const wecomTestPath = url.pathname.startsWith(`${RUNTIME_ROUTES.wecomConnections}/`)
