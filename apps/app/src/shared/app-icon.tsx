@@ -3,7 +3,7 @@ import type { UiDestination } from '../ui-registry.js';
 
 type AppView = UiDestination;
 
-export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'folder' | 'file' | 'image' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate' | 'briefcase' | 'code' | 'lightning' | 'archive' }) {
+export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'folder' | 'file' | 'image' | 'globe' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate' | 'briefcase' | 'code' | 'lightning' | 'archive' }) {
   const paths = {
     work: <path d="M20 11.5c0 4.2-3.8 7.5-8.5 7.5-1.4 0-2.7-.3-3.8-.8L3 20l1.4-4.1A7.2 7.2 0 0 1 3 11.5C3 7.4 6.8 4 11.5 4S20 7.4 20 11.5Z" />,
     assistant: <><path d="m9 5 2.2 6.3L17.5 14l-6.3 2.7L9 23l-2.2-6.3L.5 14l6.3-2.7Z" transform="translate(2 -2) scale(.9)" /><path d="M18 2v6m-3-3h6" /></>,
@@ -16,6 +16,7 @@ export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-le
     archive: <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-10 5h6" /></>,
     file: <><path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" /><path d="M14 3v5h5" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m4 17 5-5 3 3 3-4 5 6" /></>,
+    globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 2.5 4.5 5.5 4.5 9S15 18.5 12 21M12 3c-3 2.5-4.5 5.5-4.5 9S9 18.5 12 21" /></>,
     settings: <><path d="M10 2.5h4l.4 2.2 1.7.7L18 4.2 20.8 7l-1.2 1.9.7 1.7 2.2.4v4l-2.2.4-.7 1.7 1.2 1.9-2.8 2.8-1.9-1.2-1.7.7-.4 2.2h-4l-.4-2.2-1.7-.7L6 21.8 3.2 19l1.2-1.9-.7-1.7-2.2-.4v-4l2.2-.4.7-1.7L3.2 7 6 4.2l1.9 1.2 1.7-.7z" /><circle cx="12" cy="13" r="3" /></>,
     schedules: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.4 2" /></>,
     menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
@@ -36,6 +37,6 @@ export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-le
     edit: <><path d="M12 20h8M4 16.5V20h3.5L18.8 8.7l-3.5-3.5L4 16.5Z" /><path d="m13.8 6.7 3.5 3.5" /></>,
     refresh: <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4h-4" /></>,
     locate: <><circle cx="12" cy="12" r="6.5" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /></>,
-  } satisfies Record<AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'folder' | 'file' | 'image' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate' | 'briefcase' | 'code' | 'lightning' | 'archive', ReactNode>;
+  } satisfies Record<AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'folder' | 'file' | 'image' | 'globe' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate' | 'briefcase' | 'code' | 'lightning' | 'archive', ReactNode>;
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -34,6 +35,7 @@ import { folderPath } from './work-tree-model.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
 import { normalizeWorkspacePath } from '../shared/work-file-links.js';
 import { FileWorkspace, ImagePreviewPanel, type ImagePreviewRequest } from '../viewer/files/file-tabs.js';
+import type { ViewerBrowserHost } from '../viewer/host/browser-host.js';
 import type { ViewerFileHost } from '../viewer/host/file-host.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
@@ -865,6 +867,27 @@ export function ChatPanel({
     }
     : undefined;
 
+  const [browserRequest, setBrowserRequest] = useState(0);
+  const browserHost: ViewerBrowserHost | undefined = useMemo(() => surface === 'work' && desktop
+    ? {
+      attachGuest: (payload) => desktop.browserAttachGuest(payload),
+      detachGuest: (key) => desktop.browserDetachGuest(key),
+      openInSystemBrowser: (url) => desktop.openInSystemBrowser(url),
+      onGuestCrashed: () => () => {},
+      onSessionRequest: () => () => {},
+    }
+    : undefined, [desktop, surface]);
+
+  useEffect(() => {
+    if (surface !== 'work' || !desktop) return;
+    return desktop.onBrowserSessionRequest((conversationId) => {
+      if (conversationId !== workConversationId) return;
+      setActivityOpen(true);
+      setActivityTab('files');
+      setBrowserRequest((value) => value + 1);
+    });
+  }, [desktop, surface, workConversationId]);
+
   const visibleRun = navigationTarget?.runId
     ? (locatedRun && typeof locatedRun !== 'string' ? locatedRun : undefined)
     : lastRun;
@@ -1203,7 +1226,8 @@ export function ChatPanel({
               disconnected: Boolean(runRecovery) || locatedRun === 'error',
             }}
             run={visibleRun} archiveOpen={archiveOpen} onToggleArchive={() => setArchiveOpen((value) => !value)} /> : <>
-          <FileWorkspace key={`${workConversationId ?? 'empty'}:${selectedWork?.workingDirectory ?? ''}`} host={fileHost} scopeKey={workConversationId ?? 'empty'}
+          <FileWorkspace key={`${workConversationId ?? 'empty'}:${selectedWork?.workingDirectory ?? ''}`}
+            host={fileHost} browserHost={browserHost} browserRequest={browserRequest} scopeKey={workConversationId ?? 'empty'}
             rootName={selectedWork?.title || '工作区'}
             requestPath={filePreviewPath} requestImage={imagePreviewRequest} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
             view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); setImagePreviewRequest(undefined); }}

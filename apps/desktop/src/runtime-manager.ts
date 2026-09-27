@@ -79,6 +79,8 @@ export interface RuntimeManagerOptions {
   activationStabilityMs?: number;
   onError?: (error: Error) => void;
   onUpdateRecovery?: (reason: RuntimeUpdateRecoveryReason) => void;
+  /** Loopback browser-control endpoint delivered to the runtime bootstrap. */
+  browserControl?: { port: number; token: string };
 }
 
 const execFileAsync = promisify(execFile);
@@ -96,8 +98,8 @@ export class RuntimeManager {
   private readonly token = randomBytes(32).toString('hex');
   private readonly approvalKeyPair = generateKeyPairSync('ed25519');
   private readonly updater: RuntimeUpdater;
-  private readonly options: Required<Omit<RuntimeManagerOptions, 'command' | 'onError' | 'onUpdateRecovery'>>
-    & Pick<RuntimeManagerOptions, 'command' | 'onError' | 'onUpdateRecovery'>;
+  private readonly options: Required<Omit<RuntimeManagerOptions, 'command' | 'onError' | 'onUpdateRecovery' | 'browserControl'>>
+    & Pick<RuntimeManagerOptions, 'command' | 'onError' | 'onUpdateRecovery' | 'browserControl'>;
 
   constructor(
     private readonly appPath: string,
@@ -123,6 +125,7 @@ export class RuntimeManager {
       activationStabilityMs: options.activationStabilityMs ?? 2_000,
       onError: options.onError,
       onUpdateRecovery: options.onUpdateRecovery,
+      browserControl: options.browserControl,
     };
   }
 
@@ -302,6 +305,7 @@ export class RuntimeManager {
         token: this.token,
         approvalPublicKey,
         parentPid: process.pid,
+        ...(this.options.browserControl ? { browserControl: this.options.browserControl } : {}),
       })}\n`);
       let stdout = '';
       const ready = await new Promise<RuntimeReady>((resolveReady, rejectReady) => {
