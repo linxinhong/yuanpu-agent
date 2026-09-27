@@ -253,6 +253,29 @@ export function validateAgentRunRequest(
   }
   const text = requiredString(input.input.text, 'input.text', 64 * 1024);
   if (isRejection(text)) return { ok: false, error: text };
+  let modelSelection: AgentRunRequest['modelSelection'];
+  if (input.modelSelection !== undefined) {
+    if (entryPoint !== 'desktop' || !conversationId.startsWith('work:') || !isRecord(input.modelSelection)) {
+      return { ok: false, error: rejection('invalid_request', 'Model selection is only available for desktop Work runs.', 'modelSelection') };
+    }
+    const provider = requiredString(input.modelSelection.provider, 'modelSelection.provider', 128);
+    const model = requiredString(input.modelSelection.model, 'modelSelection.model', 256);
+    if (isRejection(provider)) return { ok: false, error: provider };
+    if (isRejection(model)) return { ok: false, error: model };
+    const level = input.modelSelection.thinkingLevel;
+    if (level !== undefined && !['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(String(level))) {
+      return { ok: false, error: rejection('invalid_request', 'Unknown thinking level.', 'modelSelection.thinkingLevel') };
+    }
+    modelSelection = { provider, model, ...(level ? { thinkingLevel: level as NonNullable<AgentRunRequest['modelSelection']>['thinkingLevel'] } : {}) };
+  }
+  let approvalMode: AgentRunRequest['approvalMode'];
+  if (input.approvalMode !== undefined) {
+    if (entryPoint !== 'desktop' || namespace !== 'desktop' || !conversationId.startsWith('work:')
+      || (input.approvalMode !== 'required' && input.approvalMode !== 'unrestricted')) {
+      return { ok: false, error: rejection('invalid_request', 'Approval mode is only available for desktop Work runs.', 'approvalMode') };
+    }
+    approvalMode = input.approvalMode;
+  }
 
   if (!isRecord(input.delivery)) {
     return { ok: false, error: rejection('invalid_request', 'delivery is required.', 'delivery') };
@@ -294,6 +317,8 @@ export function validateAgentRunRequest(
       workspaceId,
       conversation,
       input: { type: 'text', text },
+      ...(modelSelection ? { modelSelection } : {}),
+      ...(approvalMode ? { approvalMode } : {}),
       idempotencyKey,
       delivery,
     },

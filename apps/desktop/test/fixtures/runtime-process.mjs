@@ -27,7 +27,7 @@ const server = createServer((request, response) => {
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({
       version: '0.1.0',
-      protocolVersion: mode === 'health-protocol-mismatch' ? 999 : 7,
+      protocolVersion: mode === 'health-protocol-mismatch' ? 999 : 8,
       piVersion: 'fixture',
       mcpTools: [],
       configRoot: '/fixture',
@@ -123,7 +123,7 @@ const server = createServer((request, response) => {
 
 server.listen(0, '127.0.0.1', () => {
   const address = server.address();
-  const protocolVersion = mode === 'ready-protocol-mismatch' ? 999 : 7;
+  const protocolVersion = mode === 'ready-protocol-mismatch' ? 999 : 8;
   process.stdout.write(`${JSON.stringify({
     event: 'ready',
     host: '127.0.0.1',

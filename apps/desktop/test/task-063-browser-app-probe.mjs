@@ -17,10 +17,12 @@ const workspace = join(home, 'workspace');
 const userData = join(root, 'electron-user-data');
 const externalOpenLog = join(root, 'external-open.txt');
 const guestPreferencesLog = join(root, 'guest-preferences.json');
+let firstPageHits = 0;
 let secondPageHits = 0;
 const browserPage = createServer((request, response) => {
   const second = request.url === '/second';
   const slow = request.url === '/slow';
+  if (request.url === '/first') firstPageHits += 1;
   if (second) secondPageHits += 1;
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
   const html = `<html><head><title>Browser fixture ${slow ? 'slow' : second ? 'second' : 'first'}</title></head><body><h1>${second ? 'Second' : 'First'} page</h1><a href="/second">Next page</a><button onclick="window.browserClickCount=(window.browserClickCount||0)+1">Count click</button></body></html>`;
@@ -47,7 +49,7 @@ const provider = createServer(async (request, response) => {
   browserSkillAdvertised ||= messages.some((message) => message.role === 'system'
     && JSON.stringify(message.content).includes('browser-control'));
   sidebarBrowserPromptAdvertised ||= messages.some((message) => message.role === 'system'
-    && String(message.content).includes('browser_snapshot reads the page DOM text'));
+    && String(message.content).includes('For visible page text, search and execute browser_snapshot'));
   providerRequests += 1;
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   const chunk = (delta, finishReason = null) => `data: ${JSON.stringify({ id: `fixture-${providerRequests}`,
@@ -221,9 +223,14 @@ try {
   await eventually(() => renderer.evaluate('window.yuanpu?.runtimeInfo?.()'), 'Electron preload or Runtime did not start');
   await renderer.evaluate(`window.location.hash = '#/work'`);
   await eventually(() => renderer.evaluate(`Boolean(document.querySelector('button[aria-label="打开右侧面板"]'))`), 'Work panel did not mount');
+  await eventually(() => renderer.evaluate(`document.querySelector('button[aria-label="重命名会话"]')?.disabled === false`),
+    'Work conversation did not finish loading');
   await renderer.evaluate(`document.querySelector('button[aria-label="打开右侧面板"]').click()`);
   await eventually(() => renderer.evaluate(`Boolean(document.querySelector('button[aria-label="添加面板标签"]'))`), 'Workspace tabs did not mount');
   await renderer.evaluate(`document.querySelector('button[aria-label="添加面板标签"]').click()`);
+  assert.deepEqual(await renderer.evaluate(`Array.from(document.querySelectorAll('.workspace-tab-menu button'))
+    .map((button) => button.textContent.trim())`), ['文件列表', '浏览器'],
+    'Only user-openable file and browser tabs belong in the new-tab menu');
   await renderer.evaluate(`Array.from(document.querySelectorAll('.workspace-tab-menu button')).find((button) => button.textContent.includes('浏览器')).click()`);
   await eventually(() => renderer.evaluate('document.querySelector("webview")?.getWebContentsId?.()'), 'Browser webview did not attach');
   const guestId = await renderer.evaluate('document.querySelector("webview").getWebContentsId()');
@@ -246,6 +253,27 @@ try {
   await eventually(() => renderer.evaluate(`document.querySelector('webview')?.getURL() === ${JSON.stringify(firstUrl)}`), 'Browser did not navigate to the local page');
   await eventually(() => renderer.evaluate('document.querySelector("webview")?.getTitle() === "Browser fixture first"'), 'Browser title did not update');
   await eventually(() => renderer.evaluate('!document.querySelector("webview")?.isLoading()'), 'First page did not finish loading');
+  const initialConversation = await renderer.evaluate('window.yuanpu.listWorkConversations().then((items) => items.find((item) => item.current))');
+  const hitsBeforeSwitch = firstPageHits;
+  await renderer.evaluate(`document.querySelector('button[aria-label="打开工作列表"]').click()`);
+  await renderer.evaluate(`document.querySelector('button[aria-label="新建会话"]').click()`);
+  await eventually(() => renderer.evaluate(`window.yuanpu.listWorkConversations().then((items) =>
+    items.find((item) => item.current)?.id !== ${JSON.stringify(initialConversation.id)})`), 'New Work conversation did not become current');
+  assert.equal(await renderer.evaluate('document.querySelector("webview")?.getWebContentsId()'), guestId,
+    'Switching Work conversations destroyed the first browser guest');
+  await eventually(() => renderer.evaluate(`Boolean(document.querySelector('button[aria-label="打开右侧面板"]'))`),
+    'Second Work conversation did not restore its closed sidebar state');
+  await renderer.evaluate(`document.querySelector('button[aria-label="打开右侧面板"]').click()`);
+  await eventually(() => renderer.evaluate('Boolean(document.querySelector(".file-tab-title"))'), 'Second Work sidebar did not open');
+  assert.equal(await renderer.evaluate('document.querySelectorAll(".file-tab-title").length'), 1,
+    'The second Work conversation inherited tabs from the first');
+  await renderer.evaluate(`document.querySelector('[data-tree-key=${JSON.stringify(`conversation:${initialConversation.id}`)}]').click()`);
+  await eventually(() => renderer.evaluate(`window.yuanpu.listWorkConversations().then((items) =>
+    items.find((item) => item.current)?.id === ${JSON.stringify(initialConversation.id)})`), 'First Work conversation did not reopen');
+  await eventually(() => renderer.evaluate('Boolean(document.querySelector(".file-tab-title"))'), 'First Work sidebar did not reopen');
+  assert.equal(await renderer.evaluate('document.querySelector("webview")?.getWebContentsId()'), guestId,
+    'Returning to a Work conversation replaced its browser guest');
+  assert.equal(firstPageHits, hitsBeforeSwitch, 'Switching Work conversations reloaded the browser page');
   const slowUrl = `http://127.0.0.1:${browserPort}/slow`;
   await renderer.evaluate(`(() => {
     const input = document.querySelector('.browser-address');
@@ -396,7 +424,7 @@ try {
   console.log(JSON.stringify({ status: 'passed', guestId, restoredGuestId, providerRequests, screenshotHasPng, snapshotHasPageText,
     noGuestErrorSeen, firstUrl, secondUrl: `http://127.0.0.1:${browserPort}/second` }));
 } catch (error) {
-  const ui = await renderer?.evaluate('({ text: document.body.innerText.slice(-1000), approvals: document.querySelectorAll(".approval-actions").length })').catch(() => null);
+  const ui = await renderer?.evaluate('({ text: document.body.innerText.slice(-1000), approvals: document.querySelectorAll(".approval-actions").length, toggle: document.querySelector(".panel-toggle")?.getAttribute("aria-expanded"), dialog: document.querySelector(".activity-panel")?.open, instances: document.querySelectorAll(".session-sidebar-instance").length, tabHost: Boolean(document.querySelector(".workspace-tab-host")) })').catch(() => null);
   throw new Error(`${error.message}; screenshotToolSummary=${screenshotToolSummary}; providerTrace=${JSON.stringify(providerTrace.slice(-8))}; ui=${JSON.stringify(ui)}; diagnostics=${diagnostics.slice(-1800)}`);
 } finally {
   renderer?.close();

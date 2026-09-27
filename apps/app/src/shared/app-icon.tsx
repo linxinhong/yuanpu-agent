@@ -3,19 +3,25 @@ import type { UiDestination } from '../ui-registry.js';
 
 type AppView = UiDestination;
 
-export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'folder' | 'file' | 'image' | 'globe' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate' | 'briefcase' | 'code' | 'eye' | 'external' | 'lightning' | 'archive' | 'review' }) {
-  const paths = {
+type IconName = AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'pause' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'folder' | 'folder-plus' | 'file' | 'image' | 'globe' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'lock' | 'unlock' | 'edit' | 'refresh' | 'locate' | 'briefcase' | 'code' | 'eye' | 'external' | 'lightning' | 'archive' | 'review' | 'tag' | 'arrow-up' | 'arrow-down' | 'layers';
+
+export function AppIcon({ name }: { name: IconName }) {  const paths = {
     work: <path d="M20 11.5c0 4.2-3.8 7.5-8.5 7.5-1.4 0-2.7-.3-3.8-.8L3 20l1.4-4.1A7.2 7.2 0 0 1 3 11.5C3 7.4 6.8 4 11.5 4S20 7.4 20 11.5Z" />,
     assistant: <><path d="m9 5 2.2 6.3L17.5 14l-6.3 2.7L9 23l-2.2-6.3L.5 14l6.3-2.7Z" transform="translate(2 -2) scale(.9)" /><path d="M18 2v6m-3-3h6" /></>,
     skills: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><path d="M17 13.5v7m-3.5-3.5h7" /></>,
     knowledge: <><path d="M12 5.5c-2.5-1.5-5.5-1.5-8 0v14c2.5-1.5 5.5-1.5 8 0m0-14c2.5-1.5 5.5-1.5 8 0v14c-2.5-1.5-5.5-1.5-8 0m0-14v14" /></>,
     folder: <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+    'folder-plus': <><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 11v6m-3-3h6" /></>,
     briefcase: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18m-10-2v4h2v-4" /></>,
     code: <><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-12-2 14" /></>,
     eye: <><path d="M2.5 12s3.4-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.4 5.5-9.5 5.5S2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="2.5" /></>,
     external: <><path d="M13 5h6v6m0-6-9 9" /><path d="M19 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" /></>,
     lightning: <path d="m13 2-9 11h7l-1 9 10-12h-7z" />,
     archive: <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-10 5h6" /></>,
+    tag: <><path d="M3 4h9l9 9-8 8-10-10z" /><circle cx="8" cy="8" r="1.4" /></>,
+    layers: <><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 16l9 5 9-5" /></>,
+    'arrow-up': <><path d="M12 20V4m-6 6 6-6 6 6" /></>,
+    'arrow-down': <><path d="M12 4v16m-6-6 6 6 6-6" /></>,
     file: <><path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" /><path d="M14 3v5h5" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m4 17 5-5 3 3 3-4 5 6" /></>,
     globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 2.5 4.5 5.5 4.5 9S15 18.5 12 21M12 3c-3 2.5-4.5 5.5-4.5 9S9 18.5 12 21" /></>,
@@ -27,6 +33,7 @@ export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-le
     expand: <><path d="M10 14 4 20m0-6v6h6M14 10l6-6m-6 0h6v6" /></>,
     collapse: <><path d="m4 4 6 6m0-6v6H4m16 10-6-6m0 6v-6h6" /></>,
     send: <><path d="M12 19V5m-5 5 5-5 5 5" /></>,
+    pause: <><path d="M9 6v12M15 6v12" strokeWidth="2.5" /></>,
     copy: <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
     check: <path d="m4.5 12.5 5 5 10-11" />,
     bookmark: <path d="M6 4.5h12v16l-6-4-6 4z" />,
@@ -36,10 +43,11 @@ export function AppIcon({ name }: { name: AppView | 'menu' | 'panel' | 'panel-le
     plus: <path d="M12 4v16M4 12h16" />,
     shield: <path d="M12 2.8 20 6v5.6c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V6z" />,
     'shield-filled': <><path d="M12 2.8 20 6v5.6c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V6z" fill="currentColor" stroke="none" /><path d="m8.5 12 2.3 2.3 4.7-4.7" stroke="var(--yp-surface)" strokeWidth="2" /></>,
+    lock: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
+    unlock: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 7.5-2" /></>,
     edit: <><path d="M12 20h8M4 16.5V20h3.5L18.8 8.7l-3.5-3.5L4 16.5Z" /><path d="m13.8 6.7 3.5 3.5" /></>,
     refresh: <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4h-4" /></>,
     review: <><path d="M6 7h8M10 3v8" /><path d="M10 17h8" /></>,
     locate: <><circle cx="12" cy="12" r="6.5" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /></>,
-  } satisfies Record<AppView | 'menu' | 'panel' | 'panel-left' | 'expand' | 'collapse' | 'send' | 'copy' | 'check' | 'bookmark' | 'bookmark-filled' | 'knowledge-filled' | 'folder' | 'file' | 'image' | 'globe' | 'chevron' | 'plus' | 'shield' | 'shield-filled' | 'edit' | 'refresh' | 'locate' | 'briefcase' | 'code' | 'eye' | 'external' | 'lightning' | 'archive' | 'review', ReactNode>;
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+  } satisfies Record<IconName, ReactNode>;  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }

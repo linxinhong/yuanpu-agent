@@ -10,6 +10,7 @@ import {
   type YuanpuChatSession,
 } from '@yuanpu-agent/runtime-kit';
 import { registerWorkWriteArtifact } from './work-artifact.js';
+import type { SessionTrajectory } from '@yuanpu-agent/protocol';
 
 interface RuntimeAgentExecutorOptions {
   getCapabilityClient(): CapabilityToolClient;
@@ -34,6 +35,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
   readonly #retired = new Set<PooledSession>();
   readonly #disposals = new Set<Promise<void>>();
   readonly #maximumPooledSessions: number;
+  readonly #live = new Map<string, NonNullable<SessionTrajectory['live']>>();
 
   constructor(options: RuntimeAgentExecutorOptions) {
     this.#options = options;
@@ -48,6 +50,25 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
     this.reset();
   }
 
+  async observation(sessionId: string): Promise<Pick<SessionTrajectory, 'live' | 'context'>> {
+    const pooled = this.#sessions.get(sessionId);
+    const context = pooled ? await pooled.promise.then((value) => value.getContextUsage()).catch(() => undefined) : undefined;
+    let live = this.#live.get(sessionId);
+    if (live?.finishedAt && Date.now() - Date.parse(live.finishedAt) > 30_000) {
+      this.#live.delete(sessionId);
+      live = undefined;
+    }
+    return {
+      ...(context ? { context } : {}),
+      ...(live ? { live: { ...live, tools: live.tools.map((tool) => ({ ...tool })) } } : {}),
+    };
+  }
+
+  async subagentRuns(sessionId: string) {
+    const pooled = this.#sessions.get(sessionId);
+    return pooled ? await pooled.promise.then((value) => value.listSubagentRuns()).catch(() => []) : [];
+  }
+
   async execute(input: AgentRunExecutionInput): Promise<AgentRunExecutionResult> {
     if (!input.run.context.conversation.sessionBindingId) throw new Error('Agent run does not have a persisted Pi session binding.');
     const sessionKey = input.piSessionId;
@@ -60,8 +81,8 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
           ...this.#options.chat,
           cwd: input.run.context.workspaceId,
           browserControlAvailable: input.run.context.conversation.conversationId.startsWith('work:'),
-          builtinSkillPaths: input.run.context.conversation.conversationId.startsWith('work:')
-            ? this.#options.chat.builtinSkillPaths : [],
+          builtinAgentRoot: input.run.context.conversation.conversationId.startsWith('work:')
+            ? this.#options.chat.builtinAgentRoot : undefined,
           includeGlobalMemory: input.run.owner.entryPoint === 'desktop'
             && input.run.context.conversation.conversationId === 'assistant',
           capabilityClient: this.#options.getCapabilityClient(),
@@ -80,10 +101,24 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
       this.#sessions.set(sessionKey, pooled);
     }
     pooled.active += 1;
+    const live: NonNullable<SessionTrajectory['live']> = { runId: input.run.runId, text: '', tools: [] };
+    this.#live.set(sessionKey, live);
     try {
       const result = await (await pooled.promise).prompt(input.input, {
         runId: input.run.runId,
         signal: input.signal,
+        modelSelection: input.run.context.modelSelection,
+        onProgress: (event) => {
+          if (event.type === 'text') {
+            live.text = (live.text + event.delta).slice(-200_000);
+            return;
+          }
+          const tool = live.tools.find((item) => item.id === event.id);
+          if (tool) tool.status = event.status;
+          else live.tools.push({ id: event.id, name: event.name, summary: event.summary ?? event.name,
+            category: event.category ?? '工具调用',
+            status: event.status, at: new Date().toISOString() });
+        },
         context: {
           conversationId: input.run.context.conversation.conversationId,
           workspaceId: input.run.context.workspaceId,
@@ -141,6 +176,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
       }
       return { kind: 'completed', output };
     } finally {
+      live.finishedAt = new Date().toISOString();
       pooled.active -= 1;
       this.#disposeIfRetired(pooled);
       this.#retireOverflow();
@@ -158,6 +194,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
     }
     for (const { id, pooled } of selected) {
       this.#sessions.delete(id);
+      this.#live.delete(id);
       await (await pooled.promise).dispose();
     }
     await Promise.all([...this.#disposals]);
@@ -170,6 +207,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
       this.#disposeIfRetired(pooled);
     }
     this.#sessions.clear();
+    this.#live.clear();
   }
 
   async close(): Promise<void> {
@@ -190,6 +228,7 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
       if (!idle) return;
       const [bindingId, pooled] = idle;
       this.#sessions.delete(bindingId);
+      this.#live.delete(bindingId);
       pooled.retired = true;
       this.#retired.add(pooled);
       this.#disposeIfRetired(pooled);

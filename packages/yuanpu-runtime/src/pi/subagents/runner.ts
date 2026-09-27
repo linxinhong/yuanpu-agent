@@ -28,11 +28,17 @@ export async function runSubagentChild(input: SubagentChildInput, options: {
     sessionManager: SessionManager.create(cwd, input.directory),
     tools: input.tools, customTools: options.capabilityTools,
   });
+  input.onSessionStarted(session.sessionId, cwd);
   let text = '';
+  let liveText = '';
   let failed = false;
   let pendingApprovalRequestId: string | undefined;
   const abort = () => { void session.abort(); };
   const unsubscribe = session.subscribe((event) => {
+    if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
+      liveText = (liveText + event.assistantMessageEvent.delta).slice(-240);
+      input.onProgress(liveText);
+    }
     if (event.type === 'message_end' && event.message.role === 'assistant') {
       text = event.message.content.filter((block) => block.type === 'text').map((block) => block.text).join('\n');
       failed = event.message.stopReason === 'error';
@@ -53,7 +59,7 @@ export async function runSubagentChild(input: SubagentChildInput, options: {
     input.signal.throwIfAborted();
     if (failed && !pendingApprovalRequestId) throw new Error('Subagent model request failed.');
     const stats = session.getSessionStats();
-    return { text, usage: { input: stats.tokens.input, output: stats.tokens.output, totalTokens: stats.tokens.total, cost: stats.cost }, sessionId: session.sessionId, sessionFile: session.sessionFile, ...(pendingApprovalRequestId ? { pendingApprovalRequestId } : {}) };
+    return { text, usage: { input: stats.tokens.input, output: stats.tokens.output, totalTokens: stats.tokens.total, cost: stats.cost }, sessionId: session.sessionId, sessionFile: session.sessionFile, cwd, ...(pendingApprovalRequestId ? { pendingApprovalRequestId } : {}) };
   } finally {
     input.signal.removeEventListener('abort', abort);
     unsubscribe();

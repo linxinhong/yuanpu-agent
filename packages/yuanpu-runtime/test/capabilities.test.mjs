@@ -33,8 +33,8 @@ function sensitiveSource(onExecute = () => undefined, packageVersion = '1.2.3') 
     sourceInstanceId: 'test.sensitive',
     async list() { return [definition]; },
     async resolve(name) { return name === definition.name ? definition : undefined; },
-    async execute() {
-      onExecute();
+    async execute(_input, context) {
+      onExecute(context);
       return { content: [{ type: 'text', text: 'published' }] };
     },
   };
@@ -180,13 +180,17 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-approval-'));
   context.after(() => rm(root, { recursive: true, force: true }));
   let executions = 0;
+  let executedConversationId;
   const store = await CapabilityApprovalStore.open(join(root, 'approvals.json'), {
     createId: () => 'host-request-1',
   });
-  const server = createYuanpuMcpServer([sensitiveSource(() => { executions += 1; })], store);
+  const server = createYuanpuMcpServer([sensitiveSource((capabilityContext) => {
+    executions += 1;
+    executedConversationId = capabilityContext.conversationId;
+  })], store);
   const capability = createCapabilityId('test.sensitive', 'publish');
   const execution = { name: capability, arguments: { target: 'release' } };
-  const hostContext = { runId: 'run-a', sessionId: 'session-a', workspaceId: '/workspace/a' };
+  const hostContext = { runId: 'run-a', sessionId: 'session-a', conversationId: 'work:one', workspaceId: '/workspace/a' };
 
   let requestId;
   await assert.rejects(
@@ -203,6 +207,7 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
     requestId,
     runId: hostContext.runId,
     sessionId: hostContext.sessionId,
+    conversationId: hostContext.conversationId,
     workspaceId: hostContext.workspaceId,
     capabilityId: capability,
     arguments: execution.arguments,
@@ -218,6 +223,7 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
   for (const [changed, changedContext] of [
     [{ target: 'other' }, hostContext],
     [execution.arguments, { ...hostContext, sessionId: 'session-b' }],
+    [execution.arguments, { ...hostContext, conversationId: 'work:other' }],
     [execution.arguments, { ...hostContext, workspaceId: '/workspace/b' }],
     [execution.arguments, { ...hostContext, runId: 'run-b' }],
   ]) {
@@ -233,6 +239,7 @@ test('host approval is bound, atomically consumed once, and replay-safe', async 
   ]);
   assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
   assert.equal(executions, 1);
+  assert.equal(executedConversationId, hostContext.conversationId);
   assert.equal(store.executionFor(requestId), undefined);
   await assert.rejects(
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
@@ -314,6 +321,24 @@ test('expired, fabricated, denied and restarted approvals cannot execute', async
     server.execute({ ...execution, approvalRequestId: requestId }, hostContext),
     (error) => error instanceof CapabilityError && error.failure.error === 'approval_invalid',
   );
+});
+
+test('host-scoped unattended grants authorize calls without creating pending approvals', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-unattended-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const store = await CapabilityApprovalStore.open(join(root, 'approvals.json'), {
+    allowUnattended: (input) => input.runId === 'allowed-run'
+      && input.sessionId === 'session-a' && input.workspaceId === '/workspace/a',
+  });
+  const base = {
+    sessionId: 'session-a', workspaceId: '/workspace/a', sourceInstanceId: 'source',
+    packageVersion: '1', capabilityId: 'sensitive', arguments: { action: 'write' },
+  };
+  assert.deepEqual(await store.authorize({ ...base, runId: 'allowed-run' }), { status: 'authorized' });
+  assert.deepEqual(await store.listPending(), []);
+  assert.equal((await store.authorize({ ...base, runId: 'other-run' })).status, 'pending');
+  assert.equal((await store.authorize({ ...base, runId: 'allowed-run', workspaceId: '/other' })).status, 'pending');
+  assert.equal((await store.authorize({ ...base, runId: 'allowed-run', approvalRequestId: 'fabricated' })).status, 'invalid');
 });
 
 test('demo capability completes discovery and preserves MCP result fields', async () => {

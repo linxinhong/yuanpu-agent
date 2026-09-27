@@ -155,7 +155,7 @@ export class RuntimeManager {
     if (this.packaged) {
       const root = join(this.resourcesPath, 'capabilities', 'builtin.python.echo', 'YuanpuEchoMcp');
       return {
-        YUANPU_BUILTIN_SKILLS_ROOT: join(this.resourcesPath, 'app', 'skills'),
+        YUANPU_BUILTIN_AGENTS_ROOT: join(this.resourcesPath, 'app', 'agents'),
         YUANPU_PYTHON_MCP_EXECUTABLE: join(root, process.platform === 'win32' ? 'YuanpuEchoMcp.exe' : 'YuanpuEchoMcp'),
         YUANPU_PYTHON_MCP_ROOT: root,
         YUANPU_PYTHON_MCP_ARGS: '[]',
@@ -169,7 +169,7 @@ export class RuntimeManager {
     }
     const pythonRoot = resolve(this.appPath, '../python-capabilities');
     return {
-      YUANPU_BUILTIN_SKILLS_ROOT: resolve(__dirname, '../../app/skills'),
+      YUANPU_BUILTIN_AGENTS_ROOT: resolve(__dirname, '../../app/agents'),
       YUANPU_PYTHON_MCP_EXECUTABLE: process.platform === 'win32'
         ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
         : join(pythonRoot, '.venv', 'bin', 'python'),
@@ -672,20 +672,24 @@ export class RuntimeManager {
   }
 
   submitDesktopMessage(message: string, surface: 'work' | 'assistant' = 'work', conversationId?: string,
-    clientMessageId?: string): Promise<AgentRunReceipt> {
+    clientMessageId?: string, modelSelection?: import('@yuanpu-agent/protocol').AgentRunRequest['modelSelection'],
+    approvalMode?: import('@yuanpu-agent/protocol').AgentRunRequest['approvalMode']): Promise<AgentRunReceipt> {
     if (typeof message !== 'string' || !message.trim()) {
       throw new Error('A non-empty message is required.');
     }
     return this.request(RUNTIME_ROUTES.chatSubmit, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message, surface, conversationId, clientMessageId }),
+      body: JSON.stringify({ message, surface, conversationId, clientMessageId, modelSelection, approvalMode }),
     });
   }
 
-  getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]> {
+  getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string,
+    beforeId?: string, limit?: number): Promise<DesktopTranscriptMessage[]> {
     const query = new URLSearchParams({ surface });
     if (conversationId) query.set('conversationId', conversationId);
+    if (beforeId) query.set('before', beforeId);
+    if (limit !== undefined) query.set('limit', String(limit));
     return this.request(`${RUNTIME_ROUTES.desktopTranscript}?${query}`);
   }
 
@@ -724,6 +728,9 @@ export class RuntimeManager {
     const query = new URLSearchParams({ conversationId, entryId });
     if (radius !== undefined) query.set('radius', String(radius));
     return this.request(`${RUNTIME_ROUTES.workMessageWindow}?${query}`);
+  }
+  getWorkTrajectory(conversationId: string): Promise<import('@yuanpu-agent/protocol').SessionTrajectory> {
+    return this.request(`${RUNTIME_ROUTES.workTrajectory}?conversationId=${encodeURIComponent(conversationId)}`);
   }
   listWorkFolders(): Promise<import('@yuanpu-agent/protocol').WorkFolder[]> { return this.request(RUNTIME_ROUTES.workFolders); }
   createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<import('@yuanpu-agent/protocol').WorkFolder> {

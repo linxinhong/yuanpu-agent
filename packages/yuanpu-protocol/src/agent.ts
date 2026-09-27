@@ -52,6 +52,10 @@ export interface AgentRunRequest {
   workspaceId: string;
   conversation: AgentConversationRef;
   input: AgentModelInput;
+  /** Desktop Work override for this run; resolved by the Pi session before prompting. */
+  modelSelection?: { provider: string; model: string; thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' };
+  /** Explicit desktop Work authorization for this run's capability calls. */
+  approvalMode?: 'required' | 'unrestricted';
   /** Unique within entryPoint + identity.authorityId + identity.subjectId. */
   idempotencyKey: string;
   delivery: AgentDeliveryTarget;
@@ -78,6 +82,8 @@ export interface AgentRunRecord {
     workspaceId: string;
     conversation: AgentConversationRef;
     delivery: AgentDeliveryTarget;
+    modelSelection?: AgentRunRequest['modelSelection'];
+    approvalMode?: AgentRunRequest['approvalMode'];
   };
   requestFingerprint: string;
   inputDigest: string;

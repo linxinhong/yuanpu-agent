@@ -330,6 +330,14 @@ test('runtime server exposes its protocol and greeting', async (context) => {
     api: 'fixture', provider: 'fixture', model: 'fixture', stopReason: 'stop', timestamp: Date.now(),
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  const trajectoryEndpoint = `http://${ready.host}:${ready.port}/v1/work/trajectory?conversationId=${encodeURIComponent(nested.id)}`;
+  const trajectoryBeforeMove = await fetch(trajectoryEndpoint, { headers }).then((response) => response.json());
+  assert.equal(trajectoryBeforeMove.conversationId, nested.id);
+  assert.equal(trajectoryBeforeMove.rounds, 1);
+  assert.deepEqual(trajectoryBeforeMove.rows.map((row) => row.kind), ['user', 'assistant']);
+  assert.equal((await fetch(`http://${ready.host}:${ready.port}/v1/work/trajectory?conversationId=work%3Aforeign`,
+    { headers })).status, 404);
+  assert.equal((await fetch(trajectoryEndpoint)).status, 401);
   const searchEndpoint = `http://${ready.host}:${ready.port}/v1/work/search?query=needle`;
   const searchBeforeMove = await fetch(searchEndpoint, { headers }).then((response) => response.json());
   assert.equal(searchBeforeMove.items[0].messageEntryId, searchEntryId);
@@ -356,6 +364,8 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.equal(relocated.folderId, parent.id);
   assert.deepEqual(relocated.previousWorkingDirectories, [nested.workingDirectory]);
   const searchAfterMove = await fetch(searchEndpoint, { headers }).then((response) => response.json());
+  const trajectoryAfterMove = await fetch(trajectoryEndpoint, { headers }).then((response) => response.json());
+  assert.deepEqual(trajectoryAfterMove.rows.map((row) => row.kind), ['user', 'assistant']);
   assert.equal(searchAfterMove.items[0].messageEntryId, searchEntryId);
   assert.deepEqual(searchAfterMove.items[0].folderPath.map((part) => part.name), ['Renamed']);
   assert.equal((await fetch(windowEndpoint, { headers }).then((response) => response.json())).status, 'ok');
@@ -676,7 +686,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   assert.deepEqual(scheduleHistory, []);
   assert.deepEqual(health, {
     version: '0.1.0',
-    protocolVersion: 7,
+    protocolVersion: 8,
     piVersion: '0.86.1',
     mcpTools: ['search_capabilities', 'execute_capability'],
     configRoot: home,

@@ -3,7 +3,6 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import { ManagedMcpSourceError } from './mcp-source.js';
 
 import {
-  CAPABILITY_ID_PREFIX,
   CAPABILITY_TOOL_NAMES,
   type CapabilityContext,
   type CapabilityAuthorizer,
@@ -19,10 +18,12 @@ import {
   type SearchCapabilitiesInput,
   type SearchCapabilitiesResult,
 } from './contracts.js';
+import { createCapabilityId, parseCapabilityId } from './id.js';
 
 export * from './contracts.js';
 export * from './approval.js';
 export * from './mcp-source.js';
+export { createCapabilityId, parseCapabilityId } from './id.js';
 
 export interface CapabilitySource {
   /** Stable for this configured source, not merely its package display name. */
@@ -63,37 +64,6 @@ const riskOrder: Record<CapabilityRiskLevel, number> = {
 };
 
 const schemaValidator = new Ajv2020({ allErrors: true, strict: false });
-
-function encodeCapabilityPart(value: string): string {
-  return Buffer.from(value, 'utf8').toString('base64url');
-}
-
-function decodeCapabilityPart(value: string): string | undefined {
-  try {
-    const decoded = Buffer.from(value, 'base64url').toString('utf8');
-    return encodeCapabilityPart(decoded) === value ? decoded : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function createCapabilityId(sourceInstanceId: string, originalName: string): string {
-  if (!sourceInstanceId.trim() || !originalName.trim()) {
-    throw new Error('Capability source and tool names must be non-empty.');
-  }
-  return `${CAPABILITY_ID_PREFIX}:${encodeCapabilityPart(sourceInstanceId)}:${encodeCapabilityPart(originalName)}`;
-}
-
-export function parseCapabilityId(id: string): {
-  sourceInstanceId: string;
-  originalName: string;
-} | undefined {
-  const [prefix, sourcePart, namePart, extra] = id.split(':');
-  if (prefix !== CAPABILITY_ID_PREFIX || !sourcePart || !namePart || extra !== undefined) return undefined;
-  const sourceInstanceId = decodeCapabilityPart(sourcePart);
-  const originalName = decodeCapabilityPart(namePart);
-  return sourceInstanceId && originalName ? { sourceInstanceId, originalName } : undefined;
-}
 
 function describe(source: CapabilitySource, definition: CapabilityDefinition): CapabilityDescriptor {
   return {
@@ -344,6 +314,7 @@ export class CapabilityRegistry implements CapabilityToolClient {
         approvalRequestId: input.approvalRequestId,
         runId: context.runId,
         sessionId: context.sessionId,
+        conversationId: context.conversationId,
         workspaceId: context.workspaceId,
         sourceInstanceId: capability.sourceInstanceId,
         packageVersion: capability.packageVersion,

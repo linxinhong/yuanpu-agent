@@ -5,6 +5,7 @@ import type { UiDestination } from '../ui-registry.js';
 import { AppIcon } from '../shared/app-icon.js';
 import { AvatarMark } from '../shared/avatar-mark.js';
 import { BrandShowcase } from '../shared/brand-showcase.js';
+import { emo, showNavigation } from '../emo.js';
 
 import { PageToolbarHost } from '../shared/page-toolbar.js';
 
@@ -17,9 +18,11 @@ export function App() {
   const location = useLocation();
   const routerNavigate = useNavigate();
   const destinations = useSyncExternalStore(uiRegistry.subscribe, uiRegistry.getSnapshot);
+  const enabledDestinations = destinations.filter((entry) => showNavigation(entry.id));
   const routeId = location.pathname.slice(1).split('/')[0];
-  const view: AppView = destinations.some((entry) => entry.id === routeId) ? routeId as AppView : 'work';
-  const setView = (destination: AppView) => routerNavigate(`/${destination}`);
+  const fallbackView = enabledDestinations.find((entry) => entry.id !== 'settings')?.id ?? 'settings';
+  const view: AppView = enabledDestinations.some((entry) => entry.id === routeId) ? routeId as AppView : fallbackView;
+  const setView = (destination: AppView) => routerNavigate(`/${showNavigation(destination) ? destination : fallbackView}`);
   const [configRoot, setConfigRoot] = useState('~/.yuanpu');
   const [notificationTarget, setNotificationTarget] = useState<NotificationNavigationTarget>();
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>();
@@ -53,17 +56,17 @@ export function App() {
         <div className="shell-toolbar-host" ref={setToolbarHost} />
       </div>
       <aside className="sidebar">
-        <nav className="sidebar-nav" aria-label="主导航">{destinations.filter((entry) => entry.id !== 'settings').map((entry) =>
+        <nav className="sidebar-nav" aria-label="主导航">{enabledDestinations.filter((entry) => entry.id !== 'settings').map((entry) =>
           <button key={entry.id} className={`nav-item ${view === entry.id ? 'active' : ''}`} type="button"
             title={entry.label} aria-label={entry.label} aria-current={view === entry.id ? 'page' : undefined} onClick={() => setView(entry.id)}>
             <AppIcon name={entry.id} /><span className="nav-label">{entry.label}</span>
           </button>)}</nav>
 
         <div className="sidebar-bottom">
-          <BrandShowcase variant="yuanpu" />
+          <BrandShowcase variant="yuanpu" name={emo.brand.name} />
           <button className={`sidebar-footer settings-trigger ${view === 'settings' ? 'active' : ''}`} type="button"
             title="设置" aria-label="设置" onClick={() => setView('settings')}><AppIcon name="settings" /></button>
-          <div className="profile-avatar" role="img" aria-label="Yuanpu Agent 头像"><AvatarMark /></div>
+          <div className="profile-avatar" role="img" aria-label={`${emo.brand.name} 头像`}><AvatarMark /></div>
         </div>
       </aside>
 
@@ -77,7 +80,7 @@ export function App() {
         </div>
       )}
 
-      {destinations.map((entry) => <div className={`page-host ${view === entry.id ? '' : 'view-hidden'}`} key={entry.id}>
+      {enabledDestinations.map((entry) => <div className={`page-host ${view === entry.id ? '' : 'view-hidden'}`} key={entry.id}>
         {entry.render({
           active: view === entry.id,
           configRoot,

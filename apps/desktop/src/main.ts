@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import { autoUpdater } from 'electron-updater';
@@ -20,6 +21,24 @@ let notificationHost: ElectronNotificationHost | undefined;
 let pendingNotificationTarget: NotificationNavigationTarget | undefined;
 let notificationsEnabled = true;
 let runtimeRecoveryNotice: RuntimeRecoveryNotice | undefined;
+
+function readEmoBrand(): { name: string; icon: string } {
+  const appRoot = app.isPackaged ? join(process.resourcesPath, 'app') : resolve(__dirname, '../../app');
+  const iconRoot = app.isPackaged ? appRoot : join(appRoot, 'src/assets');
+  try {
+    const config = JSON.parse(readFileSync(join(appRoot, 'emo.json'), 'utf8')) as {
+      brand?: { name?: unknown; icon?: unknown };
+    };
+    const name = typeof config.brand?.name === 'string' && config.brand.name.trim()
+      ? config.brand.name : 'Yuanpu Agent';
+    const icon = typeof config.brand?.icon === 'string' ? resolve(iconRoot, config.brand.icon) : '';
+    return { name, icon: icon.startsWith(`${iconRoot}${sep}`) && existsSync(icon) ? icon : '' };
+  } catch {
+    return { name: 'Yuanpu Agent', icon: '' };
+  }
+}
+
+const emoBrand = readEmoBrand();
 
 function flushNotificationNavigation(): void {
   if (!mainWindow || mainWindow.webContents.isLoadingMainFrame() || !pendingNotificationTarget) return;
@@ -68,7 +87,8 @@ function createWindow(): void {
     minHeight: 560,
     backgroundColor: '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    title: 'Yuanpu Agent',
+    title: emoBrand.name,
+    ...(emoBrand.icon ? { icon: emoBrand.icon } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -122,6 +142,8 @@ app.on('second-instance', () => {
 });
 
 if (hasSingleInstanceLock) void app.whenReady().then(async () => {
+  app.setName(emoBrand.name);
+  if (process.platform === 'darwin' && emoBrand.icon) app.dock?.setIcon(emoBrand.icon);
   const browserGuestManager = new BrowserGuestManager({
     onGuestCrashed: (windowId, guestKey) => {
       BrowserWindow.fromId(windowId)?.webContents.send('browser:guest-crashed', guestKey);

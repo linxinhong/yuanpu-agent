@@ -27,6 +27,30 @@ test('parallel runs respect global concurrency, tool ceiling, and persist result
   const saved = JSON.parse(await readFile(join(runs[0].directory, 'result.json'), 'utf8'));
   assert.deepEqual(saved.children.map((c) => c.text), ['0', '1', '2', '3', '4']);
 });
+test('running child exposes its Pi session before the child finishes', async (t) => {
+  let finish;
+  const manager = await setup(t, (input) => new Promise((resolve) => {
+    input.onSessionStarted('child-session', '/workspace');
+    input.onProgress('Inspecting files');
+    finish = () => resolve({ text: 'done', sessionId: 'child-session', cwd: '/workspace' });
+  }));
+  const run = await manager.start({ agent: 'scout', task: 'inspect', async: true });
+  let child;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    child = manager.status(run.id).children[0];
+    if (child.sessionId) break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(child?.sessionId, 'child-session');
+  assert.equal(child?.cwd, '/workspace');
+  assert.equal(child?.progress, 'Inspecting files');
+  assert.equal(child?.status, 'running');
+  finish();
+  for (let attempt = 0; attempt < 50 && manager.status(run.id).status === 'running'; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(manager.status(run.id).status, 'completed');
+});
 test('chain forwards output and stops at approval boundary', async (t) => {
   let count = 0;
   const manager = await setup(t, async ({ task }) => {
@@ -116,16 +140,15 @@ for (const approval of [false, true]) test(`real SDK delegation preserves model,
   });
   try {
     const result = await chat.prompt('Delegate this test to an agent.', { runId: 'parent-run' });
-    assert.equal(result.message, 'Delegation complete.');
-    assert.equal(requests.length, 3);
+    assert.equal(result.message, approval ? '等待授权后执行当前操作。' : 'Delegation complete.');
+    assert.equal(requests.length, approval ? 2 : 3);
     assert.ok(requests[0].tools.some((tool) => tool.function.name === 'subagent'));
     assert.equal(requests[1].tools.some((tool) => tool.function.name === 'subagent'), false);
     if (!approval) assert.deepEqual(requests[1].tools.map((tool) => tool.function.name).sort(), ['find', 'grep', 'ls', 'read']);
-    const returned = requests[2].messages.find((m) => m.role === 'tool');
     if (approval) {
-      assert.equal(result.pendingApprovalRequestId, 'approval-test', returned.content);
-      assert.match(returned.content, /needs_approval/);
+      assert.equal(result.pendingApprovalRequestId, 'approval-test');
     } else {
+      const returned = requests[2].messages.find((m) => m.role === 'tool');
       assert.match(returned.content, /Child evidence/);
       assert.match(returned.content, /completed/);
     }

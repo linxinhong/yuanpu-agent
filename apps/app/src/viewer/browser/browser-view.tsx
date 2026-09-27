@@ -77,6 +77,7 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
     const updateState = () => {
       if (disposed) return;
       const title = webview.getTitle();
+      memory.remember(scopeKey, webview.getURL());
       if (title) onTitleChange?.(title);
       setState((current) => {
         return {

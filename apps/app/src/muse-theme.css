@@ -55,6 +55,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .brand-showcase { display: flex; width: 36px; min-height: 146px; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 12px; color: var(--yp-text-tinted); }
 .brand-showcase-mark { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border: 1px solid var(--yp-border-tinted); border-radius: 8px; color: var(--yp-accent-text); background: var(--yp-surface-tinted); }
 .brand-showcase-mark svg { width: 19px; height: 19px; }
+.brand-showcase-mark img { width: 26px; height: 26px; object-fit: contain; }
 .brand-showcase-name { writing-mode: vertical-rl; text-orientation: mixed; color: var(--yp-text-subtle); font-size: 0.625rem; font-weight: 500; letter-spacing: .08em; white-space: nowrap; }
 .brand-showcase-mindlink { display: none; }
 .brand-showcase-seal { width: 30px; height: 30px; object-fit: contain; }
@@ -355,6 +356,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .composer .composer-utility:hover:not(:disabled) { color: var(--yp-text); background: var(--yp-action-hover); }
 .composer .composer-utility:disabled { color: var(--yp-text-subtle); background: transparent; cursor: default; }
 .composer .composer-utility svg { width: 20px; height: 20px; }
+.composer .composer-permission[aria-pressed='true'] { color: #c96262; background: transparent; }
+.composer .composer-permission[aria-pressed='true']:hover:not(:disabled) { color: #b94f4f; background: transparent; }
 .composer .composer-redaction-preview { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 0; border-radius: 8px; padding: 0; color: var(--yp-text-action); background: transparent; cursor: pointer; }
 .composer .composer-redaction-preview:hover { color: var(--yp-text); background: var(--yp-action-hover); }
 .composer .composer-redaction-preview[aria-pressed='true'] { color: var(--yp-redaction-active); background: transparent; }
@@ -584,9 +587,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 /* The empty conversation keeps its real greeting and input together. */
 .chat-panel.is-empty .chat-main { display: flex; flex-direction: column; background: var(--yp-surface); }
 .chat-panel.is-empty .conversation { flex: 0 0 auto; min-height: 0; margin-top: auto; overflow: visible; }
-.chat-panel.is-empty .conversation-inner { min-height: 0; padding: 0 0 18px; }
+.chat-panel.is-empty .conversation-inner { min-height: 0; padding: 0 0 30px; }
 .chat-panel.is-empty .composer-wrap { flex: 0 0 auto; margin-bottom: auto; background: var(--yp-surface); }
-.empty-chat { display: flex; flex-direction: column; align-items: center; max-width: 640px; margin: 0 auto; text-align: center; }
+.empty-chat { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 640px; margin: 0 auto; text-align: center; }
 .empty-chat-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; }
 .empty-chat-mark { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid var(--yp-border-tinted); border-radius: 50%; color: var(--yp-text-tinted); background: var(--yp-surface-tinted); }
 .empty-chat-mark svg { width: 19px; height: 19px; }
@@ -791,7 +794,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   .sidebar-footer.settings-trigger { display: grid; position: fixed; right: 6px; bottom: 7px; width: 45px; height: 45px; z-index: 12; }
   .sidebar-nav { margin-top: 0; padding-right: 45px; }
   .nav-item { min-width: 0; }
-  .chat-panel.is-empty .conversation-inner { padding-bottom: 16px; }
+  .chat-panel.is-empty .conversation-inner { padding-bottom: 22px; }
   .empty-chat-mark { width: 30px; height: 30px; }
   .empty-chat-mark svg { width: 18px; height: 18px; }
   .empty-chat h1 { font-size: 1.375rem; line-height: 1.75rem; }

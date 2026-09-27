@@ -22,7 +22,16 @@ interface FolderRow {
 }
 interface TagRow { tag_id: string; workspace_id: string; name: string; color: string; created_at: string; updated_at: string }
 
-const icons = new Set(['chat', 'folder', 'briefcase', 'code', 'book', 'star', 'lightning', 'archive']);
+const icons = new Set([
+  'chat', 'folder', 'briefcase', 'code', 'book', 'star', 'lightning', 'archive',
+  'target', 'calendar', 'clock', 'globe', 'search', 'file', 'image', 'chart', 'lightbulb', 'rocket',
+  'flag', 'pin', 'link', 'terminal', 'database', 'cloud', 'shield', 'key', 'puzzle', 'layers',
+  'music', 'camera', 'heart', 'leaf', 'coffee', 'gift', 'users', 'wrench',
+  'home', 'message', 'note', 'checklist', 'bell', 'bookmark', 'calendar-check', 'map', 'compass',
+  'palette', 'pen', 'sparkles', 'chip', 'bug', 'git-branch', 'server', 'wifi', 'upload',
+  'download', 'inbox', 'mail', 'phone', 'video', 'microphone', 'headset', 'battery', 'sun',
+  'moon', 'mountain', 'tree', 'flower', 'shopping', 'wallet', 'calculator', 'graduation', 'trophy',
+]);
 function validName(value: string): string {
   const name = value.trim();
   if (!name || name.length > 120 || /[\x00-\x1f]/.test(name)) throw new Error('Invalid display name.');
@@ -315,6 +324,7 @@ export class WorkConversationStore {
     iconId: string, relativeDirectory: string, requestId?: string): WorkFolder {
     const parent = parentId ? this.folderRow(workspaceId, parentId) : undefined;
     if (parentId && !parent) throw new Error('Unknown Work parent folder.');
+    if (relativeDirectory.split('/').length > 5) throw new Error('工作文件夹最多支持五级。');
     if (!/^folder:[0-9a-f-]{36}$/.test(id)
       || !/^f-[0-9a-f-]{36}(\/f-[0-9a-f-]{36})*$/.test(relativeDirectory)
       || (parent ? !relativeDirectory.startsWith(`${parent.relative_directory}/`)
@@ -376,6 +386,14 @@ export class WorkConversationStore {
       this.database.exec('COMMIT');
     } catch (error) { this.database.exec('ROLLBACK'); throw error; }
     return this.toConversation(this.row(workspaceId, id)!, this.selectedId(workspaceId) ?? '');
+  }
+
+  /** Name a new Work conversation once; a user-supplied title always wins. */
+  titleIfEmpty(workspaceId: string, id: string, title: string): boolean {
+    const result = this.database.prepare(`UPDATE yp_work_conversations SET title=?, updated_at=?
+      WHERE workspace_id=? AND conversation_id=? AND title=''`)
+      .run(validName(title), new Date().toISOString(), workspaceId, id);
+    return result.changes > 0;
   }
 
   private tagRow(workspaceId: string, id: string): TagRow | undefined {

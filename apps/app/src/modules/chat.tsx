@@ -19,6 +19,7 @@ import type {
 } from '@yuanpu-agent/protocol';
 import { effectiveHotkeyBinding } from '@yuanpu-agent/protocol';
 import mindlinkSeal from '../../themes/assets/mindlink-seal.png';
+import { emo } from '../emo.js';
 
 import { AppIcon } from '../shared/app-icon.js';
 import { bindingFromKeyEvent } from '../shared/hotkeys.js';
@@ -103,9 +104,9 @@ function privateImDeliveryLabel(status: PrivateImRunSummary['replyDeliveryStatus
 const initialMessages: ChatMessage[] = [{
   id: 1,
   role: 'assistant',
-  text: '你好，我是 YuanpuAgent。你可以直接开始对话，也可以让我调用外部 MCP 能力。',
+  text: emo.welcome.work.description,
 }];
-const assistantGreeting = '你好，我是你的助理。桌面与企业微信共享助理身份，各自保留独立对话。';
+const assistantGreeting = emo.welcome.assistant.description;
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -1025,8 +1026,8 @@ export function ChatPanel({
                 <strong>元朴思联</strong><span>MindLink</span>
               </div>
               <div className="empty-chat-heading">
-                <div className="empty-chat-mark" aria-hidden="true">{surface === 'assistant' ? <AppIcon name="assistant" /> : <AvatarMark />}</div>
-                <h1>{surface === 'work' ? '开始一项工作' : '你的桌面助理'}</h1>
+                {surface === 'assistant' && <div className="empty-chat-mark" aria-hidden="true"><AppIcon name="assistant" /></div>}
+                <h1>{emo.welcome[surface].title}</h1>
               </div>
               <p>{messages[0]?.text}</p>
             </div>}
@@ -1150,7 +1151,7 @@ export function ChatPanel({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={workArchived ? workConversationId === 'default' ? '旧工作归档只读，请选择或新建工作' : '会话已归档，恢复后可继续对话' : archiveOpen ? '归档只读，请返回已绑定会话继续对话' : '今天帮你做些什么？'}
+              placeholder={workArchived ? workConversationId === 'default' ? '旧工作归档只读，请选择或新建工作' : '会话已归档，恢复后可继续对话' : archiveOpen ? '归档只读，请返回已绑定会话继续对话' : emo.composer.placeholder}
               disabled={archiveOpen || workArchived || (surface === 'work' && Boolean(desktop) && !workConversationId)}
               rows={2}
             />

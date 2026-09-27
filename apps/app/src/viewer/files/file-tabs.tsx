@@ -10,11 +10,16 @@ import { FilePreview } from '../preview/file-preview.js';
 import { FileTree, useWorkspaceTree } from './file-tree.js';
 
 type FileTab =
-  | { id: 'activity' | 'run' | 'review'; kind: 'activity' | 'run' | 'review' }
+  | { id: 'trajectory' | 'subagents' | 'review'; kind: 'trajectory' | 'subagents' | 'review' }
   | { id: 'tree'; kind: 'tree' }
   | { id: string; kind: 'image'; image: ImagePreview }
   | { id: 'browser'; kind: 'browser' }
   | { id: string; kind: 'file'; path: string };
+
+type SidebarSnapshot = { tabs: FileTab[]; activeTabId: string; treeSelection?: string;
+  treeOpen: boolean; directoryPath: string; browserTitle: string };
+const sidebarSnapshots = new Map<string, SidebarSnapshot>();
+const consumedBrowserRequests = new Map<string, number>();
 
 export type ImagePreviewRequest = ImagePreview & { id: string };
 
@@ -29,7 +34,6 @@ export function ImagePreviewPanel({ image, onClose }: { image: ImagePreview; onC
 
 const TREE_TAB: FileTab = { id: 'tree', kind: 'tree' };
 const BROWSER_TAB: FileTab = { id: 'browser', kind: 'browser' };
-const REVIEW_TAB: FileTab = { id: 'review', kind: 'review' };
 
 function fileTabId(path: string): string {
   return `file:${path}`;
@@ -76,24 +80,32 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
   requestImage?: ImagePreviewRequest;
   onActiveFileChange?: (path: string | undefined) => void;
   tabHost: HTMLElement | null;
-  view: 'activity' | 'run' | 'files' | 'review';
-  onViewChange: (view: 'activity' | 'run' | 'files' | 'review') => void;
+  view: 'trajectory' | 'subagents' | 'files' | 'review';
+  onViewChange: (view: 'trajectory' | 'subagents' | 'files' | 'review') => void;
   runContent: ReactNode;
   reviewContent: ReactNode;
   onClose: () => void;
   rootName?: string;
 }) {
+  const [snapshot] = useState(() => sidebarSnapshots.get(scopeKey));
   const [initialTab] = useState<FileTab>(() => view === 'files'
     ? requestPath ? { id: fileTabId(requestPath), kind: 'file', path: requestPath } : TREE_TAB
     : { id: view, kind: view });
-  const [tabs, setTabs] = useState<FileTab[]>([initialTab]);
-  const [activeTabId, setActiveTabId] = useState(initialTab.id);
-  const [treeSelection, setTreeSelection] = useState<string>();
+  const [tabs, setTabs] = useState<FileTab[]>(snapshot?.tabs ?? [initialTab]);
+  const [activeTabId, setActiveTabId] = useState(snapshot?.activeTabId ?? initialTab.id);
+  const [treeSelection, setTreeSelection] = useState<string | undefined>(snapshot?.treeSelection);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [browserTitle, setBrowserTitle] = useState('浏览器');
-  const [treeOpen, setTreeOpen] = useState(true);
-  const [directoryPath, setDirectoryPath] = useState('');
+  const [browserTitle, setBrowserTitle] = useState(snapshot?.browserTitle ?? '浏览器');
+  const [treeOpen, setTreeOpen] = useState(snapshot?.treeOpen ?? true);
+  const [directoryPath, setDirectoryPath] = useState(snapshot?.directoryPath ?? '');
   const [openLocalError, setOpenLocalError] = useState<string>();
+
+  useEffect(() => {
+    if (!tabs.length) { sidebarSnapshots.delete(scopeKey); return; }
+    sidebarSnapshots.delete(scopeKey);
+    sidebarSnapshots.set(scopeKey, { tabs, activeTabId, treeSelection, treeOpen, directoryPath, browserTitle });
+    while (sidebarSnapshots.size > 30) sidebarSnapshots.delete(sidebarSnapshots.keys().next().value!);
+  }, [scopeKey, tabs, activeTabId, treeSelection, treeOpen, directoryPath, browserTitle]);
 
   function activate(tab: FileTab) {
     setTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
@@ -101,6 +113,13 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
     onViewChange(tab.kind === 'file' || tab.kind === 'image' || tab.kind === 'tree' || tab.kind === 'browser' ? 'files' : tab.kind);
     setMenuOpen(false);
   }
+
+  useEffect(() => {
+    if (view === 'trajectory' || view === 'subagents' || view === 'review') {
+      setTabs((current) => current.some((tab) => tab.id === view) ? current : [...current, { id: view, kind: view }]);
+      setActiveTabId(view);
+    }
+  }, [view]);
 
   useEffect(() => {
     if (view === 'files' && requestPath) {
@@ -118,11 +137,12 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
   }, [requestImage, view]);
 
   useEffect(() => {
-    if (!browserRequest || !browserHost) return;
+    if (!browserRequest || !browserHost || browserRequest <= (consumedBrowserRequests.get(scopeKey) ?? 0)) return;
+    consumedBrowserRequests.set(scopeKey, browserRequest);
     setTabs((current) => current.some((tab) => tab.kind === 'browser') ? current : [...current, BROWSER_TAB]);
     setActiveTabId('browser');
     onViewChange('files');
-  }, [browserRequest, browserHost, onViewChange]);
+  }, [browserRequest, browserHost, onViewChange, scopeKey]);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeFilePath = activeTab?.kind === 'file' ? activeTab.path : undefined;
@@ -131,15 +151,21 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
   function closeTab(id: string) {
     const index = tabs.findIndex((tab) => tab.id === id);
     const next = tabs.filter((tab) => tab.id !== id);
+    if (!next.length) {
+      setTabs([TREE_TAB]);
+      setActiveTabId('tree');
+      onViewChange('files');
+      onClose();
+      return;
+    }
     setTabs(next);
-    if (!next.length) { onClose(); return; }
     if (activeTabId === id) activate(next[Math.max(0, index - 1)]!);
   }
 
   const tabStrip = <div className="workspace-tabs">
     <div className="file-tabs" role="tablist" aria-label="右侧面板标签">
       {tabs.map((tab) => {
-        const label = tab.kind === 'file' ? fileTabLabel(tab.path) : tab.kind === 'image' ? tab.image.alt || '图片' : tab.kind === 'browser' ? browserTitle : tab.kind === 'tree' ? '文件' : tab.kind === 'activity' ? '动态' : tab.kind === 'review' ? '审查' : '运行';
+        const label = tab.kind === 'file' ? fileTabLabel(tab.path) : tab.kind === 'image' ? tab.image.alt || '图片' : tab.kind === 'browser' ? browserTitle : tab.kind === 'tree' ? '文件' : tab.kind === 'trajectory' ? '运行轨迹' : tab.kind === 'subagents' ? '子智能体' : '审查';
         return <div key={tab.id} className={`file-tab ${tab.id === activeTabId ? 'active' : ''}`}>
           <button type="button" role="tab" aria-selected={tab.id === activeTabId} className="file-tab-title"
             title={tab.kind === 'file' ? tab.path : label} onClick={() => activate(tab)}>
@@ -157,9 +183,6 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
         <div className="workspace-tab-menu" onKeyDown={(event) => { if (event.key === 'Escape') setMenuOpen(false); }}>
           <button type="button" onClick={() => activate(TREE_TAB)}><AppIcon name="folder" />文件列表</button>
           {browserHost && <button type="button" onClick={() => activate(BROWSER_TAB)}><AppIcon name="globe" />浏览器</button>}
-          <button type="button" onClick={() => activate({ id: 'activity', kind: 'activity' })}><AppIcon name="schedules" />动态</button>
-          <button type="button" onClick={() => activate({ id: 'run', kind: 'run' })}><AppIcon name="send" />运行</button>
-          <button type="button" onClick={() => activate(REVIEW_TAB)}><AppIcon name="review" />审查</button>
         </div>
       </>}
     </div>
@@ -172,8 +195,7 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
       <BrowserView host={browserHost} scopeKey={scopeKey} onTitleChange={setBrowserTitle} />
     </div>}
     {activeTab?.kind === 'browser' ? null : activeTab?.kind === 'review' ? reviewContent
-      : activeTab?.kind === 'activity' || activeTab?.kind === 'run' ? runContent : <div className="file-workspace-body">
-      {activeTab?.kind === 'image' ? <ImagePreviewPanel image={activeTab.image} />
+      : activeTab?.kind === 'trajectory' || activeTab?.kind === 'subagents' ? runContent : <div className="file-workspace-body">      {activeTab?.kind === 'image' ? <ImagePreviewPanel image={activeTab.image} />
         : !host ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
         : activeTab?.kind === 'file'
           ? <div className="file-preview-layout">

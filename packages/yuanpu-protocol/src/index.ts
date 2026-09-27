@@ -1,9 +1,9 @@
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 import type { NotificationNavigationTarget } from './host-events.js';
 import type { AssistantMemoryView, AssistantSuggestion, AssistantSuggestionInbox,
   AssistantWorkspaceSnapshot, AssistantDelegationRecord, AssistantSourceRevocationReceipt } from './assistant.js';
-import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
+import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunRequest, AgentRunStatus } from './agent.js';
 import type {
   ScheduleHistoryRecord,
   ScheduleInput,
@@ -54,6 +54,7 @@ export const RUNTIME_ROUTES = {
   workMove: '/v1/work/move',
   workSearch: '/v1/work/search',
   workMessageWindow: '/v1/work/messages/window',
+  workTrajectory: '/v1/work/trajectory',
   workTags: '/v1/work/tags',
   workOrder: '/v1/work/order',
   workFiles: '/v1/work/files',
@@ -317,6 +318,30 @@ export interface DesktopTranscriptMessage {
   run?: DesktopReplyRunInfo;
 }
 
+export interface SessionTrajectoryRow {
+  id: string;
+  round: number;
+  kind: 'user' | 'assistant' | 'tool' | 'model' | 'context' | 'subagent';
+  title: string;
+  text: string;
+  at: string;
+  status?: 'running' | 'completed' | 'failed';
+  toolCallId?: string;
+}
+
+export interface SessionTrajectory {
+  conversationId: string;
+  rows: SessionTrajectoryRow[];
+  rounds: number;
+  calls: number;
+  children: Array<{ id: string; agent: string; status: string; at: string; progress?: string;
+    rows: SessionTrajectoryRow[]; rounds: number; calls: number }>;
+  context?: { tokens: number | null; contextWindow: number; percent: number | null;
+    breakdown?: { systemPrompt: number; tools: number; messages: number; other: number } };
+  live?: { runId: string; text: string; finishedAt?: string; tools: Array<{ id: string; name: string; summary: string;
+    category: string; status: 'running' | 'completed' | 'failed'; at: string }> };
+}
+
 export interface AssistantLinkStatus {
   linked: boolean;
   contactId?: string;
@@ -562,8 +587,10 @@ export interface DesktopBridge {
   greeting(name: string): Promise<RuntimeGreeting>;
   chat(message: string): Promise<ChatResponse>;
   submitDesktopMessage(message: string, surface?: DesktopConversationSurface, conversationId?: string,
-    clientMessageId?: string): Promise<AgentRunReceipt>;
-  getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
+    clientMessageId?: string, modelSelection?: AgentRunRequest['modelSelection'],
+    approvalMode?: AgentRunRequest['approvalMode']): Promise<AgentRunReceipt>;
+  getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string,
+    beforeId?: string, limit?: number): Promise<DesktopTranscriptMessage[]>;
   listWorkConversations(): Promise<WorkConversation[]>;
   createWorkConversation(folderId?: string, requestId?: string): Promise<WorkConversation>;
   selectWorkConversation(conversationId: string, previewArchived?: boolean): Promise<WorkConversation>;
@@ -571,6 +598,7 @@ export interface DesktopBridge {
   moveWorkNode(request: WorkMoveRequest): Promise<WorkMoveResult>;
   searchWorkConversations(input: WorkSearchQuery): Promise<WorkSearchResult>;
   getWorkMessageWindow(conversationId: string, entryId: string, radius?: number): Promise<WorkMessageWindowResult>;
+  getWorkTrajectory(conversationId: string): Promise<SessionTrajectory>;
   listWorkFolders(): Promise<WorkFolder[]>;
   createWorkFolder(parentId: string | null, name: string, iconId?: string, requestId?: string): Promise<WorkFolder>;
   updateWorkFolder(folderId: string, patch: { name?: string; iconId?: string }): Promise<WorkFolder>;

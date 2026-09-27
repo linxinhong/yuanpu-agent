@@ -185,6 +185,24 @@ test('rejects cycle, occupied destination, symlink and external cwd without part
   assert.equal(f.db.workConversations.moveRecords().length,0);
 });
 
+test('rejects moving a five-level folder subtree below another folder',async t=>{
+  const f=await fixture(t); const store=f.db.workConversations;
+  let parentId=null; let path=''; let rootId='';
+  for(let level=1;level<=5;level++){
+    const id=`folder:${randomUUID()}`;
+    if(level===1)rootId=id;
+    path=[path,`f-${id.slice(7)}`].filter(Boolean).join('/');
+    await mkdir(join(f.workspaceRoot,path),{recursive:true});
+    store.createFolder(f.scope,id,parentId,`level-${level}`,'folder',path);
+    parentId=id;
+  }
+  await assert.rejects(new WorkDirectoryMoveCoordinator(f.options()).move({
+    requestId:randomUUID(),kind:'folder',id:rootId,targetFolderId:f.targetId,
+  }),/五级/);
+  assert.equal(store.listFolders(f.scope).find((folder)=>folder.id===rootId).parentId,null);
+  assert.equal(store.moveRecords().length,0);
+});
+
 import { createServer } from 'node:http';
 const { RuntimeAgentExecutor } = await import('../src/agent-runtime.ts');
 import { PersistentAgentService, readYuanpuChatTranscript } from '@yuanpu-agent/runtime-kit';

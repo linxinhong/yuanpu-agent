@@ -1,0 +1,26 @@
+{
+  "brand": {
+    "name": "Yuanpu Agent",
+    "icon": "brand/app-icon.png"
+  },
+  "navigation": {
+    "work": true,
+    "assistant": true,
+    "skills": true,
+    "schedules": true,
+    "knowledge": true
+  },
+  "welcome": {
+    "work": {
+      "title": "开始一项工作",
+      "description": "你好，我是 YuanpuAgent。你可以直接开始对话，也可以让我调用外部 MCP 能力。"
+    },
+    "assistant": {
+      "title": "你的桌面助理",
+      "description": "你好，我是你的助理。桌面与企业微信共享助理身份，各自保留独立对话。"
+    }
+  },
+  "composer": {
+    "placeholder": "今天帮你做些什么？"
+  }
+}

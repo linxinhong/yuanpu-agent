@@ -1,4 +1,5 @@
 import { WorkDirectoryMoveCoordinator, WorkMoveConflict } from './work-directory-move.js';
+import { titleFromFirstMessage } from './work-title.js';
 import {
   verifyYuanpuSessionLocation,
   createDemoCapabilitySource,
@@ -28,6 +29,8 @@ import {
   capabilityManifestDigest,
   openYuanpuMetadataDatabase,
   readYuanpuChatTranscript,
+  readYuanpuSessionTrajectory,
+  readYuanpuSavedContextUsage,
   readSavedWorkMessageWindow,
   searchWorkConversations,
   readYuanpuSavedToolResults,
@@ -472,7 +475,13 @@ async function serve(): Promise<void> {
       process.env.YUANPU_PYTHON_MCP_VERSION = bundledManifest.version;
     }
   }
-  const approvals = await CapabilityApprovalStore.open(join(home.appPath, 'approvals.json'));
+  const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
+  const approvals = await CapabilityApprovalStore.open(join(home.appPath, 'approvals.json'), {
+    allowUnattended: (input) => Boolean(input.runId && input.sessionId && input.workspaceId
+      && metadata.agentRuns.isUnrestrictedCapabilityRun(
+      input.runId, input.sessionId, input.workspaceId,
+    )),
+  });
   const pythonConfigFile = join(home.packagesPath, 'config', 'builtin.python.echo', 'user.json');
   const fetchArtifactManifest = async (source: string) => {
     if (!artifacts) throw new Error('当前宿主没有配置能力制品信任根。');
@@ -562,7 +571,6 @@ async function serve(): Promise<void> {
     discoveryTimeoutMs: PYTHON_CAPABILITY_DISCOVERY_TIMEOUT_MS,
   });
   const piCapabilityTools = createYuanpuCapabilityTools(mcp);
-  const metadata = openYuanpuMetadataDatabase(join(home.workflowsPath, 'automation.sqlite'));
   const workConversations = metadata.workConversations;
   const workMoves = new WorkDirectoryMoveCoordinator({
     store: workConversations, workspaceId: home.config.workingDirectory,
@@ -669,8 +677,8 @@ async function serve(): Promise<void> {
       cwd: home.config.workingDirectory,
       provider: home.config.provider,
       model: home.config.model,
-      builtinSkillPaths: process.env.YUANPU_BUILTIN_SKILLS_ROOT
-        ? [resolve(process.env.YUANPU_BUILTIN_SKILLS_ROOT)] : [],
+      builtinAgentRoot: process.env.YUANPU_BUILTIN_AGENTS_ROOT
+        ? resolve(process.env.YUANPU_BUILTIN_AGENTS_ROOT) : undefined,
     },
   });
   const assistantSources = new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
@@ -933,10 +941,14 @@ async function serve(): Promise<void> {
       workspaceId: workConversation!.working_directory,
       conversation: { namespace: 'desktop', conversationId: workConversationId! },
       input: { type: 'text', text: body.message.trim() },
+      ...(body.modelSelection !== undefined ? { modelSelection: body.modelSelection } : {}),
+      ...(body.approvalMode !== undefined ? { approvalMode: body.approvalMode } : {}),
       idempotencyKey: randomUUID(),
       delivery: { kind: 'desktop' },
     });
     if (!submission.accepted) return { error: submission.message } as const;
+    try { workConversations.titleIfEmpty(workScope, workConversationId!, titleFromFirstMessage(body.message.trim())); }
+    catch (error) { console.warn('[work-title]', error); }
     return { receipt: submission } as const;
   };
 
@@ -1337,6 +1349,7 @@ async function serve(): Promise<void> {
             if (parentId && !parent) throw new Error('Unknown Work parent folder.');
             const id = `folder:${randomUUID()}`;
             const relative = [parent?.relative_directory, `f-${id.slice(7)}`].filter(Boolean).join('/');
+            if (relative.split('/').length > 5) throw new Error('工作文件夹最多支持五级。');
             workConversations.beginCreateIntent(workScope, id, relative, 'folder');
             try {
               await createManagedWorkspaceDirectory(home.workspacePath,
@@ -1521,6 +1534,15 @@ async function serve(): Promise<void> {
           response.end(JSON.stringify({ error: 'Unknown desktop conversation surface.' }));
           return;
         }
+        const requestedLimit = url.searchParams.get('limit');
+        const limit = requestedLimit === null ? undefined : Number(requestedLimit);
+        const beforeId = url.searchParams.get('before') ?? undefined;
+        if ((limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 101))
+          || (beforeId !== undefined && (beforeId.length > 128 || !/^[A-Za-z0-9_-]+$/.test(beforeId)))) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid transcript page request.' }));
+          return;
+        }
         if (surface === 'assistant') {
           response.end(JSON.stringify(assistantHost.transcript()));
           return;
@@ -1541,7 +1563,7 @@ async function serve(): Promise<void> {
         }
         response.end(JSON.stringify(piSessionId
           ? readYuanpuChatTranscript(workConversation?.working_directory ?? home.config.workingDirectory,
-            piSessionId, home.sessionsPath)
+            piSessionId, home.sessionsPath, limit ?? 100, false, beforeId)
           : []));
         return;
       }
@@ -1589,6 +1611,29 @@ async function serve(): Promise<void> {
           response.statusCode = 400;
           response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
         }
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workTrajectory && request.method === 'GET') {
+        const conversationId = url.searchParams.get('conversationId') ?? '';
+        const row = workConversations.row(workScope, conversationId);
+        const piSessionId = workConversations.sessionId(workScope, conversationId);
+        if (!row || !piSessionId) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
+        const trajectory = readYuanpuSessionTrajectory(row.working_directory, piSessionId,
+          home.sessionsPath, conversationId, home.agentPath, await agentExecutor.subagentRuns(piSessionId));
+        const observation = await agentExecutor.observation(piSessionId);
+        if (!observation.context) {
+          try {
+            observation.context = await readYuanpuSavedContextUsage(row.working_directory,
+              piSessionId, home.sessionsPath, home.appPath, home.agentPath,
+              { provider: home.config.provider, model: home.config.model });
+          } catch { /* A model setting error must not hide the Pi trajectory. */ }
+        }
+        response.end(JSON.stringify({ ...trajectory, ...observation }));
         return;
       }
 
@@ -2018,6 +2063,7 @@ async function serve(): Promise<void> {
           }, {
             runId: execution.runId,
             sessionId: execution.sessionId,
+            conversationId: execution.conversationId,
             workspaceId: execution.workspaceId,
             signal: approvalSignal,
           });

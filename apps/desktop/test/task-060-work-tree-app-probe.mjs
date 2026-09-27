@@ -116,6 +116,9 @@ try {
   instance = await launch(appRoot, home, userData);
   let { page } = instance;
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rendererUrl);
+  await page.evaluate(() => window.localStorage.setItem('yuanpu:right-panel-width', '1600'));
+  await page.reload();
   await page.goto(`${rendererUrl}#/work`);
   await page.getByRole('button', { name: '打开工作列表' }).click();
   await page.locator('.work-tree-shell').waitFor();
@@ -132,6 +135,41 @@ try {
   await folderRow('Platform').click();
   await addFolder('Milestones');
   await folderRow('Milestones').click();
+  await page.getByRole('button', { name: '新建文件夹' }).click();
+  const folderPlacementSize = await page.getByRole('radio', { name: /同级/ }).evaluate((radio) => ({
+    radioWidth: radio.getBoundingClientRect().width,
+    optionHeight: radio.closest('label').getBoundingClientRect().height,
+  }));
+  assert.equal(folderPlacementSize.radioWidth <= 24 && folderPlacementSize.optionHeight < 70, true,
+    `Folder placement controls expanded unexpectedly: ${JSON.stringify(folderPlacementSize)}`);
+  await page.getByRole('radio', { name: /同级/ }).check();
+  await page.getByRole('textbox', { name: '新文件夹名称' }).fill('Sibling');
+  await page.getByRole('dialog', { name: '新建文件夹' }).getByRole('button', { name: '创建' }).click();
+  await folderRow('Sibling').waitFor();
+  const sibling = (await page.evaluate(() => window.yuanpu.listWorkFolders())).find((item) => item.name === 'Sibling');
+  const platform = (await page.evaluate(() => window.yuanpu.listWorkFolders())).find((item) => item.name === 'Platform');
+  assert.equal(sibling.parentId, platform.id, 'Sibling creation ignored the explicit placement');
+  await folderRow('Milestones').click();
+  await addFolder('Level4');
+  await folderRow('Level4').click();
+  await addFolder('Level5');
+  await folderRow('Level5').click();
+  await page.getByRole('button', { name: '新建文件夹' }).click();
+  assert.equal(await page.getByRole('radio', { name: /子级/ }).isDisabled(), true, 'A sixth folder level was offered');
+  await page.getByRole('dialog', { name: '新建文件夹' }).getByRole('button', { name: '取消' }).click();
+  await folderRow('Milestones').click();
+  await page.getByRole('button', { name: '切换到文件管理器视图' }).click();
+  await page.getByRole('button', { name: 'Acme', exact: true }).click();
+  await page.getByRole('button', { name: 'Platform', exact: true }).click();
+  await page.getByRole('button', { name: 'Milestones', exact: true }).click();
+  await page.getByRole('button', { name: '切换到树状列表视图' }).click();
+  await page.getByRole('button', { name: '工作列表全屏' }).click();
+  assert.equal(await page.locator('.chat-panel.work-mode .chat-main').evaluate((item) => getComputedStyle(item).display), 'none');
+  await page.getByRole('button', { name: '退出工作列表全屏' }).click();
+  const widthBefore = Number(await page.getByRole('separator', { name: '调整工作列表宽度' }).getAttribute('aria-valuenow'));
+  await page.getByRole('separator', { name: '调整工作列表宽度' }).focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(Number(await page.getByRole('separator', { name: '调整工作列表宽度' }).getAttribute('aria-valuenow')), widthBefore + 20);
   await page.getByRole('button', { name: '新建会话' }).click();
   await eventually(async () => (await page.evaluate(() => window.yuanpu.listWorkConversations())).length >= 2,
     'First nested conversation missing');
@@ -149,11 +187,21 @@ try {
   assert.notEqual(first.id, second.id);
   assert.equal(first.folderId, second.folderId);
   await page.screenshot({ path: join(evidence, 'tree-created-light.png') });
+  await page.getByRole('button', { name: '打开右侧面板' }).click();
+  const emptyPanelWidth = await page.locator('.chat-panel.work-mode .activity-panel').evaluate((panel) => panel.getBoundingClientRect().width);
+  assert.equal(emptyPanelWidth, 320, 'A new Work conversation inherited the previous global right-panel width');
+  await page.getByRole('button', { name: '收起右侧面板' }).click();
   await page.getByRole('button', { name: 'Roadmap的操作' }).click();
-  await page.getByRole('menuitem', { name: '图标与标签' }).click();
-  await page.getByRole('dialog', { name: '设置图标与标签' }).getByRole('button', { name: '星标' }).click();
+  await page.getByRole('menuitem', { name: '修改图标' }).click();
+  assert.equal(await page.getByRole('group', { name: '选择图标' }).getByRole('button').count(), 36);
+  await page.getByRole('button', { name: '下一页' }).click();
+  assert.equal(await page.getByRole('group', { name: '选择图标' }).getByRole('button').count(), 36);
+  await page.getByRole('dialog', { name: '修改图标' }).getByRole('button', { name: '成就' }).click();
+  await page.getByRole('dialog', { name: '修改图标' }).getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: 'Roadmap的操作' }).click();
+  await page.getByRole('menuitem', { name: '修改标签' }).click();
   await page.locator('.work-tree-dialog input[placeholder="输入新标签名称（可选）"]').fill('Priority');
-  await page.getByRole('dialog', { name: '设置图标与标签' }).getByRole('button', { name: '保存' }).click();
+  await page.getByRole('dialog', { name: '修改标签' }).getByRole('button', { name: '保存' }).click();
   await eventually(async () => (await page.evaluate(() => window.yuanpu.listWorkConversations()))
     .find((item) => item.id === first.id)?.tagIds.length === 1, 'Icon/tag edit did not persist');
   await firstRow.click();
@@ -174,9 +222,64 @@ try {
   await assert.rejects(stat(original.workingDirectory), { code: 'ENOENT' });
   assert.equal(await readFile(join(moved.workingDirectory, 'preview.txt'), 'utf8'), 'synthetic preview survives');
   assert.equal((await page.evaluate(() => window.yuanpu.listWorkConversations())).find((item) => item.id === first.id).title, 'Roadmap');
-  assert.equal((await page.evaluate(() => window.yuanpu.listWorkConversations())).find((item) => item.id === first.id).iconId, 'star');
+  assert.equal((await page.evaluate(() => window.yuanpu.listWorkConversations())).find((item) => item.id === first.id).iconId, 'trophy');
   await page.screenshot({ path: join(evidence, 'electron-moved.png') });
   await page.getByRole('button', { name: '打开右侧面板' }).click();
+  const resizeHandles = await page.evaluate(() => {
+    const left = document.querySelector('.left-panel-resize-handle');
+    const right = document.querySelector('.activity-resize-handle');
+    return {
+      leftWidth: getComputedStyle(left).width, rightWidth: getComputedStyle(right).width,
+      leftLine: getComputedStyle(left, '::after').width, rightLine: getComputedStyle(right, '::after').width,
+    };
+  });
+  assert.equal(resizeHandles.leftWidth, resizeHandles.rightWidth);
+  assert.equal(resizeHandles.leftLine, resizeHandles.rightLine);
+  await page.getByRole('button', { name: '铺满右侧面板' }).click();
+  const expandedBounds = await page.locator('.chat-panel.work-mode .activity-panel').evaluate((item) => {
+    const panel = item.getBoundingClientRect();
+    const chat = item.closest('.chat-panel').getBoundingClientRect();
+    return { panelWidth: panel.width, chatWidth: chat.width, panelLeft: panel.left, chatLeft: chat.left,
+      classes: item.closest('.chat-panel').className,
+      gridColumns: getComputedStyle(item.closest('.chat-panel')).gridTemplateColumns,
+      panelCssWidth: getComputedStyle(item).width,
+      panelGridColumn: getComputedStyle(item).gridColumn,
+      panelPosition: getComputedStyle(item).position };
+  });
+  assert.equal(Math.abs(expandedBounds.panelWidth - expandedBounds.chatWidth) < 2, true,
+    `Expanded right panel did not fill the Work view: ${JSON.stringify(expandedBounds)}`);
+  await page.getByRole('button', { name: '还原右侧面板' }).click();
+  await page.getByRole('button', { name: '打开工作列表' }).click();
+  const panelWidths = () => page.locator('.chat-panel.work-mode').evaluate((panel) => ({
+    chat: panel.getBoundingClientRect().width,
+    left: panel.querySelector('.conversation-list-preview')?.getBoundingClientRect().width ?? 0,
+    right: panel.querySelector('.activity-panel').getBoundingClientRect().width,
+    classes: panel.className,
+    columns: getComputedStyle(panel).gridTemplateColumns,
+  }));
+  const assertHalfPanels = async (stage) => {
+    const widths = await panelWidths();
+    assert.equal(Math.abs(widths.left - widths.chat / 2) < 2 && Math.abs(widths.right - widths.chat / 2) < 2, true,
+      `${stage} did not split the two panels equally: ${JSON.stringify(widths)}`);
+  };
+  await page.getByRole('button', { name: '收起右侧面板' }).click();
+  await page.getByRole('button', { name: '工作列表全屏' }).click();
+  await page.getByRole('button', { name: '打开右侧面板' }).click();
+  await assertHalfPanels('Opening right from full left');
+  await page.locator('.activity-panel .session-sidebar-instance[aria-hidden="false"] .file-workspace').waitFor();
+  await page.getByRole('button', { name: '收起右侧面板' }).click();
+  await page.getByRole('button', { name: '退出工作列表全屏' }).click();
+  await page.getByRole('button', { name: '打开右侧面板' }).click();
+  await page.getByRole('button', { name: '铺满右侧面板' }).click();
+  await page.getByRole('button', { name: '打开工作列表' }).click();
+  await assertHalfPanels('Opening left from full right');
+  await page.locator('.activity-panel .session-sidebar-instance[aria-hidden="false"] .file-workspace').waitFor();
+  await page.getByRole('button', { name: '收起工作列表' }).click();
+  const rightOnly = await panelWidths();
+  assert.equal(Math.abs(rightOnly.right - rightOnly.chat) < 2, true,
+    `Right panel did not fill after closing left: ${JSON.stringify(rightOnly)}`);
+  await page.getByRole('button', { name: '还原右侧面板' }).click();
+  await page.getByRole('button', { name: '打开工作列表' }).click();
   await page.screenshot({ path: join(evidence, 'electron-files-open.png') });
   // The file tree uses a separate renderer surface; click its visible row in Electron.
   await page.mouse.click(1209, 214);
@@ -264,7 +367,7 @@ try {
   await page.getByRole('button', { name: 'Roadmap的操作' }).waitFor();
   const restarted = (await page.evaluate(() => window.yuanpu.listWorkConversations())).find((item) => item.id === first.id);
   assert.equal(restarted.workingDirectory, moved.workingDirectory);
-  assert.equal(restarted.iconId, 'star');
+  assert.equal(restarted.iconId, 'trophy');
   assert.equal(restarted.tagIds.length, 1);
   await page.locator(`[data-tree-key="conversation:${first.id}"]`).click();
   await page.getByText('Saved reply 2.').waitFor();

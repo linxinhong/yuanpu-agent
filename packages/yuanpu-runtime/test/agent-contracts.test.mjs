@@ -104,6 +104,42 @@ test('invalid requests have observable stable rejection codes', () => {
   assert.equal(missingRoute.error.field, 'delivery.routeId');
 });
 
+test('per-run model choice is accepted only for a desktop Work conversation', () => {
+  const modelSelection = { provider: 'test-provider', model: 'test-model', thinkingLevel: 'high' };
+  const work = validateAgentRunRequest(caller(), request({
+    conversation: { namespace: 'desktop', conversationId: 'work:one' }, modelSelection,
+  }));
+  assert.equal(work.ok, true);
+  assert.deepEqual(work.value.modelSelection, modelSelection);
+
+  const personal = validateAgentRunRequest(caller(), request({ modelSelection }));
+  assert.equal(personal.ok, false);
+  assert.equal(personal.error.field, 'modelSelection');
+
+  const invalid = validateAgentRunRequest(caller(), request({
+    conversation: { namespace: 'desktop', conversationId: 'work:one' },
+    modelSelection: { ...modelSelection, thinkingLevel: 'private' },
+  }));
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.error.field, 'modelSelection.thinkingLevel');
+});
+
+test('unrestricted approval is scoped to a desktop Work run', () => {
+  const work = validateAgentRunRequest(caller(), request({
+    conversation: { namespace: 'desktop', conversationId: 'work:one' }, approvalMode: 'unrestricted',
+  }));
+  assert.equal(work.ok, true);
+  assert.equal(work.value.approvalMode, 'unrestricted');
+  for (const overrides of [
+    { conversation: { namespace: 'desktop', conversationId: 'assistant' }, approvalMode: 'unrestricted' },
+    { conversation: { namespace: 'desktop', conversationId: 'work:one' }, approvalMode: 'unknown' },
+  ]) {
+    const invalid = validateAgentRunRequest(caller(), request(overrides));
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.error.field, 'approvalMode');
+  }
+});
+
 test('trusted caller policy owns workspace, conversation binding, and delivery route', () => {
   const policyCaller = caller({
     authorizeWorkspace: (workspaceId) => workspaceId === '/allowed',

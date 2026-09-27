@@ -136,6 +136,11 @@ export class WorkDirectoryMoveCoordinator {
         for (const child of allFolders) if (child.parentId && folderIds.has(child.parentId)) folderIds.add(child.id);
       }
       if (request.targetFolderId && folderIds.has(request.targetFolderId)) throw new WorkMoveConflict('Cannot move a folder inside itself.');
+      const targetDepth = target ? target.relativeDirectory.split('/').length : 0;
+      const sourceDepth = folder.relativeDirectory.split('/').length;
+      const subtreeDepth = Math.max(...allFolders.filter((item) => folderIds.has(item.id))
+        .map((item) => item.relativeDirectory.split('/').length - sourceDepth + 1));
+      if (targetDepth + subtreeDepth > 5) throw new WorkMoveConflict('工作文件夹最多支持五级。');
       source = join(workspaceRoot, folder.relativeDirectory);
     } else {
       const conversation = allConversations.find((item) => item.id === request.id);

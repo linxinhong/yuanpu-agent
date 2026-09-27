@@ -19,12 +19,14 @@ export interface ApprovalStoreOptions {
   ttlMs?: number;
   now?: () => Date;
   createId?: () => string;
+  allowUnattended?: (input: CapabilityAuthorizationInput) => boolean;
 }
 
 export interface PendingCapabilityExecution {
   requestId: string;
   runId?: string;
   sessionId: string;
+  conversationId?: string;
   workspaceId: string;
   capabilityId: string;
   arguments: Record<string, JsonValue>;
@@ -45,6 +47,7 @@ export function digestCapabilityArguments(value: Record<string, JsonValue>): str
 function sameBinding(record: CapabilityApprovalRecord, input: CapabilityAuthorizationInput): boolean {
   return record.runId === input.runId
     && record.sessionId === input.sessionId
+    && record.conversationId === input.conversationId
     && record.workspaceId === input.workspaceId
     && record.sourceInstanceId === input.sourceInstanceId
     && record.packageVersion === input.packageVersion
@@ -57,6 +60,7 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
   readonly #ttlMs: number;
   readonly #now: () => Date;
   readonly #createId: () => string;
+  readonly #allowUnattended?: (input: CapabilityAuthorizationInput) => boolean;
   #records: CapabilityApprovalRecord[];
   #pendingExecutions = new Map<string, PendingCapabilityExecution>();
   #queue: Promise<void> = Promise.resolve();
@@ -67,6 +71,7 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
     this.#ttlMs = options.ttlMs ?? 5 * 60_000;
     this.#now = options.now ?? (() => new Date());
     this.#createId = options.createId ?? randomUUID;
+    this.#allowUnattended = options.allowUnattended;
   }
 
   static async open(path: string, options: ApprovalStoreOptions = {}): Promise<CapabilityApprovalStore> {
@@ -130,12 +135,16 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
       if (!input.sessionId || !input.workspaceId) {
         return { status: 'invalid', message: 'Host session and workspace context are required.' };
       }
+      if (!input.approvalRequestId && this.#allowUnattended?.(input)) {
+        return { status: 'authorized' };
+      }
       if (!input.approvalRequestId) {
         const now = this.#now();
         const record: CapabilityApprovalRecord = {
           requestId: this.#createId(),
           ...(input.runId ? { runId: input.runId } : {}),
           sessionId: input.sessionId,
+          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
           workspaceId: input.workspaceId,
           sourceInstanceId: input.sourceInstanceId,
           packageVersion: input.packageVersion,
@@ -150,6 +159,7 @@ export class CapabilityApprovalStore implements CapabilityAuthorizer {
           requestId: record.requestId,
           ...(input.runId ? { runId: input.runId } : {}),
           sessionId: input.sessionId,
+          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
           workspaceId: input.workspaceId,
           capabilityId: input.capabilityId,
           arguments: structuredClone(input.arguments),

@@ -9,6 +9,55 @@ import { SessionManager } from '@earendil-works/pi-coding-agent';
 
 import { openYuanpuMetadataDatabase, readYuanpuChatTranscript } from '../dist/index.mjs';
 
+test('Work transcript pages load newest first and older pages without repeating the cursor', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-transcript-pages-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const sessions = join(root, 'sessions');
+  await mkdir(workspace);
+  const session = SessionManager.create(workspace, sessions, { id: 'paged-session' });
+  for (let index = 0; index < 7; index++) {
+    session.appendMessage({ role: 'user', content: `message ${index}`, timestamp: Date.now() + index });
+  }
+  session.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'done' }],
+    api: 'fixture', provider: 'fixture', model: 'fixture', stopReason: 'stop',
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, timestamp: Date.now() });
+  const recent = readYuanpuChatTranscript(workspace, 'paged-session', sessions, 3);
+  assert.deepEqual(recent.map((item) => item.text), ['message 5', 'message 6', 'done']);
+  const older = readYuanpuChatTranscript(workspace, 'paged-session', sessions, 3, false, recent[0].id);
+  assert.deepEqual(older.map((item) => item.text), ['message 2', 'message 3', 'message 4']);
+  assert.deepEqual(readYuanpuChatTranscript(workspace, 'paged-session', sessions, 3, false, older[0].id)
+    .map((item) => item.text), ['message 0', 'message 1']);
+  assert.deepEqual(readYuanpuChatTranscript(workspace, 'paged-session', sessions, 3, false, 'missing'), []);
+});
+
+test('unrestricted capability grant stays bound to one running desktop Work session', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-permission-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const database = openYuanpuMetadataDatabase(join(root, 'automation.sqlite'));
+  context.after(() => database.close());
+  const runs = database.agentRuns;
+  const now = new Date().toISOString();
+  const result = runs.submit({
+    request: {
+      contractVersion: 1, entryPoint: 'desktop',
+      identity: { kind: 'local_user', subjectId: 'local-user', authorityId: 'local-desktop', authenticatedBy: 'electron' },
+      workspaceId: '/workspace', conversation: { namespace: 'desktop', conversationId: 'work:one' },
+      input: { type: 'text', text: 'work' }, approvalMode: 'unrestricted',
+      idempotencyKey: 'permission-test', delivery: { kind: 'desktop' },
+    }, requestFingerprint: 'fingerprint', inputDigest: 'digest', runId: 'run-one',
+    bindingId: 'binding-one', piSessionId: 'session-one', now, maximumQueuedRuns: 10,
+  });
+  assert.equal(result.kind, 'created');
+  assert.equal(runs.isUnrestrictedCapabilityRun('run-one', 'session-one', '/workspace'), false);
+  runs.claimQueued('run-one', now);
+  assert.equal(runs.isUnrestrictedCapabilityRun('run-one', 'session-one', '/workspace'), true);
+  assert.equal(runs.isUnrestrictedCapabilityRun('run-one', 'session-two', '/workspace'), false);
+  assert.equal(runs.isUnrestrictedCapabilityRun('run-one', 'session-one', '/other'), false);
+  assert.equal(runs.isUnrestrictedCapabilityRun('other-run', 'session-one', '/workspace'), false);
+});
+
 test('new Work sessions remain isolated and selected across restart while default is read only', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-conversations-'));
   context.after(() => rm(root, { recursive: true, force: true }));
@@ -83,6 +132,11 @@ test('nested folders, metadata, tags and archive persist without changing stable
   assert.equal(renamed.relativeDirectory, firstPath);
   const one = store.create(scope, join(scope, secondPath, 'c-one'), secondId);
   const two = store.create(scope, join(scope, secondPath, 'c-two'), secondId);
+  assert.equal(store.titleIfEmpty(scope, two.id, '浏览器侧栏测试'), true);
+  assert.equal(store.titleIfEmpty(scope, two.id, '不应覆盖'), false);
+  assert.equal(store.listExisting(scope).find((item) => item.id === two.id).title, '浏览器侧栏测试');
+  assert.equal(store.updateConversation(scope, two.id, { iconId: 'wrench' }).iconId, 'wrench');
+  assert.equal(store.updateConversation(scope, two.id, { iconId: 'trophy' }).iconId, 'trophy');
   assert.notEqual(store.sessionId(scope, one.id), store.sessionId(scope, two.id));
   const requestId = '44444444-4444-4444-8444-444444444444';
   const requested = store.create(scope, join(scope, secondPath, 'c-three'), secondId,
@@ -117,6 +171,26 @@ test('nested folders, metadata, tags and archive persist without changing stable
     .map((item) => item.id), [two.id, one.id, requested.id]);
   assert.equal(database.workConversations.listTags(scope)[0].id, tag.id);
   database.close();
+});
+
+test('Work folders stop at five levels even when created through the store', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'yuanpu-work-depth-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const database = openYuanpuMetadataDatabase(join(root, 'automation.sqlite'));
+  context.after(() => database.close());
+  const scope = join(root, 'workspace');
+  let parentId = null;
+  let path = '';
+  for (let level = 1; level <= 5; level++) {
+    const uuid = `${String(level).repeat(8)}-${String(level).repeat(4)}-4${String(level).repeat(3)}-8${String(level).repeat(3)}-${String(level).repeat(12)}`;
+    const id = `folder:${uuid}`;
+    path = [path, `f-${uuid}`].filter(Boolean).join('/');
+    database.workConversations.createFolder(scope, id, parentId, `第 ${level} 级`, 'folder', path);
+    parentId = id;
+  }
+  const sixthId = 'folder:66666666-6666-4666-8666-666666666666';
+  assert.throws(() => database.workConversations.createFolder(scope, sixthId, parentId, '第 6 级', 'folder',
+    `${path}/f-66666666-6666-4666-8666-666666666666`), /五级/);
 });
 
 test('only saved complete turns produce stable source events on repeated scans', async (context) => {

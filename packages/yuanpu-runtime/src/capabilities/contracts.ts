@@ -108,6 +108,7 @@ export interface CapabilityApprovalBinding {
   requestId: string;
   runId?: string;
   sessionId: string;
+  conversationId?: string;
   workspaceId: string;
   sourceInstanceId: string;
   packageVersion?: string;
@@ -127,6 +128,7 @@ export interface CapabilityAuthorizationInput {
   approvalRequestId?: string;
   runId?: string;
   sessionId?: string;
+  conversationId?: string;
   workspaceId?: string;
   sourceInstanceId: string;
   packageVersion?: string;

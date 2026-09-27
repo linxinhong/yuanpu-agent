@@ -58,6 +58,8 @@ interface StoredRunMetadata {
   workspaceId: string;
   conversation: AgentRunRecord['context']['conversation'];
   delivery: AgentRunRecord['context']['delivery'];
+  modelSelection?: AgentRunRecord['context']['modelSelection'];
+  approvalMode?: AgentRunRecord['context']['approvalMode'];
 }
 
 function rowToRun(row: AgentRunRow): AgentRunRecord {
@@ -81,6 +83,8 @@ function rowToRun(row: AgentRunRow): AgentRunRecord {
       workspaceId: metadata.workspaceId,
       conversation: metadata.conversation,
       delivery: metadata.delivery,
+      ...(metadata.modelSelection ? { modelSelection: metadata.modelSelection } : {}),
+      ...(metadata.approvalMode ? { approvalMode: metadata.approvalMode } : {}),
     },
     requestFingerprint: row.request_fingerprint,
     inputDigest: row.input_digest,
@@ -133,6 +137,18 @@ export class AgentRunStore {
       'SELECT output_json FROM yp_agent_run_outputs WHERE run_id = ?',
     ).get(runId) as { output_json: string } | undefined;
     return output ? { ...run, output: JSON.parse(output.output_json) as AgentRunOutput } : run;
+  }
+
+  isUnrestrictedCapabilityRun(runId: string, sessionId: string, workspaceId: string): boolean {
+    const row = this.database.prepare(`SELECT r.request_metadata_json
+      FROM yp_agent_runs r JOIN yp_conversation_bindings b ON b.binding_id = r.binding_id
+      WHERE r.run_id = ? AND r.entry_point = 'desktop' AND r.status = 'running'
+        AND b.namespace = 'desktop' AND b.conversation_id LIKE 'work:%'
+        AND b.pi_session_id = ? AND b.workspace_id = ?
+      LIMIT 1`).get(runId, sessionId, workspaceId) as { request_metadata_json: string } | undefined;
+    if (!row) return false;
+    const metadata = JSON.parse(row.request_metadata_json) as StoredRunMetadata;
+    return metadata.approvalMode === 'unrestricted';
   }
 
   /** Work navigation must keep the selected conversation stable while a persisted run can still act on it. */
@@ -259,6 +275,8 @@ export class AgentRunStore {
         workspaceId: request.workspaceId,
         conversation: resolvedConversation,
         delivery: request.delivery,
+        ...(request.modelSelection ? { modelSelection: request.modelSelection } : {}),
+        ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
       };
       this.database.prepare(`
         INSERT INTO yp_agent_runs(
