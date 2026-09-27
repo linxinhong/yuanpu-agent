@@ -765,6 +765,12 @@ export class RuntimeManager {
     return this.request(`${RUNTIME_ROUTES.workFilePath}?${query}`);
   }
 
+  listWorkFileChanges(query: { conversationId: string; runId?: string }): Promise<import('@yuanpu-agent/protocol').WorkFileChangesSummary> {
+    const params = new URLSearchParams({ conversationId: query.conversationId });
+    if (query.runId) params.set('runId', query.runId);
+    return this.request(`${RUNTIME_ROUTES.workFileChanges}?${params}`);
+  }
+
   getAssistantLink(): Promise<AssistantLinkStatus> {
     return this.request(RUNTIME_ROUTES.assistantLink);
   }

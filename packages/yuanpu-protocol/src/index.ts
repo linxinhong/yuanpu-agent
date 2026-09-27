@@ -59,6 +59,7 @@ export const RUNTIME_ROUTES = {
   workFiles: '/v1/work/files',
   workFileContent: '/v1/work/files/content',
   workFilePath: '/v1/work/files/path',
+  workFileChanges: '/v1/work/file-changes',
   modelSettings: '/v1/settings/models',
   modelSettingsDelete: '/v1/settings/models/delete',
   modelCatalog: '/v1/settings/models/catalog',
@@ -237,6 +238,31 @@ export type WorkFilePreview =
   | { kind: 'image'; path: string; mediaType: string; base64: string; size: number; updatedAt: string }
   | { kind: 'pdf'; path: string; base64: string; size: number; updatedAt: string }
   | { kind: 'unsupported'; path: string; reason: string; size?: number };
+
+/** Captured content snapshot of one file version. Never carries an absolute path. */
+export interface WorkFileChangeSnapshot {
+  content: string;
+  truncated: boolean;
+}
+
+/** One workspace file merged across its edits within the requested scope. */
+export interface WorkFileChangeEntry {
+  /** Workspace-relative path with POSIX separators. Never an absolute path. */
+  path: string;
+  runId: string;
+  toolName: 'edit' | 'write';
+  /** null means the file did not exist before the change (new file). */
+  before: WorkFileChangeSnapshot | null;
+  after: WorkFileChangeSnapshot;
+  updatedAt: string;
+}
+
+export interface WorkFileChangesSummary {
+  conversationId: string;
+  /** Echoed when the query was scoped to one run; null for conversation-wide. */
+  runId: string | null;
+  files: WorkFileChangeEntry[];
+}
 
 /** One control command addressed to the embedded browser session of a Work conversation. */
 export interface BrowserControlCommand {
@@ -560,6 +586,7 @@ export interface DesktopBridge {
   onBrowserSessionRequest(listener: (conversationId: string) => void): () => void;
   readWorkFile(conversationId: string, filePath: string): Promise<WorkFilePreview>;
   openWorkFile(conversationId: string, filePath: string): Promise<void>;
+  listWorkFileChanges(query: { conversationId: string; runId?: string }): Promise<WorkFileChangesSummary>;
   getAssistantLink(): Promise<AssistantLinkStatus>;
   bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;
   unbindAssistantContact(): Promise<AssistantLinkStatus>;

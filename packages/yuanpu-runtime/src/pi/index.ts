@@ -22,6 +22,11 @@ import { Type } from 'typebox';
 import { readFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, lstatSync, openSync,
   readdirSync, readSync } from 'node:fs';
+import { beginWorkFileCapture, completeWorkFileCapture,
+  type CapturedWorkFileChange, type WorkFileCaptureSession,
+  type WorkFileSnapshotReader } from './file-changes.js';
+export type { CapturedWorkFileChange, WorkFileSnapshot } from './file-changes.js';
+export { WORK_FILE_CHANGE_MAX_BYTES, beginWorkFileCapture, completeWorkFileCapture, resolveWorkspaceRelativePath } from './file-changes.js';
 import { join, dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { GoalManager, createGoalTool, auditWithSubagent } from '../builtin/goals/index.js';
@@ -272,6 +277,8 @@ export interface YuanpuChatResult {
   toolResults?: Array<{ entryId: string; toolCallId: string; name: string; status: 'completed' | 'failed';
     text: string; truncated: boolean }>;
   artifactCandidates?: Array<{ toolCallId: string; requestedPath: string; content: string }>;
+  /** edit/write 工具的前后文件快照，供工作会话审查视图消费。 */
+  fileChanges?: CapturedWorkFileChange[];
   pendingApprovalRequestId?: string;
 }
 
@@ -450,6 +457,12 @@ export async function createYuanpuChatSession(
     settingsManager,
   });
 
+  const workspaceRoot = options.cwd;
+  const workFileReader: WorkFileSnapshotReader = (absolutePath) =>
+    readFile(absolutePath).catch((error) => {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+      throw error;
+    });
   let queue: Promise<void> = Promise.resolve();
   const runPrompt = async (
     message: string,
@@ -464,6 +477,8 @@ export async function createYuanpuChatSession(
     const toolStarts = new Map<string, { name: string; path?: string; content?: string }>();
     const existingEntryIds = new Set(sessionManager.getBranch().map((entry) => entry.id));
     const artifactCandidates: NonNullable<YuanpuChatResult['artifactCandidates']> = [];
+    const fileChangeCaptures = new Map<string, WorkFileCaptureSession>();
+    const fileChangeJobs: Array<Promise<CapturedWorkFileChange | undefined>> = [];
     let pendingApprovalRequestId: string | undefined;
     const unsubscribe = session.subscribe((event) => {
       if (event.type === 'message_end' && event.message.role === 'assistant') {
@@ -478,6 +493,13 @@ export async function createYuanpuChatSession(
         const content = event.args && typeof event.args === 'object' && typeof event.args.content === 'string'
           ? event.args.content : undefined;
         toolStarts.set(event.toolCallId, { name: event.toolName, path, content });
+        if (path) {
+          const capture = beginWorkFileCapture({
+            rootDir: workspaceRoot, requestedPath: path, toolCallId: event.toolCallId,
+            toolName: event.toolName, reader: workFileReader,
+          });
+          if (capture) fileChangeCaptures.set(event.toolCallId, capture);
+        }
       }
       if (event.type === 'tool_execution_end') {
         const details = event.result?.details as {
@@ -490,6 +512,11 @@ export async function createYuanpuChatSession(
           && start.path && start.content !== undefined) {
           artifactCandidates.push({ toolCallId: event.toolCallId,
             requestedPath: start.path, content: start.content });
+        }
+        const fileCapture = fileChangeCaptures.get(event.toolCallId);
+        fileChangeCaptures.delete(event.toolCallId);
+        if (fileCapture && status === 'completed') {
+          fileChangeJobs.push(completeWorkFileCapture(fileCapture, workFileReader));
         }
         toolStarts.delete(event.toolCallId);
         if (
@@ -528,11 +555,15 @@ export async function createYuanpuChatSession(
           text: resultText.slice(0, 4_000), truncated: resultText.length > 4_000 });
         if (toolResults.length === 16) break;
       }
+      const fileChanges = (await Promise.all(fileChangeJobs)).filter(
+        (change): change is CapturedWorkFileChange => Boolean(change),
+      );
       return {
         message: text.trim() || '完成。',
         tools: [...toolStates].map(([name, status]) => ({ name, status })),
         ...(toolResults.length ? { toolResults } : {}),
         ...(artifactCandidates.length ? { artifactCandidates } : {}),
+        ...(fileChanges.length ? { fileChanges } : {}),
         ...(pendingApprovalRequestId ? { pendingApprovalRequestId } : {}),
       };
     } catch (error) {

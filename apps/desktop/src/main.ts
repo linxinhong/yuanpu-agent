@@ -183,6 +183,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
     const error = await shell.openPath(resolved.path);
     if (error) throw new Error(error);
   }));
+  ipcMain.handle('work:file-changes:list', trustedHandler((query: { conversationId: string; runId?: string }) => runtime.listWorkFileChanges(query)));
   ipcMain.handle('browser:attach-guest', trustedHandlerWithEvent((event, payload: { key: string; webContentsId: number; conversationId: string }) => {
     const windowId = BrowserWindow.fromWebContents(event.sender)?.id;
     if (windowId === undefined) throw new Error('Browser guest attach requires a known window.');

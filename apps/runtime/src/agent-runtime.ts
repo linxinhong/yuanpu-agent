@@ -5,6 +5,7 @@ import {
   type AgentRunExecutor,
   type CapabilityApprovalRecord,
   type CapabilityToolClient,
+  type CapturedWorkFileChange,
   type CreateYuanpuChatOptions,
   type YuanpuChatSession,
 } from '@yuanpu-agent/runtime-kit';
@@ -16,6 +17,9 @@ interface RuntimeAgentExecutorOptions {
   sessionsPath: string;
   maximumPooledSessions?: number;
   chat: Omit<CreateYuanpuChatOptions, 'capabilityClient' | 'capabilityContext' | 'piSession'>;
+  /** 桌面工作会话的 edit/write 文件快照出口；持久化失败由实现方兜底，不阻塞会话。 */
+  onWorkFileChanges?: (context: { runId: string; conversationId: string; piSessionId: string },
+    changes: readonly CapturedWorkFileChange[]) => void;
 }
 
 interface PooledSession {
@@ -100,6 +104,15 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
           artifactBytes += artifact.size;
           artifacts.push({ ...artifact, toolCallId: candidate.toolCallId });
         }
+      }
+      if (this.#options.onWorkFileChanges && result.fileChanges?.length
+        && input.run.owner.entryPoint === 'desktop'
+        && input.run.context.conversation.conversationId.startsWith('work:')) {
+        this.#options.onWorkFileChanges({
+          runId: input.run.runId,
+          conversationId: input.run.context.conversation.conversationId,
+          piSessionId: input.piSessionId,
+        }, result.fileChanges);
       }
       const output = { message: result.message, tools: result.tools,
         ...(result.toolResults ? { toolResults: result.toolResults } : {}),

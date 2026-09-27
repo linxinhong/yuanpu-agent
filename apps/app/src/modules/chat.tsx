@@ -35,6 +35,7 @@ import { folderPath } from './work-tree-model.js';
 import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-run-cache.js';
 import { normalizeWorkspacePath } from '../shared/work-file-links.js';
 import { FileWorkspace, ImagePreviewPanel, type ImagePreviewRequest } from '../viewer/files/file-tabs.js';
+import { ReviewPanel } from '../viewer/review/review-panel.js';
 import type { ViewerBrowserHost } from '../viewer/host/browser-host.js';
 import type { ViewerFileHost } from '../viewer/host/file-host.js';
 
@@ -178,12 +179,13 @@ export function ChatPanel({
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [rightPanelMaximized, setRightPanelMaximized] = useState(false);
   const [workspaceTabHost, setWorkspaceTabHost] = useState<HTMLDivElement | null>(null);
-  const [activityTab, setActivityTab] = useState<'activity' | 'run' | 'files'>(surface === 'work' ? 'files' : 'activity');
+  const [activityTab, setActivityTab] = useState<'activity' | 'run' | 'files' | 'review'>(surface === 'work' ? 'files' : 'activity');
   const [filePreviewPath, setFilePreviewPath] = useState<string>();
   const [imagePreviewRequest, setImagePreviewRequest] = useState<ImagePreviewRequest>();
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const activityEventsRef = useRef<ActivityEvent[]>([]);
   const [lastRun, setLastRun] = useState<AgentRunRecord>();
+  const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
   const [submittedTask, setSubmittedTask] = useState<{ runId: string; text: string }>();
   const [runRecovery, setRunRecovery] = useState<{ runId: string; text: string }>();
   const [bridgeError, setBridgeError] = useState(false);
@@ -501,6 +503,7 @@ export function ChatPanel({
         const run = settledRuns.current.get(runId) ?? fetched;
         const terminal = ['succeeded', 'failed', 'cancelled', 'interrupted', 'result_unknown'].includes(run.status);
         if (terminal) settledRuns.current.set(runId, run);
+        if (terminal) setReviewRefreshKey((value) => value + 1);
         setLastRun(run);
         setActiveRunStatus(run.status);
         if (run.status !== lastSeenStatus) {
@@ -1232,6 +1235,9 @@ export function ChatPanel({
             rootName={selectedWork?.workingDirectory?.split(/[\\/]/).filter(Boolean).at(-1) || '工作区'}
             requestPath={filePreviewPath} requestImage={imagePreviewRequest} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
             view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); setImagePreviewRequest(undefined); }}
+            reviewContent={<ReviewPanel conversationId={workConversationId}
+              lastRunId={lastRun?.runId ?? [...messages].reverse().find((message) => message.run?.runId)?.run?.runId}
+              refreshKey={reviewRefreshKey} active={active && activityOpen && activityTab === 'review'} />}
             runContent={activityTab === 'activity' ? (
             <div className="activity-content">
               <div className="activity-section-heading">

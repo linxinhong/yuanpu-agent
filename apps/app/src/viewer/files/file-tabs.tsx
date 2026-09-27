@@ -10,7 +10,7 @@ import { FilePreview } from '../preview/file-preview.js';
 import { FileTree, useWorkspaceTree } from './file-tree.js';
 
 type FileTab =
-  | { id: 'activity' | 'run'; kind: 'activity' | 'run' }
+  | { id: 'activity' | 'run' | 'review'; kind: 'activity' | 'run' | 'review' }
   | { id: 'tree'; kind: 'tree' }
   | { id: string; kind: 'image'; image: ImagePreview }
   | { id: 'browser'; kind: 'browser' }
@@ -29,6 +29,7 @@ export function ImagePreviewPanel({ image, onClose }: { image: ImagePreview; onC
 
 const TREE_TAB: FileTab = { id: 'tree', kind: 'tree' };
 const BROWSER_TAB: FileTab = { id: 'browser', kind: 'browser' };
+const REVIEW_TAB: FileTab = { id: 'review', kind: 'review' };
 
 function fileTabId(path: string): string {
   return `file:${path}`;
@@ -66,7 +67,7 @@ function WorkspaceTreeView({ host, scopeKey, selectedPath, onOpenFile, rootName,
 
 /** One tab strip for workspace content and the host's run views. */
 export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browserRequest, onActiveFileChange,
-  requestImage, tabHost, view, onViewChange, runContent, onClose, rootName }: {
+  requestImage, tabHost, view, onViewChange, runContent, reviewContent, onClose, rootName }: {
   host?: ViewerFileHost;
   browserHost?: ViewerBrowserHost;
   scopeKey: string;
@@ -75,9 +76,10 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
   requestImage?: ImagePreviewRequest;
   onActiveFileChange?: (path: string | undefined) => void;
   tabHost: HTMLElement | null;
-  view: 'activity' | 'run' | 'files';
-  onViewChange: (view: 'activity' | 'run' | 'files') => void;
+  view: 'activity' | 'run' | 'files' | 'review';
+  onViewChange: (view: 'activity' | 'run' | 'files' | 'review') => void;
   runContent: ReactNode;
+  reviewContent: ReactNode;
   onClose: () => void;
   rootName?: string;
 }) {
@@ -137,11 +139,11 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
   const tabStrip = <div className="workspace-tabs">
     <div className="file-tabs" role="tablist" aria-label="右侧面板标签">
       {tabs.map((tab) => {
-        const label = tab.kind === 'file' ? fileTabLabel(tab.path) : tab.kind === 'image' ? tab.image.alt || '图片' : tab.kind === 'browser' ? browserTitle : tab.kind === 'tree' ? '文件' : tab.kind === 'activity' ? '动态' : '运行';
+        const label = tab.kind === 'file' ? fileTabLabel(tab.path) : tab.kind === 'image' ? tab.image.alt || '图片' : tab.kind === 'browser' ? browserTitle : tab.kind === 'tree' ? '文件' : tab.kind === 'activity' ? '动态' : tab.kind === 'review' ? '审查' : '运行';
         return <div key={tab.id} className={`file-tab ${tab.id === activeTabId ? 'active' : ''}`}>
           <button type="button" role="tab" aria-selected={tab.id === activeTabId} className="file-tab-title"
             title={tab.kind === 'file' ? tab.path : label} onClick={() => activate(tab)}>
-            <AppIcon name={tab.kind === 'image' ? 'image' : tab.kind === 'browser' ? 'globe' : tab.kind === 'file' ? 'file' : tab.kind === 'tree' ? 'folder' : 'schedules'} /><span>{label}</span>
+            <AppIcon name={tab.kind === 'image' ? 'image' : tab.kind === 'browser' ? 'globe' : tab.kind === 'file' ? 'file' : tab.kind === 'tree' ? 'folder' : tab.kind === 'review' ? 'review' : 'schedules'} /><span>{label}</span>
           </button>
           <button type="button" className="file-tab-close" aria-label={`关闭 ${label}`} onClick={() => closeTab(tab.id)}>×</button>
         </div>;
@@ -157,6 +159,7 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
           {browserHost && <button type="button" onClick={() => activate(BROWSER_TAB)}><AppIcon name="globe" />浏览器</button>}
           <button type="button" onClick={() => activate({ id: 'activity', kind: 'activity' })}><AppIcon name="schedules" />动态</button>
           <button type="button" onClick={() => activate({ id: 'run', kind: 'run' })}><AppIcon name="send" />运行</button>
+          <button type="button" onClick={() => activate(REVIEW_TAB)}><AppIcon name="review" />审查</button>
         </div>
       </>}
     </div>
@@ -168,7 +171,8 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
       style={{ display: activeTab?.kind === 'browser' ? undefined : 'none' }}>
       <BrowserView host={browserHost} scopeKey={scopeKey} onTitleChange={setBrowserTitle} />
     </div>}
-    {activeTab?.kind === 'browser' ? null : activeTab?.kind === 'activity' || activeTab?.kind === 'run' ? runContent : <div className="file-workspace-body">
+    {activeTab?.kind === 'browser' ? null : activeTab?.kind === 'review' ? reviewContent
+      : activeTab?.kind === 'activity' || activeTab?.kind === 'run' ? runContent : <div className="file-workspace-body">
       {activeTab?.kind === 'image' ? <ImagePreviewPanel image={activeTab.image} />
         : !host ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
         : activeTab?.kind === 'file'
