@@ -8,7 +8,6 @@ export function ImageLightbox({ src, alt, onClose }: { src: string; alt: string;
   useEffect(() => {
     const element = dialog.current;
     if (element && !element.open) element.showModal();
-    return () => { if (element?.open) element.close(); };
   }, []);
 
   return createPortal(<dialog ref={dialog} className="message-image-dialog" aria-label="全屏预览图片"

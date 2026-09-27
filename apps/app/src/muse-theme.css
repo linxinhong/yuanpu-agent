@@ -277,6 +277,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .image-side-preview-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-side-preview-heading button { border: 0; background: transparent; color: var(--yp-text-muted); cursor: pointer; font-size: 1.25rem; }
 .image-side-preview-body { display: grid; min-height: 0; flex: 1; place-items: center; overflow: auto; }
+.image-side-preview-open { display: grid; max-width: 100%; max-height: 100%; place-items: center; border: 0; padding: 0; background: transparent; cursor: zoom-in; }
 .image-side-preview-body img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 .assistant-reply { min-width: 0; }
 .reply-run-details { margin: 0 0 18px; border-bottom: 1px solid var(--yp-border-subtle); color: var(--yp-text-action); font-size: 0.75rem; }

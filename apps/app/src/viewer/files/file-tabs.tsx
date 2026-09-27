@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 import { AppIcon } from '../../shared/app-icon.js';
+import { ImageLightbox } from '../../shared/image-lightbox.js';
 import type { ImagePreview } from '../../shared/message-image.js';
 import { BrowserView } from '../browser/browser-view.js';
 import type { ViewerBrowserHost } from '../host/browser-host.js';
@@ -24,11 +25,16 @@ const consumedBrowserRequests = new Map<string, number>();
 export type ImagePreviewRequest = ImagePreview & { id: string };
 
 export function ImagePreviewPanel({ image, onClose }: { image: ImagePreview; onClose?: () => void }) {
+  const [fullScreen, setFullScreen] = useState(false);
   return <div className="image-side-preview">
     <div className="image-side-preview-heading"><strong>{image.alt || '图片预览'}</strong>
       {onClose && <button type="button" onClick={onClose} aria-label="关闭图片预览">×</button>}
     </div>
-    <div className="image-side-preview-body"><img src={image.src} alt={image.alt} referrerPolicy="no-referrer" /></div>
+    <div className="image-side-preview-body">
+      <button type="button" className="image-side-preview-open" aria-label={`全屏预览图片：${image.alt || '图片'}`}
+        onClick={() => setFullScreen(true)}><img src={image.src} alt={image.alt} referrerPolicy="no-referrer" /></button>
+    </div>
+    {fullScreen && <ImageLightbox src={image.src} alt={image.alt} onClose={() => setFullScreen(false)} />}
   </div>;
 }
 
