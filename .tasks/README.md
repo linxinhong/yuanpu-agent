@@ -58,3 +58,7 @@ YuanpuAgent 面向桌面工作场景：用户在 Electron 中与 Pi 对话，通
 ## 设置全局字体配置（2026-09-26）
 
 用户要求在设置项里增加全局字体配置：界面字体大小、正文字体大小与字型可配置。渲染端探索结论：现有 CSS 无任何字体类 token，字号硬编码 px（muse-theme/styles/management/assistant-home 共约 238 处）；主题偏好走 renderer localStorage + documentElement 注入，字体配置复用同款模式，不新增 protocol/IPC/runtime 链路。界面字号经根字号缩放实现（px→rem 机械转换 + `--yp-font-scale-ui`），正文用独立 px token `--yp-font-size-content`，字型经 `--yp-font-family` 预设 + 自定义输入。开发卡见[设置全局字体配置（TASK-053）](tasks.yaml)；状态与验收以注册表为准。主工作区未提交增量与卡内触达文件有交集，集成前需协调合并顺序。
+
+## 工作会话审查标签（2026-09-27）
+
+用户确认迁移 ZCode 的「审查」面板：工作会话右侧栏新增审查 tab，按上一轮/本会话批量展示 agent 修改的文件（+N -N）与 unified diff。机制采用 ZCode 的「工具执行时读旧内容自产快照」：runtime 在 session.subscribe 捕获 edit/write 前后内容（不依赖 git、不改 Pi 上游），SQLite v16 新表持久化，新路由按 scope 聚合下发；渲染端复用 @pierre/diffs PatchDiff 与既有 tab 机制。bash 间接修改与子代理捕获不在本期范围。开发卡见[工作会话审查标签（TASK-072）](tasks.yaml)；状态与验收以注册表为准。
