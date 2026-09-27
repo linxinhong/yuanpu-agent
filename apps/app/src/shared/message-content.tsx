@@ -2,8 +2,9 @@ import { useMemo, type ReactNode } from 'react';
 import { marked, type Token, type Tokens } from 'marked';
 
 import { HtmlPreviewCard } from './html-preview-card.js';
+import { MermaidPreviewCard } from './mermaid-preview-card.js';
 import { MessageImage, type ImagePreview } from './message-image.js';
-import { completeHtmlPreview } from './preview-content.js';
+import { completeHtmlPreview, completePreviewFence } from './preview-content.js';
 import { splitTextByFilePaths } from './work-file-links.js';
 
 type RenderOptions = {
@@ -96,6 +97,13 @@ function blocks(tokens: Token[], options: RenderOptions): ReactNode[] {
           return completeHtmlPreview(code)
             ? <HtmlPreviewCard key={key} html={code.text} onAddToConversation={options.onAddToConversation} />
             : <div key={key} className="html-preview-pending" role="status">正在生成图示…</div>;
+        }
+        const language = code.lang?.trim();
+        if (language === 'mermaid' || language === 'graph') {
+          return completePreviewFence(code, language)
+            ? <MermaidPreviewCard key={key} code={code.text} language={language}
+              onAddToConversation={options.onAddToConversation} />
+            : <div key={key} className="html-preview-pending" role="status">正在生成图表…</div>;
         }
         return <pre key={key}><code>{code.text}</code></pre>;
       }

@@ -18,6 +18,7 @@ export function normalizeAddressInput(input: string): string | undefined {
   if (!trimmed || /\s/.test(trimmed)) return undefined;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (trimmed === 'about:blank') return trimmed;
+  if (/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?(?:\/[^\s]*)?$/i.test(trimmed)) return `http://${trimmed}`;
   if (/^[\w.-]+\.[a-z]{2,}(:\d+)?(\/|$)/i.test(trimmed)) return `https://${trimmed}`;
   return undefined;
 }

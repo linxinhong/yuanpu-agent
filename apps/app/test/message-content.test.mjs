@@ -8,7 +8,7 @@ import { register } from 'tsx/esm/api';
 
 register();
 const { MessageContent } = await import('../src/shared/message-content.tsx');
-const { completeHtmlPreview, htmlPreviewDocument, safeImageSource } = await import('../src/shared/preview-content.ts');
+const { completeHtmlPreview, completePreviewFence, htmlPreviewDocument, safeImageSource } = await import('../src/shared/preview-content.ts');
 
 test('assistant messages render Markdown structure without executing raw HTML', () => {
   const html = renderToStaticMarkup(createElement(MessageContent, {
@@ -45,4 +45,15 @@ test('preview document blocks scripts and network; image sources reject executab
   assert.equal(safeImageSource('javascript:alert(1)'), null);
   assert.equal(safeImageSource('data:image/svg+xml;base64,PHN2Zz4='), null);
   assert.equal(safeImageSource('../secret.png'), null);
+});
+
+test('mermaid graph waits for a complete fence before rendering', () => {
+  const complete = '架构：\n\n```mermaid\ngraph TB\nA --> B\n```\n\n完成。';
+  const partial = '```mermaid\ngraph TB\nA --> B';
+  assert.equal(completePreviewFence(marked.lexer(complete).find((token) => token.type === 'code'), 'mermaid'), true);
+  assert.equal(completePreviewFence(marked.lexer(partial).find((token) => token.type === 'code'), 'mermaid'), false);
+  const rendered = renderToStaticMarkup(createElement(MessageContent, { text: complete }));
+  assert.match(rendered, /正在生成图表/);
+  assert.match(rendered, /完成。/);
+  assert.match(renderToStaticMarkup(createElement(MessageContent, { text: partial })), /正在生成图表/);
 });

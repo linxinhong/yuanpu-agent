@@ -531,6 +531,9 @@ export async function createYuanpuChatSession(
       'External capabilities are available only through search_capabilities and execute_capability.',
       'When the user explicitly asks to use, test, or call an external capability, search first and then execute the exact returned name.',
       options.browserControlAvailable
+        ? 'Work conversation files belong in the current cwd. Save user-facing artifacts with relative paths under cwd, not /tmp. For a requested visual in the chat reply, write a complete fenced html-preview block containing static HTML and inline SVG directly in Markdown. Do not create a file, start a server, or navigate the browser merely to display a diagram in the reply. For browser screenshots, use the returned images/...png path as a Markdown image.'
+        : '',
+      options.browserControlAvailable
         ? 'The right-side browser tab in this Work conversation is shared with you and opens automatically when a browser capability needs it. For a request to open or navigate to a URL, search_capabilities for browser_navigate, then execute its exact returned capability ID with the URL. Do not use browser_evaluate or page JavaScript for navigation. For visible page text, search and execute browser_snapshot; for an image, use browser_screenshot. The capability catalog may have changed since earlier turns: search it instead of repeating old claims about available tools. Never ask the user to reply "agree" or "approve" in chat, and never invent an approval ID. Host approval, when needed, appears in the UI and is handled outside the conversation. If a tool reports that approval is needed, stop the turn without a conversational approval request.'
         : '',
       memory ? `Durable user memory:\n${memory}` : '',

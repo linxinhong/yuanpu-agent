@@ -4,7 +4,11 @@ const PREVIEW_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-in
 
 /** A code token is usable only after its closing fence arrives in the stream. */
 export function completeHtmlPreview(token: Tokens.Code): boolean {
-  if (token.lang?.trim() !== 'html-preview') return false;
+  return completePreviewFence(token, 'html-preview');
+}
+
+export function completePreviewFence(token: Tokens.Code, language: string): boolean {
+  if (token.lang?.trim() !== language) return false;
   const opening = token.raw.match(/^(`{3,}|~{3,})[^\n]*\n/);
   if (!opening) return false;
   const marker = opening[1]![0]!;

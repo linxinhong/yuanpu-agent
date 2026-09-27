@@ -32,6 +32,8 @@ Put a complete, closed `html-preview` fenced code block between Markdown paragra
 
 The preview iframe is static: scripts, external resources, network requests, and interactive controls are unavailable. Put any necessary labels and content directly in the HTML/SVG. Use a responsive SVG `viewBox` and legible text; the inline card is about 420 px tall.
 
+For a quick flowchart or relationship graph, use a complete `mermaid` fenced block instead. Begin with a Mermaid declaration such as `graph TB` or `flowchart LR`. The app renders the graph into the same static preview card. For an exact custom layout, use `html-preview` and inline SVG.
+
 ## Image card
 
 Use normal Markdown image syntax. For a local image, first create or verify a PNG, JPEG, GIF, WebP, or AVIF file inside the current Work conversation's directory, then reference its workspace-relative path. Browser screenshots are saved under that conversation's `images/` directory; use the path returned by the screenshot tool.

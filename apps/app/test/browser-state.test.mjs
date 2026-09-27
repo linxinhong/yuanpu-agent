@@ -10,6 +10,9 @@ const { createBrowserMemoryStore, initialBrowserState, normalizeAddressInput } =
 test('normalizeAddressInput accepts urls, adds https to domains and rejects junk', () => {
   assert.equal(normalizeAddressInput('https://example.com/a?b=1'), 'https://example.com/a?b=1');
   assert.equal(normalizeAddressInput('http://127.0.0.1:5173/'), 'http://127.0.0.1:5173/');
+  assert.equal(normalizeAddressInput('localhost:9876/arch.html'), 'http://localhost:9876/arch.html');
+  assert.equal(normalizeAddressInput('127.0.0.1:5173'), 'http://127.0.0.1:5173');
+  assert.equal(normalizeAddressInput('[::1]:9876/'), 'http://[::1]:9876/');
   assert.equal(normalizeAddressInput('example.com'), 'https://example.com');
   assert.equal(normalizeAddressInput('example.com/path'), 'https://example.com/path');
   assert.equal(normalizeAddressInput('about:blank'), 'about:blank');

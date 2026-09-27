@@ -255,6 +255,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .html-preview-frame { display: block; width: 100%; height: 420px; border: 0; background: #fff; pointer-events: none; }
 .html-preview-source { max-height: 310px; margin: 0 !important; border-radius: 0 !important; }
 .html-preview-pending { margin: 12px 0 18px; border: 1px dashed var(--yp-border-control); border-radius: 10px; padding: 18px; color: var(--yp-text-muted); font-size: 0.75rem; }
+.html-preview-error { display: flex; flex-direction: column; gap: 8px; }
+.html-preview-error span { color: var(--yp-text-muted); font: 0.75rem/1.5 -apple-system, BlinkMacSystemFont, sans-serif; }
 .html-preview-dialog { width: min(1080px, calc(100vw - 48px)); height: min(850px, calc(100vh - 48px)); max-width: none; max-height: none; overflow: hidden; border: 1px solid var(--yp-border-subtle); border-radius: 14px; padding: 0; background: var(--yp-surface); }
 .html-preview-dialog::backdrop, .message-image-dialog::backdrop { background: rgb(33 42 48 / 48%); backdrop-filter: blur(14px); }
 .html-preview-dialog-bar { display: flex; height: 46px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--yp-border-subtle); padding: 0 16px; font-size: 0.8125rem; }
