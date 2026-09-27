@@ -234,6 +234,7 @@ test('personal memory is refreshed after a tool call without entering the saved 
   const session = await executor.openSession();
   assert.equal((await session.prompt('Read my current preference.')).message, 'Current memory used.');
   assert.equal(requests.length, 2);
+  assert.match(JSON.stringify(requests[0]), /durable, source-backed personal memory/);
   assert.match(JSON.stringify(requests[0].messages), /blue crane/);
   assert.doesNotMatch(JSON.stringify(requests[0].messages), /green crane/);
   assert.match(JSON.stringify(requests[1].messages), /green crane/);

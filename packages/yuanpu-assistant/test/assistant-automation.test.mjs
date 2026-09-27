@@ -77,6 +77,29 @@ test('processed source left by a Worker crash is enrolled exactly once after res
   assert.equal(store.next().jobId, job.jobId);
 });
 
+test('old empty understanding results are reanalyzed once while their source is current', async (t) => {
+  const { sources, clock } = await fixture(t);
+  const event = source('1', 'v1', 'assistant');
+  sources.enqueuePage('assistant', '0', { nextCursor: '1',
+    events: [{ eventId: '1', change: event.change }] });
+  sources.setCurrent(sources.event('assistant', '1'), 'available',
+    'User: 默认使用英文文件名。\nAssistant: 好的。');
+  const store = new AssistantAutomationStore(sources.database, clock.now);
+  assert.equal(store.reconcileProcessedSources(), 1);
+  const original = store.next();
+  store.start(original.jobId);
+  assert.equal(store.commit(original.jobId, () =>
+    store.recordCheckpoint(original, { observationCount: 0 })), true);
+  assert.equal(store.requeueEmptyUnderstanding(), 1);
+  assert.equal(store.requeueEmptyUnderstanding(), 0);
+  const retry = store.next();
+  assert.equal(retry.kind, 'understand-user');
+  assert.equal(retry.sourceId, original.sourceId);
+  assert.notEqual(retry.jobId, original.jobId);
+  sources.forgetSource(original.sourceId);
+  assert.equal(store.requeueEmptyUnderstanding(), 0);
+});
+
 test('processed delegated result recovers a new Work review after restart', async (t) => {
   const context = await fixture(t);
   const work = { ...source('1', 'work-v1').change, workId: 'work:one' };

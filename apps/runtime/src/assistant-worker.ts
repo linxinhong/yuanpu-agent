@@ -400,7 +400,7 @@ export async function runAssistantWorker(): Promise<void> {
             const session = await executor.openSession(undefined, { backgroundSkill: 'understand-user' });
             try {
               const result = await session.invokeSkill('understand-user',
-                `Classify only direct user statements from this source. Return the skill's JSON object.\n${JSON.stringify(snapshot)}`,
+                `Classify only direct user statements from this source. Explicit lasting instructions about how the assistant should work (for example, statements beginning with 默认、以后、每次、长期) may be user preferences or collaboration style; do not turn one-off task commands into permanent traits. Quote the user's exact words and return only the skill's JSON object, without Markdown fences.\n${JSON.stringify(snapshot)}`,
                 signal, beforeModel);
               return { costUsd: result.costUsd, message: result.message };
             } finally { await session.close(); }
@@ -465,6 +465,7 @@ export async function runAssistantWorker(): Promise<void> {
       } catch (error) { send({ kind: 'source-error', error: String(error) }); }
       if (closed) return;
       automation.reconcileProcessedSources(100);
+      automation.requeueEmptyUnderstanding(25);
       automationEngine.setPaused(workspace.isOrganizingPaused());
       await reconcileDelegations();
       automationEngine.preemptInvalidated();

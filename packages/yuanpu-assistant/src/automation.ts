@@ -262,6 +262,31 @@ export class AssistantAutomationStore {
     return rows.length;
   }
 
+  /** Revisit old empty understanding results once after improving proposal parsing. */
+  requeueEmptyUnderstanding(limit = 25): number {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid reanalysis limit.');
+    const rows = this.database.prepare(`SELECT j.source_id,j.source_version,j.audience_kind,j.audience_id
+      FROM automation_jobs j
+      JOIN automation_checkpoints cp ON cp.effect_id=j.effect_id
+      JOIN source_current s ON s.source_id=j.source_id AND s.source_version=j.source_version
+      LEFT JOIN forgotten_sources f ON f.source_id=j.source_id
+      WHERE j.kind='understand-user' AND j.status='completed'
+        AND j.dedupe_key LIKE 'source:understand-user:%'
+        AND json_extract(cp.snapshot_json,'$.observationCount')=0
+        AND s.availability='available' AND f.source_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM automation_jobs newer
+          WHERE newer.dedupe_key='reanalysis-v2:' || j.source_id || ':' || j.source_version)
+      ORDER BY j.created_at LIMIT ?`).all(limit) as Array<{
+        source_id: string; source_version: string;
+        audience_kind: AssistantAudience['kind']; audience_id: string;
+      }>;
+    for (const row of rows) this.enqueue({ kind: 'understand-user',
+      dedupeKey: `reanalysis-v2:${row.source_id}:${row.source_version}`,
+      sourceId: row.source_id, sourceVersion: row.source_version,
+      audience: { kind: row.audience_kind, id: row.audience_id } });
+    return rows.length;
+  }
+
   enqueueDelegation(delegationId: string, version: string, audience: AssistantAudience,
     eventAt: string, status: string): AutomationJob {
     safeKey(delegationId, 'delegation ID');

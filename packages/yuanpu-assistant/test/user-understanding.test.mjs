@@ -161,6 +161,13 @@ test('invalid model claims and credential-like quotations cannot enter user memo
   assert.equal(isDirectUserStatement('以下是书里的句子：\n我喜欢滑雪。',
     '我喜欢滑雪。', 'hobbies'), false);
   assert.equal(isDirectUserStatement('关于爱好，我喜欢滑雪。', '我喜欢滑雪。', 'hobbies'), true);
+  assert.equal(isDirectUserStatement('默认使用英文文件名。', '默认使用英文文件名。', 'preferences'), true);
+  assert.equal(isDirectUserStatement('默认使用英文文件名。', '默认使用英文文件名。', 'knowledge'), false);
+  assert.equal(isDirectUserStatement('同事说“默认使用英文文件名。”', '默认使用英文文件名。', 'preferences'), false);
+  assert.equal(isDirectUserStatement('把这次文件名改成英文。', '把这次文件名改成英文。', 'preferences'), false);
+  assert.deepEqual(parseUnderstandingProposal('```json\n{"observations":[]}\n```'), { observations: [] });
+  assert.throws(() => parseUnderstandingProposal('Here is the result: ```json\n{"observations":[]}\n```'),
+    /Unexpected token|is not valid JSON/);
   assert.throws(() => parseUnderstandingProposal(JSON.stringify({ observations: [
     { topic: 'knowledge', quote: 'token: sk-abcdefghijklmnopqrstuvwxyz' },
   ] })), /sensitive/);

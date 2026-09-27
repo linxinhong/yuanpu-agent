@@ -34,8 +34,8 @@ test('real Worker invokes isolated understand-user skill and writes evidence-bac
     for await (const chunk of request) body += chunk;
     requests.push(body);
     const content = body.includes('understand-user')
-      ? JSON.stringify({ observations: [{ topic: 'interests', quote: '我喜欢安静地阅读。',
-        supersedes: [] }] })
+      ? `\`\`\`json\n${JSON.stringify({ observations: [{ topic: 'preferences',
+        quote: '默认使用英文文件名。', supersedes: [] }] })}\n\`\`\``
       : JSON.stringify({ goal: 'Understand the user', constraints: [], judgment: 'unverified',
         findings: [], unresolved: [], followUp: [], memoryCandidates: [], ledgerCandidates: [] });
     response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -63,7 +63,7 @@ test('real Worker invokes isolated understand-user skill and writes evidence-bac
     : { events: [], nextCursor: cursor }; },
   async currentSource() { return { status: 'available', sourceVersion: 'v1' }; },
   async readSource() { return { status: 'available', sourceVersion: 'v1',
-    text: 'User: 我喜欢安静地阅读。\nAssistant: 了解。' }; } };
+    text: 'User: 默认使用英文文件名。\nAssistant: 了解。' }; } };
   const home = join(root, 'assistant');
   const manager = new AssistantWorkerManager({ home, sources,
     model: { appPath, agentPath, provider: 'fixture', model: 'fixture-model' },
@@ -75,8 +75,8 @@ test('real Worker invokes isolated understand-user skill and writes evidence-bac
     await rm(root, { recursive: true, force: true });
   });
   await manager.start();
-  const note = await eventually(() => readFile(join(home, 'memories', 'user', 'interests.md'), 'utf8'));
-  assert.match(note, /我喜欢安静地阅读/);
+  const note = await eventually(() => readFile(join(home, 'memories', 'user', 'preferences.md'), 'utf8'));
+  assert.match(note, /默认使用英文文件名/);
   assert.match(note, /assistant-turn:test-one/);
   assert.ok(requests.some((body) => body.includes('understand-user')));
   for (const body of requests) if (body.includes('understand-user')) {

@@ -107,6 +107,10 @@ async function completeTurn(lane: AgentLane, sessionId: string, run: ReturnType<
 }
 
 /** Owns only assistant Sessions. Caller must keep one executor per assistant Home writer. */
+const personalMemoryPolicy = `This assistant has durable, source-backed personal memory in Assistant Home.
+Authorized Work and assistant conversations are reviewed asynchronously; desktop and WeCom chat Sessions stay separate while verified personal memory is shared.
+If no verified personal facts are retrieved for this turn, say that no verified facts are currently available and organization may still be pending. Never claim that this assistant cannot save memory or that every conversation is forgotten. Do not invent facts.`;
+
 export async function createAssistantExecutor(options: {
   assistantHome: string;
   host: AssistantHost;
@@ -207,7 +211,7 @@ export async function createAssistantExecutor(options: {
           session,
           models,
           model,
-          systemPrompt: frozen.prompt,
+          systemPrompt: backgroundSkill ? frozen.prompt : `${frozen.prompt}\n\n${personalMemoryPolicy}`,
           resources: { skills },
           activeToolNames: activeTools.map((tool) => tool.name),
           tools: activeTools,

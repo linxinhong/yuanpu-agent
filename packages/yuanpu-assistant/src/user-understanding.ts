@@ -70,7 +70,10 @@ function looksSensitive(text: string): boolean {
 
 /** Reject first-person text embedded in somebody else's speech or a quoted document. */
 export function isDirectUserStatement(userText: string, quote: string, topic: UserTopic): boolean {
-  if (!/^(?:我|本人|I\b|I'm\b|I've\b|我的|请|以后|不要|给我)/iu.test(quote)) return false;
+  const personal = /^(?:我|本人|I\b|I'm\b|I've\b|我的|请|以后|不要|给我)/iu.test(quote);
+  const lastingDirective = /^(?:以后|今后|始终|每次|默认|长期|记住|请记住|不要再|不再)/u.test(quote);
+  if (!personal && !(lastingDirective
+    && ['preferences', 'collaboration', 'working-style'].includes(topic))) return false;
   if (/^(?:请|以后|不要|给我)/u.test(quote)
     && topic !== 'preferences' && topic !== 'collaboration') return false;
   const text = normalize(userText);
@@ -103,7 +106,9 @@ export function isDirectUserStatement(userText: string, quote: string, topic: Us
 /** The model may choose a topic, but the note body is always a verified user quotation. */
 export function parseUnderstandingProposal(message: string): UnderstandingProposal {
   if (message.length > 8000) throw new Error('Understanding proposal exceeds budget.');
-  const value = JSON.parse(message) as Record<string, unknown>;
+  const trimmed = message.trim();
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/iu.exec(trimmed);
+  const value = JSON.parse(fenced?.[1] ?? trimmed) as Record<string, unknown>;
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !Array.isArray(value.observations) || value.observations.length > 8) {
     throw new Error('Invalid understanding proposal.');
