@@ -25,3 +25,9 @@
 - 与主线 `84ec395` 的合并冲突集中在 `chat.tsx` 和 `file-tabs.tsx`：保留主线的工作面板标签、文件目录、图片预览，并增加浏览器标签。
 - 浏览器标签切换后保持 webview 挂载；agent 请求会展开右侧栏并选中浏览器。增加 guest 所属窗口校验、非 http(s) 导航拦截，以及控制服务对 Origin 和 1 MiB 请求体的检查。
 - 集成工作区以本地 Node 24.15.0 / pnpm 11.22.0 运行 `pnpm check` 通过；构建前复用本机已有的模型数据，避免访问 models.dev。真实 Electron 交互仍待验证，任务状态保持进行中。
+
+## 2026-09-27 浏览器部分主线集成验证
+- 集成分支 `codex/browser-tab-integration` 保留主线 FileWorkspace、工作区文件树与图片标签，仅增加浏览器标签及共享 guest 控制链路。
+- 修复两处端到端测试发现的问题：`RuntimeManager` 构造时保存控制端点并交给 Runtime；`BrowserView` 在 guest 已附着或 React StrictMode effect 重放时补做注册。首次地址导航固定 `src=about:blank`，避免重复加载干扰历史。
+- `apps/desktop/test/task-063-browser-app-probe.mjs` 用临时 Home 和独立 Electron/Vite 实例实测地址栏导航、标签切换保持 guest、页面链接、前进后退、Agent 经 `search_capabilities`/`execute_capability` 调用 `browser_navigate` 驱动同一个 guest；结果通过，guest ID 保持一致。
+- 在同步后的主线基底上 `pnpm check` 通过，真实 Electron probe 再次通过。其它 TASK-063 验收项仍按任务卡继续验证。
