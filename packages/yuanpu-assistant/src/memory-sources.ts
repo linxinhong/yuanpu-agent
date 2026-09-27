@@ -239,10 +239,18 @@ export class AssistantSourceStore {
   }
 
   async sync(host: AssistantSourceHost, feedId: string, limit = 100): Promise<number> {
+    return (await this.syncPage(host, feedId, limit)).inserted;
+  }
+
+  async syncPage(host: AssistantSourceHost, feedId: string, limit = 100): Promise<{
+    inserted: number; fullPage: boolean }> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Invalid source page size.');
     const cursor = this.cursor(feedId);
     const page = await host.listChanges(feedId, cursor, limit);
-    return this.enqueuePage(feedId, cursor, page);
+    if (page.events.length === limit && page.nextCursor === cursor) {
+      throw new Error('Full source page did not advance its cursor.');
+    }
+    return { inserted: this.enqueuePage(feedId, cursor, page), fullPage: page.events.length === limit };
   }
 
   nextEvent(retryUnavailable = false): QueuedSource | undefined {

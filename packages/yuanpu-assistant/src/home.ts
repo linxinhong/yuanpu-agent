@@ -163,21 +163,24 @@ export async function readAssistantHomeFile(paths: AssistantHomePaths, path: str
   }
 }
 
-/** Core memory is frozen only when a new Session is created. */
+/** Freeze identity and Assistant skill locations; mutable user memory is retrieved per request. */
 export async function createFrozenAssistantPrompt(paths: AssistantHomePaths, skillList: string): Promise<string> {
-  const sections = await Promise.all([
-    readAssistantHomeFile(paths, paths.soul),
-    readAssistantHomeFile(paths, paths.user),
-    readAssistantHomeFile(paths, paths.memory),
-  ]);
-  for (const section of sections) {
-    if (section.length > maxCoreCharacters) throw new Error('Assistant core file exceeds the session prompt budget.');
+  const soul = await readAssistantHomeFile(paths, paths.soul);
+  if (soul.length > maxCoreCharacters) throw new Error('Assistant identity exceeds the session prompt budget.');
+  return [soul, skillList].filter(Boolean).join('\n\n');
+}
+
+/** v1 snapshots mixed mutable USER/MEMORY into the frozen prompt. Strip those facts on upgrade. */
+export function identityFromLegacyAssistantPrompt(prompt: string): string {
+  const marker = '\n\nThe following user information is verified only to the extent stated below. Empty sections contain no known facts.';
+  const start = prompt.indexOf(marker);
+  if (start < 0 || start !== prompt.lastIndexOf(marker)) {
+    throw new Error('Ambiguous legacy Assistant prompt snapshot; original file was preserved.');
   }
-  return [
-    sections[0],
-    'The following user information is verified only to the extent stated below. Empty sections contain no known facts.',
-    sections[1],
-    sections[2],
-    skillList,
-  ].filter(Boolean).join('\n\n');
+  const skillsMarker = '\n\nThe following skills provide specialized instructions for specific tasks.';
+  const skills = prompt.lastIndexOf(skillsMarker);
+  if (skills >= 0 && skills !== prompt.indexOf(skillsMarker)) {
+    throw new Error('Ambiguous legacy Assistant skill snapshot; original file was preserved.');
+  }
+  return prompt.slice(0, start) + (skills > start ? prompt.slice(skills) : '');
 }

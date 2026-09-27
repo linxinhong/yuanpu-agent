@@ -9,6 +9,7 @@ import { createModels, createProvider } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import {
   createAssistantExecutor,
+  identityFromLegacyAssistantPrompt,
   initializeAssistantHome,
   loadAssistantSkills,
   resolveAssistantHome,
@@ -99,21 +100,21 @@ test('a linked Pi Session store cannot redirect assistant transcripts outside Ho
   assert.deepEqual(await import('node:fs/promises').then(({ readdir }) => readdir(outside)), []);
 });
 
-async function loopbackModel(t) {
+async function loopbackModel(t, reply) {
   const requests = [];
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
-    requests.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    requests.push(body);
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    response.write(`data: ${JSON.stringify({
+    const parts = reply?.(body, requests.length) ?? [
+      { delta: { role: 'assistant', content: 'Verified reply.' }, finish_reason: null },
+      { delta: {}, finish_reason: 'stop' },
+    ];
+    for (const part of parts) response.write(`data: ${JSON.stringify({
       id: 'chatcmpl-assistant-test', object: 'chat.completion.chunk', created: 0, model: 'assistant-loopback',
-      choices: [{ index: 0, delta: { role: 'assistant', content: 'Verified reply.' }, finish_reason: null }],
-    })}\n\n`);
-    response.write(`data: ${JSON.stringify({
-      id: 'chatcmpl-assistant-test', object: 'chat.completion.chunk', created: 0, model: 'assistant-loopback',
-      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 10, completion_tokens: 3 },
+      choices: [{ index: 0, ...part }], usage: { prompt_tokens: 10, completion_tokens: 3 },
     })}\n\n`);
     response.end('data: [DONE]\n\n');
   });
@@ -136,7 +137,7 @@ async function loopbackModel(t) {
   return { requests, host: { async resolveModel() { return { models, model }; } } };
 }
 
-test('independent Pi executor makes real loopback rounds and freezes core memory per Session', async (t) => {
+test('independent Pi executor makes real loopback rounds and freezes identity per Session', async (t) => {
   const root = await workspace(t);
   const home = join(root, 'assistant');
   const work = join(root, 'agent');
@@ -167,18 +168,82 @@ test('independent Pi executor makes real loopback rounds and freezes core memory
 
   const newSession = await executor.openSession();
   assert.equal((await newSession.prompt('New context')).message, 'Verified reply.');
-  assert.match(JSON.stringify(requests[3].messages[0]), /Verified preference: concise answers/);
+  assert.doesNotMatch(JSON.stringify(requests[3].messages[0]), /Verified preference: concise answers/);
   assert.notEqual(newSession.sessionId, id);
   assert.equal(await import('node:fs/promises').then(({ stat }) => stat(join(home, 'sessions', 'snapshots', `${id}.json`)).then(() => true)), true);
 
   const otherHome = join(root, 'cloud-selected-home');
   const otherPaths = await initializeAssistantHome(otherHome);
-  await writeFile(otherPaths.user, '# About the user\n\nVerified marker: other Home.\n');
+  await writeFile(otherPaths.soul, '# Assistant identity\n\nVerified marker: other Home.\n');
   const otherExecutor = await createAssistantExecutor({ assistantHome: otherHome, host });
   t.after(() => otherExecutor.close());
   assert.equal((await (await otherExecutor.openSession()).prompt('Separate Home')).message, 'Verified reply.');
   assert.match(JSON.stringify(requests[4].messages[0]), /Verified marker: other Home/);
   assert.doesNotMatch(JSON.stringify(requests[4].messages[0]), /Verified preference: concise answers/);
+});
+
+test('opening a v1 Assistant snapshot strips frozen mutable USER and MEMORY facts', async (t) => {
+  const root = await workspace(t);
+  const { requests, host } = await loopbackModel(t);
+  const executor = await createAssistantExecutor({ assistantHome: join(root, 'assistant'), host });
+  t.after(() => executor.close());
+  const first = await executor.openSession();
+  assert.equal((await first.prompt('Before migration')).message, 'Verified reply.');
+  const id = first.sessionId;
+  await first.close();
+  const snapshot = join(executor.paths.snapshots, `${id}.json`);
+  const legacy = ['# Assistant identity\n\nPreserved soul marker.',
+    'The following user information is verified only to the extent stated below. Empty sections contain no known facts.',
+    '# About the user\n\nStale blue preference.', '# Current memory\n\nStale green preference.',
+    'The following skills provide specialized instructions for specific tasks.\n<available_skills />'].join('\n\n');
+  await writeFile(snapshot, JSON.stringify({ version: 1, prompt: legacy }));
+  const reopened = await executor.openSession(id);
+  assert.equal((await reopened.prompt('After migration')).message, 'Verified reply.');
+  const prompt = JSON.stringify(requests.at(-1).messages[0]);
+  assert.match(prompt, /Preserved soul marker/);
+  assert.match(prompt, /available_skills/);
+  assert.doesNotMatch(prompt, /Stale blue preference|Stale green preference/);
+  assert.deepEqual(JSON.parse(await readFile(snapshot, 'utf8')),
+    { version: 2, prompt: '# Assistant identity\n\nPreserved soul marker.\n\nThe following skills provide specialized instructions for specific tasks.\n<available_skills />' });
+});
+
+test('ambiguous legacy prompt delimiters fail closed before identity can be truncated', () => {
+  const marker = 'The following user information is verified only to the extent stated below. Empty sections contain no known facts.';
+  const oldPrompt = `# Assistant identity\n\n${marker}\n\nKeep this part of SOUL.\n\n${marker}\n\n# About the user\n\nOld fact.`;
+  assert.throws(() => identityFromLegacyAssistantPrompt(oldPrompt), /Ambiguous legacy Assistant prompt snapshot/);
+});
+
+test('personal memory is refreshed after a tool call without entering the saved conversation', async (t) => {
+  const root = await workspace(t);
+  const home = join(root, 'assistant');
+  let currentMemory = '[{"text":"blue crane"}]';
+  const { requests, host } = await loopbackModel(t, (_body, call) => call === 1 ? [
+    { delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_candidates',
+      type: 'function', function: { name: 'assistant_work_candidates', arguments: '{}' } }] },
+      finish_reason: null },
+    { delta: {}, finish_reason: 'tool_calls' },
+  ] : [
+    { delta: { role: 'assistant', content: 'Current memory used.' }, finish_reason: null },
+    { delta: {}, finish_reason: 'stop' },
+  ]);
+  const executor = await createAssistantExecutor({ assistantHome: home, host,
+    currentPersonalMemory: async () => currentMemory,
+    workCandidates: () => { currentMemory = '[{"text":"green crane"}]'; return []; },
+  });
+  t.after(() => executor.close());
+  const session = await executor.openSession();
+  assert.equal((await session.prompt('Read my current preference.')).message, 'Current memory used.');
+  assert.equal(requests.length, 2);
+  assert.match(JSON.stringify(requests[0].messages), /blue crane/);
+  assert.doesNotMatch(JSON.stringify(requests[0].messages), /green crane/);
+  assert.match(JSON.stringify(requests[1].messages), /green crane/);
+  assert.doesNotMatch(JSON.stringify(requests[1].messages), /blue crane/);
+  await session.close();
+  const transcripts = (await readdir(join(home, 'sessions', 'pi'),
+    { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+  assert.ok(transcripts.length > 0);
+  const saved = await Promise.all(transcripts.map((entry) => readFile(join(entry.parentPath, entry.name), 'utf8')));
+  assert.doesNotMatch(saved.join('\n'), /blue crane|green crane/);
 });
 
 test('an assistant-only skill can run through the independent Pi lane', async (t) => {

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { parse, stringify } from 'yaml';
 import type { AssistantAudience, AssistantEvidenceRef } from '@yuanpu-agent/protocol';
-import { assertSafeDirectory, resolveAssistantHome } from './home.js';
+import { assertSafeDirectory, readAssistantHomeFile, resolveAssistantHome } from './home.js';
 import { AssistantSourceStore, searchTerms, type AssistantSourceHost,
   type QueuedSource, type SourceSearchHit } from './memory-sources.js';
 
@@ -205,6 +205,26 @@ export class AssistantMemoryRepository {
       await repo.reconcileDeletedSources();
       return repo;
     } catch (error) { sources.close(); throw error; }
+  }
+
+  /** Legacy handwritten core files are retained but need explicit review before use. */
+  async unindexedLegacyCoreFiles(): Promise<string[]> {
+    const paths = resolveAssistantHome(this.root);
+    const unindexed: string[] = [];
+    for (const [id, path, empty] of [
+      ['user-summary', paths.user, '# About the user'],
+      ['core-memory', paths.memory, '# Current memory'],
+    ] as const) {
+      if (this.row(id)) continue;
+      let content: string;
+      try { content = await readAssistantHomeFile(paths, path); }
+      catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') continue;
+        throw error;
+      }
+      if (content.trim() !== empty) unindexed.push(path);
+    }
+    return unindexed;
   }
 
   private path(section: AssistantDocumentSection, id: string): string {
@@ -580,6 +600,64 @@ export class AssistantMemoryRepository {
       if (hits.length >= limit) break;
     }
     return hits;
+  }
+
+  /** Bounded, current personal facts for a single interactive Assistant turn. */
+  async personalPromptContext(maxCharacters = 8_000, includeSourceBacked = true): Promise<string> {
+    if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1 || maxCharacters > 16_000) {
+      throw new Error('Invalid Assistant memory prompt budget.');
+    }
+    const rows = this.database.prepare(`SELECT m.id FROM memory_documents m
+      WHERE m.section='memories' AND m.status='active'
+        AND m.audience_kind='personal' AND m.audience_id='local-user'
+      ORDER BY m.manual_authority DESC,
+        (SELECT MAX(r.rowid) FROM memory_revisions r WHERE r.memory_id=m.id) DESC,
+        m.id LIMIT 100`).all() as Array<{ id: string }>;
+    const selected: Array<{ id: string; version: number; context: string; text: string }> = [];
+    const currentTextLostEvidence = (document: AssistantMemoryDocument): boolean => {
+      const revisions = this.database.prepare(`SELECT content FROM memory_revisions
+        WHERE memory_id=? AND content IS NOT NULL ORDER BY version DESC LIMIT 101`)
+        .all(document.id) as Array<{ content: string }>;
+      const currentEvidence = new Set(document.evidence.map((ref) => `${ref.sourceId}\0${ref.sourceVersion}`));
+      for (const revision of revisions) {
+        const previous = parseDocument(revision.content);
+        if (previous.text === document.text && previous.evidence.some((ref) =>
+          !currentEvidence.has(`${ref.sourceId}\0${ref.sourceVersion}`))) {
+          return true;
+        }
+      }
+      return revisions.length > 100;
+    };
+    const usable = async (document: AssistantMemoryDocument, ancestors = new Set<string>()): Promise<boolean> => {
+      if (ancestors.has(document.id) || ancestors.size >= 32
+        || document.status !== 'active' || document.audience.kind !== 'personal'
+        || document.audience.id !== 'local-user') return false;
+      if (document.evidence.length && (!includeSourceBacked || !document.evidence.every((ref) => {
+        const source = this.sources.source(ref.sourceId);
+        return source?.availability === 'available' && source.sourceVersion === ref.sourceVersion;
+      }))) return false;
+      if (currentTextLostEvidence(document)) return false;
+      const next = new Set(ancestors).add(document.id);
+      for (const parentId of document.dependsOn) {
+        const parent = await this.get(parentId);
+        if (!parent || !await usable(parent, next)) return false;
+      }
+      return true;
+    };
+    let used = 2; // JSON array brackets.
+    for (const row of rows) {
+      const document = await this.get(row.id);
+      if (!document || document.status !== 'active' || document.section !== 'memories'
+        || document.audience.kind !== 'personal' || document.audience.id !== 'local-user') continue;
+      if (!await usable(document)) continue;
+      const item = { id: document.id, version: document.version,
+        context: document.context, text: document.text };
+      const size = JSON.stringify(item).length + (selected.length ? 1 : 0);
+      if (used + size > maxCharacters) continue;
+      selected.push(item);
+      used += size;
+    }
+    return selected.length ? JSON.stringify(selected) : '';
   }
 
   async rebuildIndex(): Promise<void> {

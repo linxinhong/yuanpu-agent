@@ -6,8 +6,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-// Standalone TASK-050 regression probe, deliberately excluded from pnpm check until fixed.
-// Real Worker/Pi session and persistence; loopback model, synthetic memory, temporary Home.
+// TASK-050 red probe retained as a regression: real Worker/Pi, loopback model, temporary Home.
 const require = createRequire(import.meta.url);
 const { AssistantWorkerManager } = require('../dist/index.cjs');
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
@@ -17,14 +16,19 @@ const agentPath = join(root, 'agent');
 const home = join(root, 'assistant');
 const sessionId = randomUUID();
 const question = '我的验收口令偏好是什么？请只回答四个字。';
+const restartQuestion = '重启后，我的验收口令偏好是什么？';
+const forgottenQuestion = '在新的会话里，我的验收口令偏好是什么？';
 const requests = [];
 const server = createServer(async (request, response) => {
   let text = '';
   for await (const chunk of request) text += chunk;
   const body = JSON.parse(text);
   const serialized = JSON.stringify(body.messages ?? []);
-  if (serialized.includes(question)) requests.push(serialized);
-  const content = serialized.includes(question)
+  const latest = JSON.stringify(body.messages?.at(-1) ?? '');
+  if ([question, restartQuestion, forgottenQuestion].some((item) => latest.includes(item))) {
+    requests.push({ latest, serialized });
+  }
+  const content = [question, restartQuestion, forgottenQuestion].some((item) => latest.includes(item))
     ? serialized.includes('我的验收口令偏好是绿色纸鹤') ? '绿色纸鹤' : '未知'
     : '收到';
   response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -46,9 +50,10 @@ try {
   } } }));
   await writeFile(join(appPath, 'auth.json'), JSON.stringify({ fixture: {
     type: 'api_key', key: 'fixture-only' } }));
-  manager = new AssistantWorkerManager({ home,
+  const options = { home,
     model: { appPath, agentPath, provider: 'fixture', model: 'fixture-model' },
-    command: { executable: process.execPath, args: [entry, '--assistant-worker'] } });
+    command: { executable: process.execPath, args: [entry, '--assistant-worker'] } };
+  manager = new AssistantWorkerManager(options);
   await manager.start();
   const first = await manager.prompt('task050-first', '你好。', Date.now() + 10_000, sessionId);
   assert.equal(first.status, 'completed');
@@ -60,12 +65,28 @@ try {
   const second = await manager.prompt('task050-second', question, Date.now() + 10_000, sessionId);
   assert.equal(second.status, 'completed');
   assert.equal(requests.length, 1);
-  const refreshed = requests[0].includes('我的验收口令偏好是绿色纸鹤');
+  const refreshed = requests[0].serialized.includes('我的验收口令偏好是绿色纸鹤');
   console.log(JSON.stringify({ mode: 'real-worker-loopback', sessionReused: true,
     correctedMemoryVersion: corrected.version, refreshedMemoryVisibleToModel: refreshed,
     answerMatchesCorrection: second.message === '绿色纸鹤' }));
   assert.equal(refreshed, true, 'the established Assistant session must see the corrected memory');
+  assert.doesNotMatch(requests[0].serialized, /我的验收口令偏好是蓝色纸鹤/);
   assert.equal(second.message, '绿色纸鹤');
+  await manager.stop();
+  manager = new AssistantWorkerManager(options);
+  await manager.start();
+  const afterRestart = await manager.prompt('task050-restart', restartQuestion,
+    Date.now() + 10_000, sessionId);
+  assert.equal(afterRestart.status, 'completed');
+  assert.equal(afterRestart.message, '绿色纸鹤');
+  assert.match(requests[1].serialized, /我的验收口令偏好是绿色纸鹤/);
+  assert.doesNotMatch(requests[1].serialized, /我的验收口令偏好是蓝色纸鹤/);
+  await manager.forgetMemory(imported.id);
+  const afterForget = await manager.prompt('task050-forgotten', forgottenQuestion,
+    Date.now() + 10_000, randomUUID());
+  assert.equal(afterForget.status, 'completed');
+  assert.equal(afterForget.message, '未知');
+  assert.doesNotMatch(requests[2].serialized, /我的验收口令偏好是(?:绿色|蓝色)纸鹤/);
 } finally {
   await manager?.stop();
   server.closeAllConnections();
