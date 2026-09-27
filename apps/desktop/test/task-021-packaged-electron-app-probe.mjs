@@ -24,7 +24,7 @@ const userData = join(root, 'user-data');
 const workspace = join(root, 'workspace');
 const apps = [];
 let providerRequests = 0;
-const providerBodies = [];
+const workProviderBodies = [];
 const provider = createServer(async (request, response) => {
   if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
     response.writeHead(404).end();
@@ -32,7 +32,8 @@ const provider = createServer(async (request, response) => {
   }
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
-  providerBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+  const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (body.tools?.some((tool) => tool.function?.name === 'write')) workProviderBodies.push(body);
   providerRequests += 1;
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({
@@ -141,7 +142,8 @@ async function start() {
   for (const stream of [child.stdout, child.stderr]) stream.on('data', (chunk) => {
     if (diagnostics.length < 20) diagnostics.push(chunk.toString().slice(0, 500));
   });
-  const app = { child, page: undefined, browser: undefined, runtimePid: undefined, diagnostics };
+  const app = { child, page: undefined, browser: undefined, runtimePid: undefined,
+    workerPid: undefined, diagnostics };
   apps.push(app);
   try {
     const targets = await eventually(async () => {
@@ -159,6 +161,15 @@ async function start() {
       catch { return false; }
     }, 'Packaged App preload/Runtime did not become ready.');
     app.runtimePid = await eventually(() => runtimePid(child.pid), 'Packaged Runtime child was not found.');
+    app.workerPid = await eventually(() => {
+      const output = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' });
+      for (const line of output.split('\n')) {
+        const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+        if (match && Number(match[2]) === app.runtimePid
+          && match[3].includes('--assistant-worker')) return Number(match[1]);
+      }
+      return undefined;
+    }, 'Packaged Assistant Worker child was not found.');
     return app;
   } catch (error) { throw new Error(`${error.message}; diagnostics=${diagnostics.join('').slice(-800)}`); }
 }
@@ -182,6 +193,7 @@ async function stop(app) {
   app.page.close();
   app.browser.close();
   await eventually(() => !alive(app.runtimePid), 'Packaged Runtime child survived App quit.');
+  await eventually(() => !alive(app.workerPid), 'Packaged Assistant Worker survived App quit.');
 }
 
 try {
@@ -211,7 +223,7 @@ try {
   assert.equal(connection.status, 'disabled');
   const chat = await evaluate(first, "window.yuanpu.chat('Synthetic packaged conversation')");
   assert.equal(chat.message.includes('Synthetic packaged reply.'), true);
-  assert.equal(providerRequests, 1);
+  assert.equal(workProviderBodies.length, 1);
   const initialDatabase = new DatabaseSync(join(home, 'workflows', 'automation.sqlite'), { readOnly: true });
   const desktopRun = initialDatabase.prepare("SELECT run_id, status FROM yp_agent_runs WHERE entry_point = 'desktop' ORDER BY created_at DESC LIMIT 1").get();
   assert.equal(desktopRun?.status, 'succeeded');
@@ -241,11 +253,11 @@ try {
   assert.equal((await evaluate(second, 'window.yuanpu.listSchedules()'))[0].scheduleId, created.scheduleId);
   assert.equal((await evaluate(second, `window.yuanpu.getAgentRun(${JSON.stringify(desktopRun.run_id)})`)).status, 'succeeded');
   assert.equal((await evaluate(second, 'window.yuanpu.listWecomConnections()')).connections.length, 1);
-  assert.equal(providerRequests, 1);
+  assert.equal(workProviderBodies.length, 1);
   const continuedChat = await evaluate(second, "window.yuanpu.chat('Synthetic packaged continuation')");
   assert.equal(continuedChat.message.includes('Synthetic packaged reply.'), true);
-  assert.equal(providerRequests, 2);
-  const continuedContext = JSON.stringify(providerBodies[1].messages);
+  assert.equal(workProviderBodies.length, 2);
+  const continuedContext = JSON.stringify(workProviderBodies[1].messages);
   assert.equal(continuedContext.includes('Synthetic packaged conversation'), true);
   assert.equal(continuedContext.includes('Synthetic packaged reply.'), true);
   await eventually(async () => evaluate(second, "Array.from(document.querySelectorAll('.nav-item')).some((button) => button.textContent.includes('定时任务'))"), 'Restarted packaged navigation did not mount.');
@@ -318,8 +330,8 @@ try {
     'Generic Runtime recovery notice could not be dismissed.');
   const recoveredChat = await evaluate(fourth, "window.yuanpu.chat('Synthetic packaged after rollback')");
   assert.equal(recoveredChat.message.includes('Synthetic packaged reply.'), true);
-  assert.equal(providerRequests, 3);
-  const recoveredContext = JSON.stringify(providerBodies[2].messages);
+  assert.equal(workProviderBodies.length, 3);
+  const recoveredContext = JSON.stringify(workProviderBodies[2].messages);
   assert.equal(recoveredContext.includes('Synthetic packaged conversation'), true);
   assert.equal(recoveredContext.includes('Synthetic packaged continuation'), true);
   await stop(fourth);
@@ -341,6 +353,7 @@ try {
       const command = execFileSync('ps', ['-p', String(app.runtimePid), '-o', 'command='], { encoding: 'utf8' });
       if (command.includes(root) || command.includes(bundledSea)) process.kill(app.runtimePid, 'SIGKILL');
     }
+    if (app.workerPid && alive(app.workerPid)) process.kill(app.workerPid, 'SIGKILL');
   }
   provider.closeAllConnections();
   await new Promise((done) => provider.close(done));
