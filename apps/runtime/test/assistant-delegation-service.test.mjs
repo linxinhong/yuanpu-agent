@@ -46,9 +46,15 @@ test('durable task ID deduplicates concurrent submissions and preserves one foll
   await assert.rejects(service.start({ ...firstBrief, contextRefs: ['source:other'] }), /scope conflict/);
   await eventually(async () => (await service.status('task_one'))?.status === 'completed');
   assert.equal(calls.length, 1);
-  await assert.rejects(service.followUp('task_one', 'other_session', 'correct it'), /Unknown delegation/);
-  await service.followUp('task_one', 'assistant_session', 'correct it');
+  await assert.rejects(service.followUp('task_one', 'other_session', 'correct it', 'follow_one'), /Unknown delegation/);
+  await service.followUp('task_one', 'assistant_session', 'correct it', 'follow_one');
   await eventually(async () => (await service.status('task_one'))?.status === 'completed' && calls.length === 2);
+  const retried = await service.followUp('task_one', 'assistant_session', 'correct it', 'follow_one');
+  assert.equal(retried.status, 'completed');
+  assert.equal(calls.length, 2, 'lost response retry must not dispatch the same follow-up twice');
+  assert.deepEqual(retried.followUps, ['correct it']);
+  await assert.rejects(service.followUp('task_one', 'assistant_session', 'different', 'follow_one'),
+    /request ID conflict/);
   assert.deepEqual(calls.map((call) => call.taskId), ['task_one', 'task_one']);
   assert.equal(calls[1].followUp, 'correct it');
   await service.start(brief('task_two'));
@@ -94,7 +100,7 @@ test('approval waits and cannot be converted to a follow-up or repeated executio
   const approvalBrief = brief('task_approval');
   await service.start(approvalBrief);
   await eventually(async () => (await service.status('task_approval'))?.status === 'waiting_approval');
-  await assert.rejects(service.followUp('task_approval', 'assistant_session', 'repeat'), /not ready/);
+  await assert.rejects(service.followUp('task_approval', 'assistant_session', 'repeat', 'follow_repeat'), /not ready/);
   assert.equal((await service.start(approvalBrief)).status, 'waiting_approval');
   assert.equal(runs, 1);
   await assert.rejects(service.settleApproval('task_approval', 'wrong_approval',
@@ -134,7 +140,7 @@ test('execution task waits durably for an exact grant before one same-ID run', a
   assert.deepEqual(runs, [['task_granted', undefined, grant]]);
   assert.equal((await resumed.pendingApprovals()).length, 0);
   await assert.rejects(resumed.decideApproval('task_granted', grant, 'approved'), /does not match/);
-  await resumed.followUp('task_granted', 'assistant_session', 'check again');
+  await resumed.followUp('task_granted', 'assistant_session', 'check again', 'follow_granted');
   const followApproval = (await resumed.status('task_granted')).result.approvalRequestId;
   assert.notEqual(followApproval, grant);
   assert.equal(runs.length, 1);

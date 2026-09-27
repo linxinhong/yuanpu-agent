@@ -6,11 +6,14 @@ import {
   BACKGROUND_CONTEXT,
   formatSkillsForSystemPrompt,
   JsonlSessionRepo,
+  MemorySessionRepo,
   NodeExecutionEnv,
   type AgentLane,
   type Entry,
+  type AgentHarnessTool,
 } from '@earendil-works/pi-agent-core/node';
 import type { Api, Model, Models } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import {
   createFrozenAssistantPrompt,
   initializeAssistantHome,
@@ -21,6 +24,7 @@ import {
 import { loadAssistantSkills } from './skills.js';
 import { AssistantDelegationCoordinator, createAssistantDelegationTool,
   type AssistantDelegationHost } from './delegations.js';
+import type { AssistantWorkOrganization } from './work-organization.js';
 
 /** The host owns model selection and credentials; the assistant receives no auth file or Work executor. */
 export interface AssistantHost {
@@ -49,7 +53,7 @@ export interface AssistantSession {
 export interface AssistantExecutor {
   readonly paths: AssistantHomePaths;
   openSession(sessionId?: string, options?: { createIfMissing?: boolean;
-    reviewOnly?: boolean }): Promise<AssistantSession>;
+    reviewOnly?: boolean; backgroundSkill?: string }): Promise<AssistantSession>;
   linkDelegationEvidence(taskId: string, sessionId: string,
     checks: Array<{ criterion: string; evidenceRefs: string[] }>): Promise<unknown>;
   close(): Promise<void>;
@@ -108,6 +112,7 @@ export async function createAssistantExecutor(options: {
   bundledSkillsRoot?: string;
   bundledSkillFiles?: readonly BundledAssistantSkillFile[];
   delegations?: AssistantDelegationHost;
+  workCandidates?: () => ReturnType<AssistantWorkOrganization['verificationCandidates']>;
 }): Promise<AssistantExecutor> {
   const paths = await initializeAssistantHome(options.assistantHome, {
     ...(options.bundledSkillsRoot ? { bundledSkillsRoot: options.bundledSkillsRoot } : {}),
@@ -123,10 +128,12 @@ export async function createAssistantExecutor(options: {
   let closed = false;
 
   const openSession = async (selectedId?: string, openOptions: { createIfMissing?: boolean;
-    reviewOnly?: boolean } = {}): Promise<AssistantSession> => {
+    reviewOnly?: boolean; backgroundSkill?: string } = {}): Promise<AssistantSession> => {
     if (closed) throw new Error('Assistant executor is closed.');
-    if (openOptions.reviewOnly && selectedId) {
-      throw new Error('Background review requires a new isolated Session.');
+    const backgroundSkill = openOptions.backgroundSkill ?? (openOptions.reviewOnly ? 'review-work' : undefined);
+    const ephemeralReflection = backgroundSkill === 'reflect-and-suggest';
+    if (backgroundSkill && selectedId) {
+      throw new Error('Background skill requires a new isolated Session.');
     }
     const sessionId = selectedId ?? randomUUID();
     const existing = openSessions.get(sessionId);
@@ -134,10 +141,10 @@ export async function createAssistantExecutor(options: {
     const opening = (async () => {
       const { models, model } = await options.host.resolveModel();
       const availableSkills = await loadAssistantSkills(paths);
-      const skills = openOptions.reviewOnly
-        ? availableSkills.filter((skill) => skill.name === 'review-work') : availableSkills;
-      if (openOptions.reviewOnly && skills.length !== 1) {
-        throw new Error('Background review skill is unavailable.');
+      const skills = backgroundSkill
+        ? availableSkills.filter((skill) => skill.name === backgroundSkill) : availableSkills;
+      if (backgroundSkill && skills.length !== 1) {
+        throw new Error(`Background ${backgroundSkill} skill is unavailable.`);
       }
       const metadata = selectedId
         ? (await repo.list({ cwd: paths.root }, BACKGROUND_CONTEXT)).find((item) => item.id === selectedId)
@@ -145,13 +152,17 @@ export async function createAssistantExecutor(options: {
       if (selectedId && !metadata && !openOptions.createIfMissing) {
         throw new Error(`Unknown assistant Session: ${selectedId}`);
       }
+      const sessionRepo = ephemeralReflection ? new MemorySessionRepo() : repo;
       const session = metadata
         ? await repo.open(metadata, BACKGROUND_CONTEXT)
-        : await repo.create({ id: sessionId, cwd: paths.root }, BACKGROUND_CONTEXT);
+        : await sessionRepo.create({ id: sessionId, cwd: paths.root }, BACKGROUND_CONTEXT);
       try {
         const snapshotFile = snapshotPath(paths, sessionId);
         let frozen: FrozenSessionPrompt;
-        if (metadata) {
+        if (ephemeralReflection) {
+          frozen = { version: 1,
+            prompt: await createFrozenAssistantPrompt(paths, formatSkillsForSystemPrompt(skills)) };
+        } else if (metadata) {
           frozen = JSON.parse(await readAssistantHomeFile(paths, snapshotFile)) as FrozenSessionPrompt;
           if (frozen.version !== 1 || typeof frozen.prompt !== 'string') {
             throw new Error(`Invalid assistant prompt snapshot: ${sessionId}`);
@@ -164,16 +175,31 @@ export async function createAssistantExecutor(options: {
           await writeFile(snapshotFile, JSON.stringify(frozen), { flag: 'wx', mode: 0o600 });
         }
         let automationTaskId: string | undefined;
-        const delegationTool = delegationCoordinator && !openOptions.reviewOnly
+        const delegationTool = delegationCoordinator && !backgroundSkill
           ? createAssistantDelegationTool(delegationCoordinator, sessionId, () => automationTaskId) : undefined;
+        const workCandidateParameters = Type.Object({ workId: Type.Optional(Type.String()) },
+          { additionalProperties: false });
+        const candidateTool: AgentHarnessTool<object | undefined, typeof workCandidateParameters> | undefined =
+          options.workCandidates && !backgroundSkill ? {
+            name: 'assistant_work_candidates', label: 'Assistant Work candidates',
+            description: 'List current source-bound, read-only Work verification candidates. Use a returned sourceId as the scoped context reference for delegate_and_verify; never assume a subtask result proves Work completion.',
+            parameters: workCandidateParameters, replay: 'safe',
+            async execute(_toolCallId, input) {
+              const candidates = options.workCandidates?.() ?? [];
+              const filtered = input.workId ? candidates.filter((item) => item.workId === input.workId)
+                : candidates;
+              return { content: [{ type: 'text', text: JSON.stringify(filtered) }], details: filtered };
+            },
+          } : undefined;
+        const activeTools = [delegationTool, candidateTool].filter((item) => item !== undefined);
         const { harness } = await AgentHarness.create({
           session,
           models,
           model,
           systemPrompt: frozen.prompt,
           resources: { skills },
-          activeToolNames: delegationTool ? [delegationTool.name] : [],
-          tools: delegationTool ? [delegationTool] : [],
+          activeToolNames: activeTools.map((tool) => tool.name),
+          tools: activeTools,
         }, BACKGROUND_CONTEXT);
         const lane = await harness.lane('main', BACKGROUND_CONTEXT);
         let tail: Promise<unknown> = Promise.resolve();
@@ -217,7 +243,7 @@ export async function createAssistantExecutor(options: {
             }, signal);
           },
           verifyDelegation(taskId, signal, beforeModel) {
-            if (openOptions.reviewOnly || !delegationCoordinator
+            if (backgroundSkill || !delegationCoordinator
               || !/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
               return Promise.reject(new Error('Invalid delegation verification task.'));
             }

@@ -125,6 +125,7 @@ export class RuntimeManager {
       activationStabilityMs: options.activationStabilityMs ?? 2_000,
       onError: options.onError,
       onUpdateRecovery: options.onUpdateRecovery,
+      browserControl: options.browserControl,
     };
   }
 
@@ -696,9 +697,9 @@ export class RuntimeManager {
     });
   }
 
-  selectWorkConversation(conversationId: string): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
+  selectWorkConversation(conversationId: string, previewArchived?: boolean): Promise<import('@yuanpu-agent/protocol').WorkConversation> {
     return this.request(RUNTIME_ROUTES.workConversations, {
-      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId }),
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId, previewArchived }),
     });
   }
 
@@ -777,6 +778,75 @@ export class RuntimeManager {
 
   retryAssistantMirror(mirrorId: string): Promise<AssistantMirrorStatus> {
     return this.request(`${RUNTIME_ROUTES.assistantMirrors}/${encodeURIComponent(mirrorId)}/retry`, { method: 'POST' });
+  }
+
+  listAssistantSuggestions(): Promise<import('@yuanpu-agent/protocol').AssistantSuggestionInbox> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions);
+  }
+
+  feedbackAssistantSuggestion(id: string, action: 'ignored' | 'snoozed' | 'accepted',
+    snoozedUntil?: string): Promise<import('@yuanpu-agent/protocol').AssistantSuggestion> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'feedback', id, feedback: action, snoozedUntil }) });
+  }
+
+  setAssistantSuggestionsPaused(until?: string): Promise<{ pausedUntil?: string }> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'pause', until }) });
+  }
+
+  markAssistantSuggestionRead(id: string): Promise<import('@yuanpu-agent/protocol').AssistantSuggestion> {
+    return this.request(RUNTIME_ROUTES.assistantSuggestions, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'read', id }) });
+  }
+
+  getAssistantWorkspace(memoryLimit?: number): Promise<import('@yuanpu-agent/protocol').AssistantWorkspaceSnapshot> {
+    return this.request(memoryLimit === undefined ? RUNTIME_ROUTES.assistantWorkspace
+      : `${RUNTIME_ROUTES.assistantWorkspace}?memoryLimit=${encodeURIComponent(memoryLimit)}`);
+  }
+
+  revokeAssistantSource(sourceId: string, expectedVersion: string): Promise<import('@yuanpu-agent/protocol').AssistantSourceRevocationReceipt> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'revoke-source', sourceId, expectedVersion }) });
+  }
+
+  correctAssistantMemory(id: string, expectedVersion: number, text: string,
+    revisionId: string): Promise<import('@yuanpu-agent/protocol').AssistantMemoryView> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'correct-memory', id, expectedVersion, text, revisionId }) });
+  }
+
+  forgetAssistantMemory(id: string): Promise<{ forgottenIds: string[] }> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'forget-memory', id }) });
+  }
+
+  importAssistantSavedMemory(savedId: string, surface: 'work' | 'assistant', text: string,
+    savedAt: string): Promise<import('@yuanpu-agent/protocol').AssistantMemoryView> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'import-saved', savedId, surface, text, savedAt }) });
+  }
+
+  setAssistantOrganizingPaused(until?: string): Promise<{ organizingPausedUntil?: string }> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'pause-organizing', until }) });
+  }
+
+  followUpAssistantDelegation(taskId: string, text: string): Promise<import('@yuanpu-agent/protocol').AssistantDelegationRecord> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'follow-up-delegation', id: taskId, text }) });
+  }
+
+  cancelAssistantDelegation(taskId: string): Promise<import('@yuanpu-agent/protocol').AssistantDelegationRecord> {
+    return this.request(RUNTIME_ROUTES.assistantWorkspace, { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel-delegation', id: taskId }) });
   }
 
   searchPlugins(query: string): Promise<PluginSearchResult[]> {

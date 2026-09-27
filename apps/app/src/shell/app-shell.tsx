@@ -23,6 +23,7 @@ export function App() {
   const [configRoot, setConfigRoot] = useState('~/.yuanpu');
   const [notificationTarget, setNotificationTarget] = useState<NotificationNavigationTarget>();
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>();
+  const [assistantWorkConversationId, setAssistantWorkConversationId] = useState<string>();
   const [runtimeRecoveryNotice, setRuntimeRecoveryNotice] = useState<RuntimeRecoveryNotice>();
 
   useEffect(() => {
@@ -82,6 +83,14 @@ export function App() {
           configRoot,
           notificationTarget,
           selectedScheduleId,
+          assistantWorkConversationId,
+          openAssistantWorkConversation: (conversationId) => {
+            setAssistantWorkConversationId(conversationId);
+            setNotificationTarget(undefined);
+            setSelectedScheduleId(undefined);
+            setView('work');
+          },
+          clearAssistantWorkConversation: () => setAssistantWorkConversationId(undefined),
           navigate: setView,
           openScheduledRun: (runId, conversationId, scheduleId) => {
             setSelectedScheduleId(scheduleId);

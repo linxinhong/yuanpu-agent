@@ -70,6 +70,7 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
     const webview = webviewRef.current;
     if (!webview) return;
     let disposed = false;
+    let guestRegistered = false;
     const updateState = () => {
       if (disposed) return;
       const title = webview.getTitle();
@@ -88,8 +89,15 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
       });
     };
     const handleAttach = () => {
-      void host.attachGuest({ key: guestKey, webContentsId: webview.getWebContentsId(), conversationId: scopeKey })
+      if (disposed || guestRegistered) return;
+      let webContentsId: number;
+      try { webContentsId = webview.getWebContentsId(); }
+      catch { return; }
+      if (!webContentsId) return;
+      guestRegistered = true;
+      void host.attachGuest({ key: guestKey, webContentsId, conversationId: scopeKey })
         .catch((error: unknown) => {
+          guestRegistered = false;
           if (!disposed) setState((current) => ({
             ...current,
             errorMessage: error instanceof Error ? error.message : '浏览器会话连接失败。',
@@ -97,6 +105,7 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
         });
     };
     const handleDomReady = () => {
+      handleAttach();
       updateState();
       if (pendingUrl.current) {
         const url = pendingUrl.current;
@@ -111,6 +120,7 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
     const handleGone = () => {
       if (disposed) return;
       void host.detachGuest(guestKey).catch(() => undefined);
+      pendingUrl.current = memory.recall(scopeKey);
       setState((current) => ({ ...initialBrowserState(), url: current.url }));
       setGeneration((value) => value + 1);
     };
@@ -123,6 +133,9 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
     webview.addEventListener('page-title-updated', updateState);
     webview.addEventListener('did-fail-load', handleFail as EventListener);
     webview.addEventListener('render-process-gone', handleGone);
+    // The guest may attach before React's effect subscribes (including a
+    // StrictMode effect replay). Register an already-attached guest as well.
+    queueMicrotask(handleAttach);
     return () => {
       disposed = true;
       webview.removeEventListener('did-attach', handleAttach);
@@ -153,7 +166,7 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
       onOpenExternal={(url) => void host.openInSystemBrowser(url)} />
     <div className="browser-viewport">
       <WebView key={`webview:${generation}`} ref={webviewRef as never}
-        src={memory.recall(scopeKey) ?? 'about:blank'}
+        src="about:blank"
         partition={BROWSER_PARTITION}
         allowpopups=""
         style={{ backgroundColor: '#ffffff' } as CSSProperties}

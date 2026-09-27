@@ -690,10 +690,12 @@ async function serve(): Promise<void> {
   );
   await delegations.open();
   await delegations.reconcileEffectApprovals((requestId) => approvals.get(requestId)?.status);
+  let assistantHost: AssistantHostService;
   assistantWorker = new AssistantWorkerManager({
     home: join(home.root, 'assistant'),
     sources: assistantSources,
     delegations,
+    deliverSuggestion: (id, content) => assistantHost.deliverSuggestion(id, content),
     model: {
       appPath: home.appPath,
       agentPath: home.agentPath,
@@ -702,8 +704,8 @@ async function serve(): Promise<void> {
     },
     onError: (error) => console.warn(`[assistant-worker] ${error.message}`),
   });
-  const assistantHost = new AssistantHostService(metadata.assistantHost, assistantWorker,
-    home.config.workingDirectory);
+  assistantHost = new AssistantHostService(metadata.assistantHost, assistantWorker,
+    home.config.workingDirectory, join(home.root, 'assistant', 'config.json'));
   const agentService = await PersistentAgentService.open({
     store: metadata.agentRuns,
     executor: agentExecutor,
@@ -1220,6 +1222,11 @@ async function serve(): Promise<void> {
           return;
         }
         if (request.method === 'POST') {
+          if (metadata.agentRuns.hasActiveDesktopWorkRun(workScope)) {
+            response.statusCode = 409;
+            response.end(JSON.stringify({ error: '当前工作任务仍在运行或等待授权，完成后再新建会话。' }));
+            return;
+          }
           const body = await readJsonBody(request, true);
           const folderId = isRecord(body) ? body.folderId : undefined;
           const requestId = isRecord(body) ? body.requestId : undefined;
@@ -1243,12 +1250,27 @@ async function serve(): Promise<void> {
         }
         if (request.method === 'PUT') {
           const body = await readJsonBody(request);
-          if (!isRecord(body) || typeof body.conversationId !== 'string') {
+          if (!isRecord(body) || typeof body.conversationId !== 'string'
+            || (body.previewArchived !== undefined && typeof body.previewArchived !== 'boolean')) {
             response.statusCode = 400;
             response.end(JSON.stringify({ error: 'A Work conversation id is required.' }));
             return;
           }
-          try { response.end(JSON.stringify(workConversations.select(home.config.workingDirectory, body.conversationId))); }
+          const selected = workConversations.listExisting(workScope).find((item) => item.current);
+          if (selected?.id !== body.conversationId && metadata.agentRuns.hasActiveDesktopWorkRun(workScope)) {
+            response.statusCode = 409;
+            response.end(JSON.stringify({ error: '当前工作任务仍在运行或等待授权，完成后再切换会话。' }));
+            return;
+          }
+          try {
+            if (body.previewArchived === true) {
+              const archived = workConversations.listExisting(workScope).find((item) => item.id === body.conversationId && item.archived);
+              if (!archived) throw new Error('Unknown archived Work conversation.');
+              response.end(JSON.stringify(archived));
+            } else {
+              response.end(JSON.stringify(workConversations.select(home.config.workingDirectory, body.conversationId)));
+            }
+          }
           catch { response.statusCode = 404; response.end(JSON.stringify({ error: 'Unknown Work conversation.' })); }
           return;
         }
@@ -1258,6 +1280,11 @@ async function serve(): Promise<void> {
             if (!isRecord(body) || typeof body.conversationId !== 'string') throw new Error('A Work conversation ID is required.');
             if (Object.hasOwn(body, 'folderId') || Object.hasOwn(body, 'workingDirectory')) {
               throw new Error('Moving a Work conversation requires the dedicated directory migration.');
+            }
+            if (Object.hasOwn(body, 'archived') && metadata.agentRuns.hasActiveDesktopWorkRun(workScope)) {
+              response.statusCode = 409;
+              response.end(JSON.stringify({ error: '当前工作任务仍在运行或等待授权，完成后再归档会话。' }));
+              return;
             }
             response.end(JSON.stringify(workConversations.updateConversation(workScope, body.conversationId, {
               title: body.title as string | undefined, iconId: body.iconId as string | undefined,
@@ -1528,6 +1555,106 @@ async function serve(): Promise<void> {
             response.end(JSON.stringify({ linked: false }));
             return;
           }
+        } catch (error) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+          return;
+        }
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.assistantSuggestions) {
+        try {
+          if (request.method === 'GET') {
+            response.end(JSON.stringify(await assistantWorker.suggestions()));
+            return;
+          }
+          if (request.method === 'POST') {
+            const body = await readJsonBody(request);
+            if (!isRecord(body)) throw new Error('Invalid Assistant suggestion request.');
+            if (body.action === 'pause') {
+              if (body.until !== undefined && typeof body.until !== 'string') {
+                throw new Error('Invalid pause deadline.');
+              }
+              response.end(JSON.stringify(await assistantWorker.suggestionPause(body.until)));
+              return;
+            }
+            if (typeof body.id !== 'string' || !/^suggestion-[a-f0-9]{24}$/u.test(body.id)) {
+              throw new Error('Invalid suggestion ID.');
+            }
+            if (body.action === 'read') {
+              response.end(JSON.stringify(await assistantWorker.suggestionRead(body.id)));
+              return;
+            }
+            if (body.action === 'feedback' && ['ignored', 'snoozed', 'accepted'].includes(String(body.feedback))
+              && (body.snoozedUntil === undefined || typeof body.snoozedUntil === 'string')) {
+              response.end(JSON.stringify(await assistantWorker.suggestionFeedback(body.id,
+                body.feedback as 'ignored' | 'snoozed' | 'accepted', body.snoozedUntil)));
+              return;
+            }
+            throw new Error('Invalid Assistant suggestion action.');
+          }
+        } catch (error) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+          return;
+        }
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.assistantWorkspace) {
+        try {
+          if (request.method === 'GET') {
+            const memoryLimit = url.searchParams.has('memoryLimit')
+              ? Number(url.searchParams.get('memoryLimit')) : undefined;
+            response.end(JSON.stringify(await assistantWorker.workspace(memoryLimit)));
+            return;
+          }
+          if (request.method === 'POST') {
+            const body = await readJsonBody(request);
+            if (!isRecord(body)) {
+              throw new Error('Invalid Assistant workspace request.');
+            }
+            if (body.action === 'revoke-source' && typeof body.sourceId === 'string'
+              && typeof body.expectedVersion === 'string') {
+              const receipt = assistantSources.revokeSource(body.sourceId, body.expectedVersion);
+              assistantWorker.refreshSources();
+              response.end(JSON.stringify(receipt));
+              return;
+            }
+            if (body.action === 'import-saved' && typeof body.savedId === 'string'
+              && (body.surface === 'work' || body.surface === 'assistant')
+              && typeof body.text === 'string' && typeof body.savedAt === 'string') {
+              response.end(JSON.stringify(await assistantWorker.importSavedMemory(body.savedId,
+                body.surface, body.text, body.savedAt)));
+              return;
+            }
+            if (body.action === 'pause-organizing'
+              && (body.until === undefined || typeof body.until === 'string')) {
+              response.end(JSON.stringify(await assistantWorker.pauseOrganizing(body.until)));
+              return;
+            }
+            if (typeof body.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(body.id)) {
+              throw new Error('Invalid Assistant workspace ID.');
+            }
+            if (body.action === 'correct-memory' && Number.isSafeInteger(body.expectedVersion)
+              && typeof body.text === 'string' && typeof body.revisionId === 'string') {
+              response.end(JSON.stringify(await assistantWorker.correctMemory(body.id,
+                body.expectedVersion as number, body.text, body.revisionId)));
+              return;
+            }
+            if (body.action === 'forget-memory') {
+              response.end(JSON.stringify(await assistantWorker.forgetMemory(body.id)));
+              return;
+            }
+            if (body.action === 'follow-up-delegation' && typeof body.text === 'string') {
+              response.end(JSON.stringify(await assistantWorker.followUpDelegation(body.id, body.text)));
+              return;
+            }
+            if (body.action === 'cancel-delegation') {
+              response.end(JSON.stringify(await assistantWorker.cancelDelegation(body.id)));
+              return;
+            }
+          }
+          throw new Error('Invalid Assistant workspace action.');
         } catch (error) {
           response.statusCode = 409;
           response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));

@@ -1600,7 +1600,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-045
     title: "实现用户理解与自动工作整理技能"
-    status: in_progress
+    status: done
     goal: "助理从有证据的工作评估和直接交流持续理解用户并维护工作台账。"
     scope:
       in: ["skills/understand-user、maintain-memory、organize-work、follow-up 四项专属技能", "USER/MEMORY 有预算摘要与按需专题生长", "work context/focus/commitments/projects 更新及协作反馈", "将评估待核验事项接到宿主委派接口，回收结果后重新审阅并提交修订"]
@@ -1629,10 +1629,17 @@ tasks:
       owner: "root-assistant-organize-045-10414"
       attempts: 0
       claimed_at: "2026-09-26T19:48:59.387Z"
-      completed_at: null
+      completed_at: "2026-09-26T20:50:18.302Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
       branch: "task/task-045-assistant-organize"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated main", status: "passed", summary: "TASK-045 product commit 42c6cdd merged into main e2dab0a; task memory evidence commit 503d8bb. Unrelated dirty .zcode plan was preserved and not staged."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Node 24.15.0 / pnpm 11.22.0, macOS arm64, clean detached integrated main e2dab0a; runner .git/worktrees/assistant-final-check/coding-owner/1790455698319137000.log exited 0, changed_during_run=false."}
+        - {type: "command", check: "native build and smoke", status: "passed", summary: "Final TASK-045 product tree passed pnpm build:native && pnpm smoke:native, runner .git/worktrees/assistant-organize/coding-owner/1790455622612548000.log, changed_during_run=false."}
+        - {type: "test", check: "user understanding, Work organization and Worker behavior", status: "passed", summary: "Package tests covered repeated Work evidence, correction order, source deletion, temporary unavailability by claim, third-party quotations, thirteen active Work items, single commitment record, and follow-up retention; real Worker loopback tests covered understanding, review and delegation-result re-review. Runtime child cleanup tests passed after waiting for exit."}
+        - {type: "review", check: "independent read-only failure review", status: "passed", summary: "Independent reviewer checked attribution counterexamples, multi-claim temporary unavailability, >12 Work records, evidence revision permissions, and delegation wake/recovery; no remaining reproducible TASK-045 blocker reported. Natural-language attribution remains conservative heuristic."}
+        - {type: "document", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-045.md records implementation, evidence, source boundaries, recovery, and unverified limits."}
+        - {type: "boundary", check: "external business validation", status: "unverified", summary: "No real external model or complete candidate-to-professional-task-to-re-review production journey was exercised; TASK-047 owns independent business verification. Windows/Linux and cloud execution remain unverified; TASK-048 owns proactive delivery."}
       follow_up_candidates: []
   - id: TASK-046
     title: "接通助理专业任务委派与核验"
@@ -1679,7 +1686,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-047
     title: "记忆工作评估与委派阶段验证"
-    status: pending
+    status: done
     goal: "证明工作材料能够形成可靠审阅、记忆和台账，并可通过专业子任务完成核验。"
     scope:
       in: ["后端端到端业务验证与独立隔离审查", "纠正/遗忘、评估准确归类、预算抢占和失败恢复", "助理与专业子任务的工具/存储/身份边界"]
@@ -1707,18 +1714,21 @@ tasks:
     investigation_hints: ["使用新 assistant test 与宿主现有权限/子任务测试，按提案工作评估章构造多回合样例", "先 API+持久化验证，无需 UI；真实模型样例只用合成资料，失败不改阈值掩盖", "pnpm check；影响进程访问边界时追加对应 native smoke"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "assistant-stage-verifier-047-20260927-10414"
       attempts: 0
-      claimed_at: null
-      completed_at: null
-      worktree: null
-      branch: null
-      evidence: []
+      claimed_at: "2026-09-26T20:51:56.431Z"
+      completed_at: "2026-09-26T21:50:29.791Z"
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-stage-verification"
+      branch: "task/task-047-assistant-stage-verification"
+      evidence:
+        - {type: "commit", check: "TASK-047 integrated main", status: "passed", summary: "Independent stage tests and results e1328a3, memory 1672067, merged at f8c078e and finalized at 0286067. Product defects found by this verification were fixed separately in aa40a49 and dc396ff. See .tasks/verification/TASK-047/results.md and .tasks/memory/TASK-047.md."}
+        - {type: "test", check: "real local service chain and memory lifecycle", status: "passed", summary: "Temporary Home plus loopback model drove real Runtime HTTP, Pi Work write, Assistant Worker, read-only professional delegation and source re-review: partial until new host-verified write artifact, then supported. Persisted review/source/follow-up/skills/tool isolation and correction/forget/replay were checked. Focused 54/54 passed; final shutdown regression passed after dc396ff."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Node 24.15.0, pnpm 11.22.0, macOS arm64. Branch runner 1790459052722586000.log exited 0; integrated main f8c078e pnpm check exited 0 with Assistant 38/38, Runtime 118/118, runtime-kit 187/187 and all other packages green. Later 0286067 changed only evidence Markdown."}
+        - {type: "boundary", check: "external model and user-facing channels", status: "unverified", summary: "No external model quality evaluation, real WeCom message, UI correction/deletion action, Windows/Linux or cloud sync was exercised. TASK-048/049/050 and TASK-062 own those later user journeys. No real user Home or credentials were accessed."}
       follow_up_candidates: []
-
   - id: TASK-048
     title: "实现助理主动回顾与建议投递"
-    status: pending
+    status: done
     goal: "助理根据工作评估与用户目标主动跟进，在合适的入口提供有依据的建议。"
     scope:
       in: ["skills/reflect-and-suggest/SKILL.md 消费助理内部每日/每周检查，形成独立回顾会话、漏触发合并和预算", "建议收件箱、去重/冷却/反馈与暂停", "可选已绑定企业微信投递及宿主交付状态引用"]
@@ -1744,18 +1754,22 @@ tasks:
     investigation_hints: ["助理 automation/review/work 队列及 suggestions，遵循 docs/assistant-skills-and-automation.md；宿主 delivery 既有机制，不复制配对或平台凭据", "现有 scheduler.test.mjs、scheduled-im-delivery.test.mjs 支持重启/时间 fixture；先 assistant 与投递 focused 再 pnpm check", "不同会话受众不能共享提示词缓存，建议删除来源后的失效也需测试"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-assistant-suggestions-048-10414-10414"
       attempts: 0
-      claimed_at: null
-      completed_at: null
-      worktree: null
-      branch: null
-      evidence: []
+      claimed_at: "2026-09-26T21:51:16.718Z"
+      completed_at: "2026-09-26T22:41:53.083Z"
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-048-assistant-suggestions"
+      evidence:
+        - {type: "commit", check: "TASK-048 integrated main", status: "passed", summary: "Implementation 858fda8 merged into main a383014 after TASK-059. See .tasks/memory/TASK-048.md."}
+        - {type: "test", check: "assistant suggestion behavior and real Worker process", status: "passed", summary: "Assistant tests passed in 1790462149257445000.log; real Worker with temporary Home and paired controllable WeCom transport sent once and did not replay after restart in 1790461984779382000.log. Source withdrawal, feedback, snooze, paid reflection recovery, token rejection and interrupted reads covered."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Branch runner 1790462201534629000.log and integrated main a383014 runner 1790462430022189000.log exited 0 with Node 24.15.0 and pnpm 11.22.0. First integrated run overlapped another build and failed while resolving a temporarily rebuilt protocol dist; clean rerun passed."}
+        - {type: "command", check: "native build and smoke", status: "passed", summary: "Node 24.15.0 and pnpm 11.22.0 on macOS arm64; build:native 1790462159700842000.log and smoke:native 1790462171700887000.log exited 0."}
+        - {type: "boundary", check: "real proactive WeCom and external model quality", status: "unverified", summary: "Earlier real paired WeCom private reply was confirmed by user; this card's proactive send used a controlled transport and no actual proactive message was sent to the test account. External model suggestion quality, Windows/Linux and cloud remain unverified for TASK-050 or later."}
       follow_up_candidates: []
-
   - id: TASK-049
     title: "接通助理记忆工作评估与任务界面"
-    status: pending
+    status: done
     goal: "在已确认的助理双面板中展示真实理解、工作评估、委派与连接，并支持纠正和跟进。"
     scope:
       in: ["复用今日/任务/记忆/连接页面，接入真实助理服务", "来源导航、工作评估详情、编辑纠正/遗忘、暂停整理与同步状态", "委派详情/取消/继续追问与可信投递状态；旧本地保存记忆迁移入口"]
@@ -1781,18 +1795,22 @@ tasks:
     investigation_hints: ["apps/app/src/modules/assistant-home.tsx 当前记忆来自 readSavedContent；chat.tsx、shared、apps/desktop/src/preload.ts 是接入入口", "已接受 .tasks/ui/assistant-home/proposal.md v003，复用其图像与布局，不重复要求视觉审批；先更新实际操作流再实现", "最近 apps/app/test、desktop bridge 和该提案 browser-probe；focused→pnpm check→真实浏览器/桌面持久化验收，fixture 不能证明企微可用"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-assistant-ui-049-10414"
       attempts: 0
-      claimed_at: null
-      completed_at: null
-      worktree: null
-      branch: null
-      evidence: []
+      claimed_at: "2026-09-26T22:42:09.226Z"
+      completed_at: "2026-09-26T23:29:14.376Z"
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-049-assistant-ui"
+      evidence:
+        - {type: "commit", check: "TASK-049 integrated implementation and memory", status: "passed", summary: "Implementation bc89d1f and task memory/screenshots 174c6de merged to main at 6b28010. See .tasks/memory/TASK-049.md and docs/frontend/evidence/task-049/results.md."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Node 24.15.0, pnpm 11.22.0, macOS arm64. Branch runner 1790465110862907000.log exited 0; integrated main 6b28010 runner 1790465271840429000.log exited 0."}
+        - {type: "command", check: "pnpm build:native && pnpm smoke:native", status: "passed", summary: "Task branch native build 1790465018088663000.log and smoke 1790465029136612000.log exited 0."}
+        - {type: "test", check: "Assistant workspace real Worker/HTTP and browser adapter", status: "passed", summary: "Focused delegation idempotency, worker and authenticated HTTP tests passed; browser adapter exercised suggestion read, source navigation, correction, forget, explicit legacy import, draft retention, pause, refresh, keyboard/narrow layout. Browser used fictitious data and is labeled in docs/frontend/evidence/task-049/results.md."}
+        - {type: "boundary", check: "real user and external channel journey", status: "unverified", summary: "User confirmed one ordinary WeCom private reply of 收到. Real desktop memory/work-review/delegation workflow, proactive real WeCom suggestion delivery, model quality, Windows/Linux and cloud remain for TASK-050; authoritative source revocation is TASK-062."}
       follow_up_candidates: []
-
   - id: TASK-050
     title: "独立助理完整业务验收"
-    status: pending
+    status: in_progress
     goal: "验证本地与企业微信个人助理从工作材料到评估、记忆、执行和主动跟进的完整闭环。"
     scope:
       in: ["真实桌面与企业微信单人私聊，记忆和工作评估生命周期", "子任务审批/取消/恢复、迁移和打包 App 生命周期", "本轮回归、未验证平台清单与最终交付证据"]
@@ -1818,15 +1836,14 @@ tasks:
     investigation_hints: ["先复用两个阶段验证的有效证据，再执行新增 UI/主动建议组合；历史 .tasks/verification/TASK-021 可参考但不能替代新版本", "pnpm check、pnpm build:native && pnpm smoke:native、pnpm package:desktop；仅对可用平台运行，其他保持 unverified", "真人企微外发仅使用明确授权的测试目标；无需第二名真人、真实群聊或其他 IM 平台"]
     escalation_conditions: ["如现有公共契约无法表达需求，记录最小差异并回到契约所有者协调，不私增第二套含义", "缺少真实账号、平台或模型环境时记为 unverified；不打印凭据或绕过审批"]
     result:
-      owner: null
+      owner: "root-task050-verifier-10414-10414"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T23:58:32.844Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-e2e-verification"
+      branch: "task/task-050-assistant-full-acceptance"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-052
     title: "工作对话右侧栏文件预览"
     status: done
@@ -2104,7 +2121,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-059
     title: "接入工作会话文件夹树管理界面"
-    status: in_progress
+    status: done
     goal: "用户在现有工作对话左栏像管理文件一样管理会话，且能看清文件夹层级、拖动结果、标签、归档与搜索定位。"
     scope:
       in: ["左侧工作树、紧凑工具栏、面包屑、折叠/缩进、选中态及三主题样式", "新建会话/文件夹、行内重命名、更换图标、添加标签、归档/恢复、排序与拖放/移动到菜单", "树搜索、消息结果定位、空态/失败恢复和键盘操作"]
@@ -2131,14 +2148,19 @@ tasks:
       owner: "conversation-tree-ui-sol-10677-10677"
       attempts: 0
       claimed_at: "2026-09-26T20:21:11.427Z"
-      completed_at: null
+      completed_at: "2026-09-26T22:45:47.115Z"
       worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
       branch: "task/task-059-work-tree-ui"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-059 integrated", status: "passed", summary: "Implementation branch task/task-059-work-tree-ui at 4a1340c merged into main as fa699e2; no unrelated .zcode change included."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Ran on main at 002fdc0 after concurrent build ended: full build, Yuanpu TypeScript checks and all tests passed; Runtime 123/123. The earlier check was invalidated by another task building the same checkout and is not counted."}
+        - {type: "test", check: "Work tree browser journey", status: "passed", summary: "Isolated Runtime and browser journey covered nested folders, create/rename/icon/tags, Pi JSONL search and result location, physical move, archive/restore, 55-result paging, three themes, and narrow windows. Evidence: docs/frontend/evidence/task-059/results.md and screenshots."}
+        - {type: "review", check: "independent UI/code review", status: "passed", summary: "Independent reviewer found and saw fixes for persistent run guard, pagination, reorder with archived siblings, ordinary selection guard, and 480px panel access; no remaining P1/P2 in final review."}
+        - {type: "limitation", check: "desktop business journey", status: "unverified", summary: "Actual Electron UI, restart and fault recovery combination reserved for independent TASK-060. Non-macOS platforms unverified."}
       follow_up_candidates: []
   - id: TASK-060
     title: "工作会话文件夹树完整业务验收"
-    status: pending
+    status: in_progress
     goal: "独立确认真实桌面用户能把工作会话按文件夹组织、物理移动、安全找回、搜索和归档，而不丢失 Pi 历史或工作文件。"
     scope:
       in: ["在可用 Electron/Runtime 环境走真实 UI 与服务端持久化全旅程", "验证重启、故障恢复、旧 default、根外目录拒绝与三主题树操作", "记录截图、revision、真实/fixture 标识、失败与未验证项"]
@@ -2160,15 +2182,14 @@ tasks:
     investigation_hints: ["从 .tasks/ui/conversation-management/prototype-v003.md 的新建、树移动、搜索、归档旅程出发；对比工作对话右侧栏文件预览（TASK-052）的验收结果", "复用 .tasks/verification/TASK-058/results.md 的真实后端/故障证据，只新增 UI、主题、键盘、重启组合场景；用 pnpm check 守仓库门禁"]
     escalation_conditions: ["若当前环境无法运行 Electron，记录浏览器 UI 与 Runtime 真实服务各自证据及未验证的桌面组合，不标整体完成", "发现迁移后 Pi 历史或文件丢失立即停止后续移动，退回安全搬迁工作会话及文件夹的磁盘目录（TASK-056）修复"]
     result:
-      owner: null
+      owner: "conversation-verifier-sol-10677"
       attempts: 0
-      claimed_at: null
+      claimed_at: "2026-09-26T22:47:14.290Z"
       completed_at: null
-      worktree: null
-      branch: null
+      worktree: "/Users/linxinhong/.codex/worktrees/conversation-tree-verification/yuanpu-agent"
+      branch: "task/task-060-work-tree-acceptance"
       evidence: []
       follow_up_candidates: []
-
   - id: TASK-061
     title: "建立工作工具结果与产物的助理来源契约"
     status: done
@@ -2210,7 +2231,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-062
     title: "接通用户撤销助理来源与权威删除事件"
-    status: pending
+    status: done
     goal: "用户撤销一条 Work 或助理来源后，宿主权威地记录删除事件，助理撤回只由该来源支持的认识，重启后不会重新导入。"
     scope:
       in: ["助理界面的来源撤销操作与版本化服务契约", "宿主单事务登记 tombstone、来源读权限变化及事件投递", "Work/助理已保存来源的幂等重启恢复和端到端验收"]
@@ -2234,15 +2255,20 @@ tasks:
     investigation_hints: ["TASK-043 的 RuntimeAssistantSourceHost.markDeleted 与 AssistantSourceLifecycleStore 是生产接缝，但当前没有用户操作调用它", "从 TASK-049 已接入的来源详情与版本化记忆服务扩展撤销入口；验证旧 Work 保存回合与助理回合各一条", "先测试宿主 tombstone 与读权限的一致性，再测 Worker 消费、重启和界面状态"]
     escalation_conditions: ["若原始来源本身将来支持物理删除，应先确定该删除事务与 tombstone 的先后及失败恢复，不以 UI 隐藏代替", "若无法证明受众和所属身份，拒绝撤销而不发事件"]
     result:
-      owner: null
+      owner: "root-assistant-source-revoke-10414-10414"
       attempts: 0
-      claimed_at: null
-      completed_at: null
-      worktree: null
-      branch: null
-      evidence: []
+      claimed_at: "2026-09-26T23:29:27.872Z"
+      completed_at: "2026-09-26T23:56:56.907Z"
+      worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
+      branch: "task/task-062-assistant-source-revoke"
+      evidence:
+        - {type: "commit", check: "TASK-062 integrated main", status: "passed", summary: "Implementation and browser evidence at 2fa5cdb, memory at d809fc3, merged on main c5dc83a. Integration evidence updated at d660d4a; tested product tree e368b7e also includes TASK-064 owner fixes."}
+        - {type: "test", check: "Host tombstone, Worker recovery and authenticated HTTP", status: "passed", summary: "Temporary Home tests cover Work and Assistant source revocation, denied ownership/stale version, duplicate submission, immediate Host read denial, Worker stopped between commit and consumption, restart replay, memory and review withdrawal with shared evidence retained until second revocation, original records unchanged. Focused runner 1790466421531342000.log; IPC regression 1790466469746806000.log."}
+        - {type: "review", check: "independent read-only source revocation review", status: "passed", summary: "Reviewer identified orphan Work evidence authorization and premature UI completion semantics; both repaired with focused regression before final checks. No remaining reproducible TASK-062 blocker reported."}
+        - {type: "command", check: "Node 24 pnpm check and native smoke", status: "passed", summary: "Branch pnpm check 1790466478998033000.log; build:native 1790466546696017000.log; smoke:native 1790466559158033000.log. Integrated main e368b7e stable pnpm check 1790466913667927000.log exited 0 with changed_during_run=false. A concurrent-merge run and one ECONNRESET desktop test attempt were excluded; same-revision focused and final full reruns passed."}
+        - {type: "document", check: "handoff and sanitized UI evidence", status: "passed", summary: ".tasks/memory/TASK-062.md and docs/frontend/evidence/task-062/results.md describe entry points, semantics, runner IDs and fixture browser screenshots; screenshots contain invented source data."}
+        - {type: "boundary", check: "real desktop and platform coverage", status: "unverified", summary: "True Desktop UI source revocation journey, in-flight model request window before Worker consumption, Windows/Linux and cloud remain unverified; TASK-050 owns full business journey. Tombstone revokes Assistant reading and derivatives, not physical source deletion."}
       follow_up_candidates: []
-
   - id: TASK-063
     title: "内置浏览器标签与 agent 共享会话"
     status: in_progress
@@ -2277,5 +2303,35 @@ tasks:
       completed_at: null
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/browser-tab"
       branch: "task/task-063-browser-tab"
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-064
+    title: "修复旧 default 工作会话启动时的证据补扫"
+    status: in_progress
+    goal: "已有旧 default Pi 会话和绑定时，Runtime 能启动、只读显示历史，并安全补扫工作证据，不要求旧会话伪装成新会话。"
+    scope:
+      in: ["修复 WorkEvidenceStore 对旧 default 的绑定核验与启动扫描兼容", "增加临时 Home 的 Runtime 启动、旧 Pi JSONL 历史和证据补扫回归测试"]
+      out: ["改变旧 default 只读约束", "迁移用户工作目录或修改 Pi 上游包"]
+    constraints: ["旧 default 只接受本地 desktop/local-user 的精确 Pi 绑定与工作目录，不能放宽新会话的身份与来源授权", "保留原始 Pi JSONL；验收者在 TASK-060 的隔离 Electron 场景复测"]
+    forbidden: ["跳过所有旧会话扫描以掩盖启动失败", "将任意未绑定 Pi 会话登记为 Work 证据"]
+    acceptance:
+      - type: assertion
+        expect: "已有旧 default 绑定和 Pi JSONL 的临时 Home 启动 Runtime 成功，旧历史只读可见；可确定的工具结果补扫不重复且不越权"
+      - type: assertion
+        expect: "错误身份、错误 Pi session 或无绑定的证据登记仍被拒绝；新 Work 会话的现有行为保持不变"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-059", "TASK-061"]
+    risk_level: "L3"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["TASK-060 隔离 Electron 重启复现：旧 default 只有 yp_conversation_bindings 行，没有 yp_work_conversations 行；启动 scanSavedWorkTurns 调用 WorkEvidenceStore.recordToolResults 抛 Work evidence is not bound to a local conversation", "从 packages/yuanpu-runtime/src/persistence/work-evidence-store.ts 与 apps/runtime/src/index.ts 的现有路径和 packages/yuanpu-runtime/test/work-conversation.test.mjs 的 legacy fixture 入手"]
+    escalation_conditions: ["若旧绑定无法可靠证明同一工作目录和身份，保持拒绝并记录迁移决策，不隐式授权"]
+    result:
+      owner: "legacy-work-repair-sol-10677"
+      attempts: 0
+      claimed_at: "2026-09-26T23:43:47.457Z"
+      completed_at: null
+      worktree: "/Users/linxinhong/.codex/worktrees/legacy-work-repair/yuanpu-agent"
+      branch: "task/task-064-legacy-work-evidence"
       evidence: []
       follow_up_candidates: []

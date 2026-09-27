@@ -78,7 +78,13 @@ test('real Worker invokes review-work for a saved Work source and persists a cau
         ? 'Successful write payload for requested Work path report.md, run run_1:\n# Report'
         : 'User: Write exactly `# Report` to `report.md`.\nAssistant: Done.' }; } };
   const home = join(root, 'assistant');
-  const manager = new AssistantWorkerManager({ home, sources,
+  let delegationRecord;
+  const delegations = { async status(taskId) { return taskId === delegationRecord?.taskId
+    ? delegationRecord : undefined; },
+  async start() { throw new Error('Not started by this fixture.'); },
+  async followUp() { throw new Error('Not followed up by this fixture.'); },
+  async cancel() { throw new Error('Not cancelled by this fixture.'); } };
+  const manager = new AssistantWorkerManager({ home, sources, delegations,
     model: { appPath, agentPath, provider: 'fixture', model: 'fixture-model' },
     command: { executable: process.execPath, args: [entry, '--assistant-worker'] } });
   t.after(async () => {
@@ -98,6 +104,10 @@ test('real Worker invokes review-work for a saved Work source and persists a cau
     `${reviewId}.md`), 'utf8'));
   assert.match(markdown, /Judgment: unverified/);
   assert.match(markdown, /sourceVersion: v1/);
+  assert.match(await eventually(() => readFile(join(home, 'work', 'context.md'), 'utf8')),
+    /work-project-/);
+  assert.match(await eventually(() => readFile(join(home, 'work', 'focus.md'), 'utf8')),
+    /unverified/);
   assert.ok(requests.some((body) => body.includes('review-work')),
     'the Worker must load and invoke its assistant-only review skill');
   answer = JSON.stringify({ goal: 'Write exactly # Report to report.md', constraints: [],
@@ -118,10 +128,30 @@ test('real Worker invokes review-work for a saved Work source and persists a cau
     try { return database.prepare("SELECT COUNT(*) AS n FROM automation_jobs WHERE kind='review-work' AND status='completed'").get().n === 3; }
     finally { database.close(); }
   }, 20_000);
+  delegationRecord = { taskId: 'task-verification', assistantSessionId: 'missing-session',
+    skillName: 'reviewer', goal: 'Check saved Work result',
+    completionCriteria: ['Inspect source'], contextRefs: [source.sourceId],
+    authorizedCapabilities: [], readOnly: true,
+    deadlineAt: '2026-09-28T00:00:00.000Z', status: 'completed', followUps: [],
+    result: { status: 'completed', summary: 'The read-only subtask returned one reference.',
+      resultRef: 'fixture:delegation-result', evidenceRefs: ['fixture:evidence-one'] },
+    createdAt: '2026-09-27T00:00:00.000Z', updatedAt: '2026-09-27T00:00:03.000Z' };
+  manager.notifyDelegation(delegationRecord);
+  await eventually(() => {
+    const database = new DatabaseSync(state);
+    try { return database.prepare(`SELECT COUNT(*) AS n FROM work_reviews
+      WHERE work_id='work:review-live'`).get().n >= 4; }
+    finally { database.close(); }
+  }, 20_000);
+  assert.ok(requests.some((body) => body.includes('delegation:task-verification')),
+    'the returned host result must trigger a new Work review with a labeled source');
+  const candidateRequest = requests.find((body) => body.includes('assistant_work_candidates'));
+  assert.equal(candidateRequest, undefined,
+    'review-only sessions must not receive the interactive candidate or delegation tools');
   await manager.stop();
   const database = new DatabaseSync(state);
   try {
-    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM automation_jobs WHERE kind='review-work' AND status='completed'").get().n, 3);
-    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM work_reviews').get().n, 3);
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM automation_jobs WHERE kind='review-work' AND status='completed'").get().n, 4);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM work_reviews').get().n, 4);
   } finally { database.close(); }
 });

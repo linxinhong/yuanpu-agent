@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -67,6 +70,36 @@ test('two desktop clients attach one durable request; offline worker recovers wi
     assert.equal(reattached.transcript().length, 2);
     reattached.close();
   } finally { env.service.close(); env.metadata.close(); }
+});
+
+test('proactive WeCom send requires opt-in and a paired private target; accepted is not read', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'yp-proactive-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const config = join(root, 'config.json');
+  await writeFile(config, '{"schemaVersion":1}\n');
+  const env = setup();
+  const service = new AssistantHostService(env.metadata.assistantHost, env.worker, '/work', config);
+  t.after(() => { service.close(); env.service.close(); env.metadata.close(); });
+  let sends = 0;
+  const transport = { isReady: () => true, sendProactive: async (recipient, content) => {
+    sends++;
+    assert.equal(recipient, 'member-1');
+    assert.equal(content, 'Check the report.');
+    return { status: 'accepted' };
+  } };
+  service.recoverWecom('bot-1', transport);
+  const id = `suggestion-${'b'.repeat(24)}`;
+  assert.deepEqual(await service.deliverSuggestion(id, 'Check the report.'), { status: 'deferred' });
+  await writeFile(config, '{"schemaVersion":1,"proactiveWecomEnabled":true}\n');
+  assert.deepEqual(await service.deliverSuggestion(id, 'Check the report.'), { status: 'deferred' },
+    'an unbound contact cannot receive proactive suggestions');
+  env.metadata.assistantHost.linkWecomContact(env.metadata.channels.listPrivateContacts('wecom')[0].contactId);
+  assert.deepEqual(await service.deliverSuggestion(id, 'Check the report.'), {
+    status: 'accepted', ref: `assistant-proactive:${id}` });
+  assert.equal(sends, 1);
+  assert.deepEqual(await service.deliverSuggestion(id, 'Check the report.'), {
+    status: 'accepted', ref: `assistant-proactive:${id}` });
+  assert.equal(sends, 1);
 });
 
 test('desktop retry key survives lost response and refuses conflicting text', async () => {

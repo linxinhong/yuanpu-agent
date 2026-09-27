@@ -1,0 +1,12 @@
+# TASK-047 记忆工作评估与委派阶段验证
+
+- Keywords: `assistant`, `work-review`, `delegation`, `memory`, `forget`, `source-lifecycle`, `stage-verification`。
+- Owner: `assistant-stage-verifier-047-20260927-10414`；独立分支 `task/task-047-assistant-stage-verification`；记录日期 2026-09-27。最终产品复测基线 `5effa0b`，包含多回合修复 `aa40a49` 和 Worker 停机修复 `dc396ff`；本卡测试与结果提交 `e1328a3`，任务记忆提交 `1672067`，合并主线 `f8c078e`。状态和结论以 [阶段证据](../verification/TASK-047/results.md) 与任务注册表为准。
+- 入口：`apps/runtime/src/index.ts` 的 Runtime HTTP/Work/Assistant 装配，`apps/runtime/src/assistant-worker.ts` 的独立 Worker，`packages/yuanpu-assistant/src/work-review.ts` 的来源证据判定，`apps/runtime/src/assistant-delegation-service.ts` 的专业委派，`packages/yuanpu-assistant/src/user-understanding.ts` 和 `memory-documents.ts` 的画像、修订与遗忘。
+- 新增 [真实服务链阶段测试](../../apps/runtime/test/task-047-work-repair-stage.test.mjs)：临时 Home、loopback 模型驱动实际 Runtime、Pi Work write、Assistant Worker、LocalProfessionalAdapter 及来源复审。首次错误写入保持 `partial`，只读委派不能改变 Work，第二轮正确 write 的宿主保存产物才使新版 review `supported`；核对了 SQLite、Markdown、六项助理技能和工具面。
+- 新增 [画像生命周期阶段测试](../../packages/yuanpu-assistant/test/task-047-memory-lifecycle-stage.test.mjs)：两条 Work 来源、助理纠正、临时不可用、遗忘、SQLite 重启及旧 feed 重放。旧画像不复活；这是仓库/Worker 来源契约，不是尚未交付的 UI 删除入口。
+- 阶段验收发现：旧 `exactWriteProof` 对最新修复回合不能按新证据结案。旧基线同场景得到 `partial`，产品所有者独立复现、修复为按最新用户字面目标与其后的成功 tool+artifact 配对；在 `0d9895f` 上服务链变为 `supported`，旧目标证据不能重用。
+- 负向回归：`assistant-executor`、`assistant-memory`、`user-understanding`、`work-review`、`assistant-automation`、Runtime 来源/委派/渠道现有聚焦测试与新增两场景共 54/54，通过 runner `1790457805645179000.log`（Node 24.15.0、pnpm 11.22.0、macOS arm64）。恶意引述、跨受众、symlink、任务授权、重启/重复/unknown 已覆盖列明边界。
+- 全仓 `pnpm check` 首次因 runner PATH 缺 `uv` 中断；第二次遇 `builtin-workflows.test.mjs` 清理目录偶发 ENOTEMPTY，验收分支将重载 manager 改为 `try/finally` 显式 dispose。随后发现 Worker 崩溃/重启后第二 Worker 停机可无限等待，原回归自身又有无界 HTTP 等待和清理顺序竞态；改用实际 `model-request` 门槛及有界测试停机，确定性红测，产品所有者以 `dc396ff` 加 4 秒停机上界。同一隔离场景复测通过 `1790459027715121000.log`。完整 `pnpm check` 分支 runner `1790459052722586000.log` 与合并主线 `f8c078e` 均通过（Assistant 38/38、Runtime 118/118、runtime-kit 187/187）。
+- 限制：所有本卡模型回复均为可控 loopback 提案，无真实外部模型质量评测；无真实企微外发或 UI 路径。`evidence_linked` 只证明授权 ref 归属，不能证明语义完成；明确完成由 Work 新工具结果及宿主产物快照支持。用户可操作的来源撤销→Host tombstone→Worker 撤回由 TASK-062 接续，主动投递由 TASK-048、界面由 TASK-049、全程真实旅程由 TASK-050 验收。
+- 环境复现：隔离 worktree 经 `worktree-kit prepare` 保存 Node 24/pnpm/uv PATH；Pi models.dev 在线生成不可用时复用 main 同代码树已生成的忽略型 `packages/ai/src/providers/data`，再跑 `pnpm build:pi` 与本仓构建。不要提交生成模型数据、临时 Home 或 runner 原始日志。

@@ -1,6 +1,8 @@
 export const PROTOCOL_VERSION = 7;
 
 import type { NotificationNavigationTarget } from './host-events.js';
+import type { AssistantMemoryView, AssistantSuggestion, AssistantSuggestionInbox,
+  AssistantWorkspaceSnapshot, AssistantDelegationRecord, AssistantSourceRevocationReceipt } from './assistant.js';
 import type { AgentRunCancellationReceipt, AgentRunReceipt, AgentRunRecord, AgentRunStatus } from './agent.js';
 import type {
   ScheduleHistoryRecord,
@@ -44,6 +46,8 @@ export const RUNTIME_ROUTES = {
   capabilityApprovalDecision: '/v1/capabilities/approvals/decision',
   assistantLink: '/v1/assistant/link',
   assistantMirrors: '/v1/assistant/mirrors',
+  assistantSuggestions: '/v1/assistant/suggestions',
+  assistantWorkspace: '/v1/assistant/workspace',
   desktopTranscript: '/v1/desktop/transcript',
   workConversations: '/v1/work/conversations',
   workFolders: '/v1/work/folders',
@@ -535,7 +539,7 @@ export interface DesktopBridge {
   getDesktopTranscript(surface: DesktopTranscriptSurface, conversationId?: string): Promise<DesktopTranscriptMessage[]>;
   listWorkConversations(): Promise<WorkConversation[]>;
   createWorkConversation(folderId?: string, requestId?: string): Promise<WorkConversation>;
-  selectWorkConversation(conversationId: string): Promise<WorkConversation>;
+  selectWorkConversation(conversationId: string, previewArchived?: boolean): Promise<WorkConversation>;
   updateWorkConversation(conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }): Promise<WorkConversation>;
   moveWorkNode(request: WorkMoveRequest): Promise<WorkMoveResult>;
   searchWorkConversations(input: WorkSearchQuery): Promise<WorkSearchResult>;
@@ -559,6 +563,22 @@ export interface DesktopBridge {
   unbindAssistantContact(): Promise<AssistantLinkStatus>;
   listAssistantMirrors(runId: string): Promise<AssistantMirrorStatus[]>;
   retryAssistantMirror(mirrorId: string): Promise<AssistantMirrorStatus>;
+  listAssistantSuggestions(): Promise<AssistantSuggestionInbox>;
+  feedbackAssistantSuggestion(id: string, action: 'ignored' | 'snoozed' | 'accepted',
+    snoozedUntil?: string): Promise<AssistantSuggestion>;
+  setAssistantSuggestionsPaused(until?: string): Promise<{ pausedUntil?: string }>;
+  markAssistantSuggestionRead(id: string): Promise<AssistantSuggestion>;
+  getAssistantWorkspace(memoryLimit?: number): Promise<AssistantWorkspaceSnapshot>;
+  revokeAssistantSource(sourceId: string, expectedVersion: string):
+    Promise<AssistantSourceRevocationReceipt>;
+  correctAssistantMemory(id: string, expectedVersion: number, text: string,
+    revisionId: string): Promise<AssistantMemoryView>;
+  forgetAssistantMemory(id: string): Promise<{ forgottenIds: string[] }>;
+  importAssistantSavedMemory(savedId: string, surface: 'work' | 'assistant', text: string,
+    savedAt: string): Promise<AssistantMemoryView>;
+  setAssistantOrganizingPaused(until?: string): Promise<{ organizingPausedUntil?: string }>;
+  followUpAssistantDelegation(taskId: string, text: string): Promise<AssistantDelegationRecord>;
+  cancelAssistantDelegation(taskId: string): Promise<AssistantDelegationRecord>;
   getAgentRun(runId: string): Promise<AgentRunRecord>;
   getPrivateImRunSummary(runId: string): Promise<PrivateImRunSummary>;
   cancelAgentRun(runId: string): Promise<AgentRunCancellationReceipt>;

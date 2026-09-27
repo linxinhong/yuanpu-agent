@@ -15,6 +15,14 @@ import {
   capabilityApprovalSigningPayload,
 } from '@yuanpu-agent/protocol';
 
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise((resolve) => {
+    child.once('exit', resolve);
+    child.kill();
+  });
+}
+
 test('runtime CLI prints the default greeting from the Yuanpu runtime kit', () => {
   const output = execFileSync(process.execPath, ['dist/index.cjs'], { encoding: 'utf8' });
   assert.equal(output.trim(), 'Hello, world!');
@@ -78,10 +86,7 @@ test('optional Enterprise WeChat startup failure does not prevent Runtime readin
       child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
       let assistantWorkerPid;
       scenario.after(async () => {
-        child.kill();
-        if (child.exitCode === null && child.signalCode === null) {
-          await new Promise((resolveExit) => child.once('exit', resolveExit));
-        }
+        await stopChild(child);
         if (assistantWorkerPid) {
           const deadline = Date.now() + 5_000;
           while (Date.now() < deadline) {
@@ -130,7 +135,7 @@ test('connection management preserves the previous config when an enabled creden
   });
   child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
   context.after(async () => {
-    child.kill();
+    await stopChild(child);
     await rm(home, { recursive: true, force: true });
   });
   const ready = await new Promise((resolve, reject) => {
@@ -235,7 +240,7 @@ test('runtime server exposes its protocol and greeting', async (context) => {
   });
   child.stdin.end(`${JSON.stringify({ token, approvalPublicKey, parentPid: process.pid })}\n`);
   context.after(async () => {
-    child.kill();
+    await stopChild(child);
     await rm(home, { recursive: true, force: true });
   });
 

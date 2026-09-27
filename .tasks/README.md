@@ -13,7 +13,7 @@ YuanpuAgent 面向桌面工作场景：用户在 Electron 中与 Pi 对话，通
 
 ## 基线与约束
 
-工作会话目录与列表管理的当前交互草图见 [提案 v001](ui/conversation-management/proposal.md)；树状会话管理方向以 [文件夹原型 v003](ui/conversation-management/prototype-v003.md) 为准。新会话默认独立工作目录，Pi 会话历史继续留在 `agent/sessions`；归档、搜索和树状管理待实施。
+工作会话目录与列表管理的当前交互草图见 [提案 v001](ui/conversation-management/proposal.md)；树状会话管理方向以[已确认文件夹树 v003 摘要](../docs/frontend/work-tree-v003.md)为准。新会话默认独立工作目录，Pi 会话历史继续留在 `agent/sessions`；实施进度以任务注册表和 [TASK-059 证据](../docs/frontend/evidence/task-059/results.md)为准。
 
 文件夹树的实施边界与新开发卡见[工作会话文件夹树设计](../docs/work-conversation-tree.md)及任务注册表；目录移动需同时修正 Pi 会话 cwd 关联，不等同于只调整界面顺序。
 

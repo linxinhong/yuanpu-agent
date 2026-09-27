@@ -98,6 +98,71 @@ export interface AssistantEvidenceRef {
   observedAt: string;
 }
 
+export interface AssistantSuggestion {
+  suggestionId: string;
+  candidateId: string;
+  fingerprint: string;
+  reason: string;
+  nextStep: string;
+  evidence: AssistantEvidenceRef[];
+  generatedAt: string;
+  feedback: 'none' | 'ignored' | 'snoozed' | 'accepted';
+  snoozedUntil?: string;
+  deliveryStatus: 'not_requested' | 'accepted' | 'failed' | 'unknown';
+  deliveryRef?: string;
+  readAt?: string;
+}
+
+export interface AssistantSuggestionInbox {
+  items: AssistantSuggestion[];
+  pausedUntil?: string;
+}
+
+/** Read model for the personal Assistant panel; source IDs are opaque references, never paths. */
+export interface AssistantMemoryView {
+  id: string;
+  version: number;
+  section: 'memories' | 'work' | 'reviews' | 'suggestions';
+  kind: 'explicit' | 'observed' | 'inferred';
+  context: string;
+  text: string;
+  status: 'active' | 'withdrawn';
+  verifiedAt: string;
+  evidence: AssistantEvidenceRef[];
+  manualAuthority: boolean;
+}
+
+export interface AssistantSourceView {
+  sourceId: string;
+  sourceVersion: string;
+  availability: 'available' | 'temporarily_unavailable' | 'deleted' | 'unknown';
+  current?: boolean;
+  workConversationId?: string;
+}
+
+/** Host accepted revocation; Assistant processing may still be pending. */
+export interface AssistantSourceRevocationReceipt {
+  sourceId: string;
+  tombstoneVersion: string;
+  status: 'accepted' | 'already_accepted';
+}
+
+export interface AssistantWorkspaceSnapshot {
+  memories: AssistantMemoryView[];
+  hasMoreMemories: boolean;
+  reviews: AssistantWorkReview[];
+  hasMoreReviews: boolean;
+  delegations: AssistantDelegationRecord[];
+  hasMoreDelegations: boolean;
+  delegationVerifications: Record<string, { checkedAt: string;
+    evidenceByCriterion: Record<string, string[]> }>;
+  delegationsUnavailable?: boolean;
+  sources: AssistantSourceView[];
+  hasMoreSources: boolean;
+  organizingPausedUntil?: string;
+  sourceSync: { processed: number; pending: number; unavailable: number; lastObservedAt?: string };
+}
+
 export type AssistantReviewJudgment = 'supported' | 'partial' | 'failed' | 'unverified';
 
 /** Reviews assess work content and artifacts, never the assistant's own model score. */
@@ -161,6 +226,8 @@ export interface AssistantDelegationResult {
 export interface AssistantDelegationRecord extends AssistantDelegationBrief {
   status: Exclude<AssistantDelegationStatus, 'requested'>;
   followUps: string[];
+  /** Durable request IDs prevent a lost follow-up response from dispatching twice. */
+  followUpRequests?: Array<{ requestId: string; text: string }>;
   result?: AssistantDelegationResult;
   /** Host-issued task grant; only trusted approval code can set it. */
   approvedGrantId?: string;

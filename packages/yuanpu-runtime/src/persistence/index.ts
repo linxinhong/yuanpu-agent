@@ -18,7 +18,7 @@ export * from './assistant-source-lifecycle-store.js';
 export * from './work-conversation-store.js';
 export * from './work-evidence-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 14;
+export const YUANPU_METADATA_SCHEMA_VERSION = 15;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -543,6 +543,21 @@ const migrations: readonly Migration[] = [{
     ) STRICT;
     CREATE INDEX IF NOT EXISTS yp_work_evidence_conversation
       ON yp_work_evidence_sources(conversation_id,event_id);
+  `,
+}, {
+  version: 15,
+  sql: `
+    CREATE TABLE IF NOT EXISTS yp_assistant_proactive_deliveries (
+      suggestion_id TEXT PRIMARY KEY,
+      content_digest TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      external_user_id TEXT NOT NULL,
+      binding_generation INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('delivering','accepted','failed','unknown')),
+      failure_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
   `,
 }];
 

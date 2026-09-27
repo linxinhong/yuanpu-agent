@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 
 import type { AssistantHostBinding, AssistantHostRequest, AssistantHostStore } from '@yuanpu-agent/runtime-kit';
 import {
@@ -29,26 +31,81 @@ export class AssistantHostService {
   private linkQueue: Promise<void> = Promise.resolve();
   private linkChanges = 0;
   private readonly recoveryTimer: NodeJS.Timeout;
+  private readonly proactiveConfigPath?: string;
+  private closed = false;
 
-  constructor(store: AssistantHostStore, worker: AssistantWorkerManager, workspaceId: string) {
+  constructor(store: AssistantHostStore, worker: AssistantWorkerManager, workspaceId: string,
+    proactiveConfigPath?: string) {
     this.store = store;
     this.worker = worker;
     this.workspaceId = workspaceId;
+    this.proactiveConfigPath = proactiveConfigPath;
     this.store.desktop();
     this.store.markUncertainDeliveries();
+    this.store.markUncertainProactiveDeliveries();
     // A revoked or corrupt legacy link must not prevent Work startup or reopen shared sessions.
     try { this.store.migrateLegacyLink(); } catch { /* original records stay untouched for retry */ }
     this.recoveryTimer = setInterval(() => this.recover(), 10_000);
     this.recoveryTimer.unref();
   }
 
-  close(): void { clearInterval(this.recoveryTimer); }
+  close(): void { this.closed = true; clearInterval(this.recoveryTimer); }
 
   async drain(): Promise<void> {
     await Promise.allSettled([...this.inFlight.values(), ...this.deliveries]);
   }
 
   get link(): AssistantHostBinding | undefined { return this.store.wecomLink(); }
+
+  private async proactiveEnabled(): Promise<boolean> {
+    if (!this.proactiveConfigPath) return false;
+    try {
+      const file = await open(this.proactiveConfigPath,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const config: unknown = JSON.parse(await file.readFile('utf8'));
+        return Boolean(config && typeof config === 'object'
+          && (config as { proactiveWecomEnabled?: unknown }).proactiveWecomEnabled === true);
+      } finally { await file.close(); }
+    } catch { return false; }
+  }
+
+  /** A private, opted-in send with a host-owned receipt. Uncertain sends are never replayed. */
+  async deliverSuggestion(suggestionId: string, content: string): Promise<{
+    status: 'accepted' | 'failed' | 'unknown' | 'deferred'; ref?: string;
+  }> {
+    if (this.closed || !(await this.proactiveEnabled()) || this.linkChanges > 0) {
+      return { status: 'deferred' };
+    }
+    const existing = this.store.proactiveDelivery(suggestionId);
+    if (existing) return existing.status === 'delivering' ? { status: 'deferred' }
+      : { status: existing.status, ref: `assistant-proactive:${suggestionId}` };
+    const binding = this.store.wecomLink();
+    if (!binding) return { status: 'deferred' };
+    const transport = this.transports.get(binding.accountId);
+    if (!transport?.sendProactive || !transport.isReady?.()) return { status: 'deferred' };
+    const claimed = this.store.beginProactiveDelivery(suggestionId, content, binding);
+    if (!claimed.started) return claimed.record.status === 'delivering' ? { status: 'deferred' }
+      : { status: claimed.record.status, ref: `assistant-proactive:${suggestionId}` };
+    const ref = `assistant-proactive:${suggestionId}`;
+    if (this.closed || !(await this.proactiveEnabled()) || this.linkChanges > 0
+      || this.store.wecomLink()?.generation !== binding.generation) {
+      this.store.finishProactiveDelivery(suggestionId, 'failed', 'binding_or_opt_in_changed');
+      return { status: 'failed', ref };
+    }
+    const sending = transport.sendProactive(binding.externalUserId, content)
+      .catch(() => ({ status: 'unknown' as const, code: 'transport_uncertain' }))
+      .then((result) => {
+        const status = result.status === 'accepted' ? 'accepted'
+          : result.status === 'failed' ? 'failed' : 'unknown';
+        this.store.finishProactiveDelivery(suggestionId, status,
+          'code' in result ? result.code : undefined);
+      });
+    this.deliveries.add(sending);
+    try { await sending; } finally { this.deliveries.delete(sending); }
+    return { status: this.store.proactiveDelivery(suggestionId)!.status as
+      'accepted' | 'failed' | 'unknown', ref };
+  }
   ownsWecomMessage(message: NormalizedChannelMessage): boolean {
     return message.conversationType === 'single'
       && this.store.ownsWecomMessage(message.connectionId, message.senderId, message.conversationId);

@@ -86,6 +86,24 @@ test('delivery unknown is sticky; old link migration preserves old row and expli
   } finally { metadata.close(); }
 });
 
+test('proactive suggestion receipt is idempotent and interrupted sending stays unknown', () => {
+  const { metadata, contact } = fixture();
+  try {
+    const link = metadata.assistantHost.linkWecomContact(contact.contactId);
+    const id = `suggestion-${'a'.repeat(24)}`;
+    const first = metadata.assistantHost.beginProactiveDelivery(id, 'Check the report.', link);
+    assert.equal(first.started, true);
+    assert.equal(first.record.status, 'delivering');
+    assert.equal(metadata.assistantHost.beginProactiveDelivery(id, 'Check the report.', link).started, false);
+    assert.throws(() => metadata.assistantHost.beginProactiveDelivery(id, 'Different text.', link),
+      /different content/);
+    metadata.assistantHost.markUncertainProactiveDeliveries();
+    assert.equal(metadata.assistantHost.proactiveDelivery(id).status, 'unknown');
+    metadata.assistantHost.finishProactiveDelivery(id, 'accepted');
+    assert.equal(metadata.assistantHost.proactiveDelivery(id).status, 'unknown');
+  } finally { metadata.close(); }
+});
+
 test('revoked pair blocks migrated owner access without destroying historical requests', () => {
   const { metadata, contact } = fixture();
   try {

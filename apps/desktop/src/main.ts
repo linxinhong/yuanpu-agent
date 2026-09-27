@@ -163,7 +163,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('desktop:transcript', trustedHandler((surface: 'work' | 'assistant' | 'assistantArchive', conversationId?: string) => runtime.getDesktopTranscript(surface, conversationId)));
   ipcMain.handle('work:conversations:list', trustedHandler(() => runtime.listWorkConversations()));
   ipcMain.handle('work:conversations:create', trustedHandler((folderId?: string, requestId?: string) => runtime.createWorkConversation(folderId, requestId)));
-  ipcMain.handle('work:conversations:select', trustedHandler((conversationId: string) => runtime.selectWorkConversation(conversationId)));
+  ipcMain.handle('work:conversations:select', trustedHandler((conversationId: string, previewArchived?: boolean) => runtime.selectWorkConversation(conversationId, previewArchived)));
   ipcMain.handle('work:conversations:update', trustedHandler((conversationId: string, patch: { title?: string; iconId?: string; archived?: boolean; tagIds?: string[] }) => runtime.updateWorkConversation(conversationId, patch)));
   ipcMain.handle('work:move', trustedHandler((request: import('@yuanpu-agent/protocol').WorkMoveRequest) => runtime.moveWorkNode(request)));
   ipcMain.handle('work:search', trustedHandler((input: import('@yuanpu-agent/protocol').WorkSearchQuery) => runtime.searchWorkConversations(input)));
@@ -191,6 +191,30 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('assistant:link:get', trustedHandler(() => runtime.getAssistantLink()));
   ipcMain.handle('assistant:link:bind', trustedHandler((contactId: string) => runtime.bindAssistantContact(contactId)));
   ipcMain.handle('assistant:link:unbind', trustedHandler(() => runtime.unbindAssistantContact()));
+  ipcMain.handle('assistant:suggestions:list', trustedHandler(() => runtime.listAssistantSuggestions()));
+  ipcMain.handle('assistant:suggestions:feedback', trustedHandler((id: string,
+    action: 'ignored' | 'snoozed' | 'accepted', snoozedUntil?: string) =>
+    runtime.feedbackAssistantSuggestion(id, action, snoozedUntil)));
+  ipcMain.handle('assistant:suggestions:pause', trustedHandler((until?: string) =>
+    runtime.setAssistantSuggestionsPaused(until)));
+  ipcMain.handle('assistant:suggestions:read', trustedHandler((id: string) =>
+    runtime.markAssistantSuggestionRead(id)));
+  ipcMain.handle('assistant:workspace:get', trustedHandler((_event, memoryLimit?: number) =>
+    runtime.getAssistantWorkspace(memoryLimit)));
+  ipcMain.handle('assistant:source:revoke', trustedHandler((sourceId: string, expectedVersion: string) =>
+    runtime.revokeAssistantSource(sourceId, expectedVersion)));
+  ipcMain.handle('assistant:memory:correct', trustedHandler((id: string, expectedVersion: number,
+    text: string, revisionId: string) => runtime.correctAssistantMemory(id, expectedVersion, text, revisionId)));
+  ipcMain.handle('assistant:memory:forget', trustedHandler((id: string) => runtime.forgetAssistantMemory(id)));
+  ipcMain.handle('assistant:memory:import-saved', trustedHandler((savedId: string,
+    surface: 'work' | 'assistant', text: string, savedAt: string) =>
+    runtime.importAssistantSavedMemory(savedId, surface, text, savedAt)));
+  ipcMain.handle('assistant:organizing:pause', trustedHandler((until?: string) =>
+    runtime.setAssistantOrganizingPaused(until)));
+  ipcMain.handle('assistant:delegation:follow-up', trustedHandler((taskId: string, text: string) =>
+    runtime.followUpAssistantDelegation(taskId, text)));
+  ipcMain.handle('assistant:delegation:cancel', trustedHandler((taskId: string) =>
+    runtime.cancelAssistantDelegation(taskId)));
   ipcMain.handle('assistant:mirrors:list', trustedHandler((runId: string) => runtime.listAssistantMirrors(runId)));
   ipcMain.handle('assistant:mirrors:retry', trustedHandler((mirrorId: string) => runtime.retryAssistantMirror(mirrorId)));
   ipcMain.handle('agent:runs:get', trustedHandler((runId: string) => runtime.getAgentRun(runId)));

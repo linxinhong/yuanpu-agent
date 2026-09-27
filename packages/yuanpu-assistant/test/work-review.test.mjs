@@ -113,6 +113,55 @@ test('review preserves source versions and waits for real tool evidence before c
   assert.match(await readFile(file, 'utf8'), /Judgment: supported/);
 });
 
+test('a later exact repair closes only after its own verified write', async (t) => {
+  const context = await fixture(t);
+  await context.add('work', event('1', 'work-turn:first',
+    'User: Write exactly `# Report` to `report.md`.\nAssistant: Done.'));
+  await context.add('work-evidence', event('2', 'work-tool:first',
+    'Tool write (completed), run run_1:\nFile written.'));
+  await context.add('work-evidence', event('3', 'work-artifact:first',
+    'Successful write payload for requested Work path report.md, run run_1:\n# Incomplete'));
+  const store = new AssistantAutomationStore(context.sources.database);
+  const reviews = new AssistantWorkReviewStore(context.sources.database, context.sources, context.home);
+  store.reconcileProcessedSources();
+  const firstJob = store.byKey('source:review-work:work-artifact:first:v3');
+  const firstProposal = proposal(['work-tool:first', 'work-artifact:first']);
+  firstProposal.constraints = [];
+  commitReview(store, reviews, firstJob, reviews.snapshot(firstJob), firstProposal);
+  const firstId = context.sources.database.prepare('SELECT review_id FROM work_reviews WHERE job_id=?')
+    .get(firstJob.jobId).review_id;
+  assert.equal(reviews.get(firstId).judgment, 'partial');
+
+  await context.add('work', event('4', 'work-turn:repair',
+    'User: Please fix report.md so it contains exactly `# Report`.\nAssistant: Fixed.'));
+  await context.add('work-evidence', event('5', 'work-tool:repair',
+    'Tool write (completed), run run_2:\nFile written.'));
+  await context.add('work-evidence', event('6', 'work-artifact:repair',
+    'Successful write payload for requested Work path report.md, run run_2:\n# Report'));
+  store.reconcileProcessedSources();
+  const repairJob = store.byKey('source:review-work:work-artifact:repair:v6');
+  const repaired = reviews.snapshot(repairJob);
+  assert.equal(repaired.materials.filter((item) => item.kind === 'turn').length, 2);
+  const repairProposal = proposal(['work-tool:repair', 'work-artifact:repair']);
+  repairProposal.constraints = [];
+  commitReview(store, reviews, repairJob, repaired, repairProposal);
+  const repairId = context.sources.database.prepare('SELECT review_id FROM work_reviews WHERE job_id=?')
+    .get(repairJob.jobId).review_id;
+  assert.equal(reviews.get(repairId).judgment, 'supported');
+  assert.match(reviews.get(repairId).goal, /Please fix report.md/);
+
+  await context.add('work', event('7', 'work-turn:new-goal',
+    'User: Write exactly `# Other` to `report.md`.\nAssistant: I will.'));
+  store.reconcileProcessedSources();
+  const newGoalJob = store.byKey('source:review-work:work-turn:new-goal:v7');
+  const staleProof = proposal(['work-tool:repair', 'work-artifact:repair']);
+  staleProof.constraints = [];
+  commitReview(store, reviews, newGoalJob, reviews.snapshot(newGoalJob), staleProof);
+  const newGoalId = context.sources.database.prepare('SELECT review_id FROM work_reviews WHERE job_id=?')
+    .get(newGoalJob.jobId).review_id;
+  assert.equal(reviews.get(newGoalId).judgment, 'unverified');
+});
+
 test('a successful irrelevant write is only partial and credentials are redacted', async (t) => {
   const context = await fixture(t);
   await context.add('work', event('1', 'work-turn:one',
