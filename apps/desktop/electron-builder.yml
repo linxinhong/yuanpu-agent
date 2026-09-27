@@ -11,6 +11,10 @@ extraResources:
     to: app
     filter:
       - '**/*'
+  - from: ../app/src/skills
+    to: app/skills
+    filter:
+      - '**/*'
   - from: ../runtime/dist-native/bin
     to: runtime
     filter:

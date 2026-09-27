@@ -55,6 +55,8 @@ export class RuntimeAgentExecutor implements AgentRunExecutor {
         promise: createYuanpuChatSession({
           ...this.#options.chat,
           cwd: input.run.context.workspaceId,
+          builtinSkillPaths: input.run.context.conversation.conversationId.startsWith('work:')
+            ? this.#options.chat.builtinSkillPaths : [],
           includeGlobalMemory: input.run.owner.entryPoint === 'desktop'
             && input.run.context.conversation.conversationId === 'assistant',
           capabilityClient: this.#options.getCapabilityClient(),
