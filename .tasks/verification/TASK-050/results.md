@@ -1,6 +1,6 @@
 # 独立助理完整业务验收（TASK-050）阶段记录
 
-状态：**部分通过，整卡仍在进行。** 本次验证者不是 TASK-049/062 的主要实现者。产品验收基线为 main `15a1430`（产品树 `5e9a4f1` 加 TASK-050 领卡提交）；验收增量 `8417d12` 已集成 main，并在该修订重跑 `pnpm check` exit 0。本卡新增打包业务探针与历史探针清理修正，没有产品源码修改。所有新数据均在自动清理的临时 `YUANPU_HOME`、独立 Electron `user-data` 和合成 loopback 模型中；未读真实用户 Home、未用真实凭据、未发送企微消息。
+状态：**部分通过，整卡仍在进行。** 本次验证者不是 TASK-049/062 的主要实现者。产品验收基线为 main `15a1430`（产品树 `5e9a4f1` 加 TASK-050 领卡提交）；验收增量 `8417d12` 和完整 UI 点击补充 `efdf902` 已集成 main。`8417d12` 集成后 `pnpm check` exit 0，`efdf902` 只改聚焦探针与证据，并在自身修订执行该探针 exit 0。本卡没有产品源码修改。所有新数据均在自动清理的临时 `YUANPU_HOME`、独立 Electron `user-data` 和合成 loopback 模型中；未读真实用户 Home、未用真实凭据、未发送企微消息。
 
 环境：macOS arm64，Node 24.15.0，pnpm 11.22.0，uv。独立 worktree `.worktrees/assistant-e2e-verification`；`worktree-kit.py` 的 runner 记录保存在此 worktree 私有 Git 目录的 `coding-owner/` 下。首次 `pnpm check` 因新 worktree 缺少忽略的模型目录且 models.dev 连接超时，在测试前失败；从主线同版本 `packages/ai/src/providers/data` 复制忽略的离线目录后，完整检查通过。没有创建或刷新 zvec 索引；当前宿主无 zvec 工具，已知任务卡、设计、阶段证据和测试入口用限定 `rg` 与定向读取。
 
@@ -23,4 +23,4 @@
 3. `node apps/desktop/test/task-050-packaged-assistant-probe.mjs`：最终 runner `1790468606540187000.log`，exit 0；包含七技能目录、真实桌面纠正/两步撤销/忽略点击及合成截图。早期 runner `1790468060790104000.log` 通过桥接纠正/撤销与 UI 忽略；本次把前两项也改为真实界面点击。
 4. `node apps/desktop/test/task-021-packaged-electron-app-probe.mjs`：最终 runner `1790468015649433000.log`，exit 0。早期失败 runner `1790467842769413000.log` 和 `1790467959237961000.log` 分别暴露测试清理竞态与过时模型请求计数。
 
-本记录的 PASS 只覆盖注明的环境和输入。TASK-050 的真实企微“修订后记忆”结果尚未取得，不将卡标为 done；如获授权，再执行一次限定的测试账号往返、清理测试记忆，并补充真实桌面与渠道结果。否则保持 UNVERIFIED，避免把 fixture 或已有“收到”回执冒充本轮完整业务验收。
+本记录的 PASS 只覆盖注明的环境和输入。TASK-050 的真实企微“修订后记忆”结果尚未取得，不将卡标为 done。已向用户提出的待授权步骤是：真实助理 Home 中建立纯测试记忆“蓝色纸鹤”，纠正为“绿色纸鹤”，由已配对测试账号发送一次「助理验收：我刚在桌面修订的验收口令偏好是什么？请只回答四个字。」并允许机器人原路回复；核对后清理测试记忆。未收到明确答复前不执行。否则保持 UNVERIFIED，避免把 fixture 或已有“收到”回执冒充本轮完整业务验收。
