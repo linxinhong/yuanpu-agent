@@ -2307,7 +2307,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-064
     title: "修复旧 default 工作会话启动时的证据补扫"
-    status: in_progress
+    status: done
     goal: "已有旧 default Pi 会话和绑定时，Runtime 能启动、只读显示历史，并安全补扫工作证据，不要求旧会话伪装成新会话。"
     scope:
       in: ["修复 WorkEvidenceStore 对旧 default 的绑定核验与启动扫描兼容", "增加临时 Home 的 Runtime 启动、旧 Pi JSONL 历史和证据补扫回归测试"]
@@ -2330,8 +2330,13 @@ tasks:
       owner: "legacy-work-repair-sol-10677"
       attempts: 0
       claimed_at: "2026-09-26T23:43:47.457Z"
-      completed_at: null
+      completed_at: "2026-09-27T00:36:23.884Z"
       worktree: "/Users/linxinhong/.codex/worktrees/legacy-work-repair/yuanpu-agent"
       branch: "task/task-064-legacy-work-evidence"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "legacy Work repair integrated", status: "passed", summary: "TASK-064 implementation and regression branch task/task-064-legacy-work-evidence (89d2e64, 2f89873) merged into main at e368b7e."}
+        - {type: "test", check: "legacy binding and startup regression", status: "passed", summary: "Temporary Home tests verify exact desktop/local-user/default Pi binding, real JSONL history, Runtime startup twice, idempotent evidence backfill and rejection of wrong identity/session or absent binding; branch focused and full check passed."}
+        - {type: "test", check: "independent Electron legacy retest", status: "passed", summary: "TASK-060 independent verifier reran real isolated Electron+preload+Runtime with correctly persisted old default Pi JSONL. Legacy messages display and composer is read-only; script exited 0. Evidence .tasks/verification/TASK-060/results.md and electron-legacy-readonly.png."}
+        - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Full build, TypeScript and test gate passed on main c74ef49 after repair and verification merges; apps/runtime 128/128."}
+        - {type: "limitation", check: "platform scope", status: "unverified", summary: "Electron retest executed on macOS only; Windows/Linux packaged SEA not exercised."}
       follow_up_candidates: []
