@@ -1,4 +1,5 @@
 import type { DesktopReplyRunInfo, DesktopTranscriptMessage } from '@yuanpu-agent/protocol';
+import { browserScreenshotPath, withBrowserScreenshots } from './browser-screenshot-attachment.js';
 
 type TranscriptEntry = {
   id: string;
@@ -10,6 +11,7 @@ type TranscriptEntry = {
     stopReason?: string;
     toolName?: string;
     isError?: boolean;
+    details?: unknown;
   };
 };
 
@@ -22,6 +24,7 @@ export function summarizeTranscript(
   let startedAt: string | undefined;
   let events: DesktopReplyRunInfo['events'] = [];
   let tools: DesktopReplyRunInfo['tools'] = [];
+  let browserScreenshots: string[] = [];
   for (const entry of entries) {
     const message = entry.message;
     if (entry.type !== 'message' || !message) continue;
@@ -29,8 +32,13 @@ export function summarizeTranscript(
       startedAt = entry.timestamp;
       events = [{ id: 0, title: '收到消息', at: entry.timestamp }];
       tools = [];
+      browserScreenshots = [];
     }
     if (message.role === 'toolResult' && startedAt && message.toolName) {
+      if (message.toolName === 'execute_capability') {
+        const path = browserScreenshotPath(message.details);
+        if (path) browserScreenshots.push(path);
+      }
       tools.push({ name: message.toolName, status: message.isError ? 'failed' : 'completed' });
       events.push({ id: events.length, title: message.isError ? '工具调用失败' : '工具调用完成', detail: message.toolName, at: entry.timestamp });
     }
@@ -46,7 +54,10 @@ export function summarizeTranscript(
       events: [...events, { id: events.length, title: status === 'succeeded' ? '已生成回复' : status === 'running' ? '继续处理' : '处理结束', at: entry.timestamp }],
       tools: [...tools],
     } : undefined;
-    messages.push({ id: entry.id, role: message.role, text, at: entry.timestamp, ...(run ? { run } : {}) });
+    messages.push({ id: entry.id, role: message.role,
+      text: message.role === 'assistant' && status === 'succeeded'
+        ? withBrowserScreenshots(text, browserScreenshots) : text,
+      at: entry.timestamp, ...(run ? { run } : {}) });
   }
   return messages.slice(-(options.limit ?? 100));
 }

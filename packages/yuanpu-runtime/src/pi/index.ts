@@ -39,6 +39,7 @@ import { WORKFLOW_CHECKPOINT_SOURCE, WORKFLOW_CHECKPOINT_CAPABILITY } from '../b
 import { createCapabilityId } from '../capabilities/index.js';
 import type { AgentRunRequest, DesktopTranscriptMessage, SessionTrajectory } from '@yuanpu-agent/protocol';
 import { summarizeTranscript } from './transcript-summary.js';
+import { browserScreenshotPath, withBrowserScreenshots } from './browser-screenshot-attachment.js';
 import { projectSessionTrajectory, toolCategory, toolSummary } from './session-trajectory.js';
 import { YuanpuSubagentManager, type SubagentRun } from './subagents/manager.js';
 import { createSubagentTool } from './subagents/tools.js';
@@ -607,6 +608,7 @@ export async function createYuanpuChatSession(
     const toolStarts = new Map<string, { name: string; path?: string; content?: string }>();
     const existingEntryIds = new Set(sessionManager.getBranch().map((entry) => entry.id));
     const artifactCandidates: NonNullable<YuanpuChatResult['artifactCandidates']> = [];
+    const browserScreenshots: string[] = [];
     const fileChangeCaptures = new Map<string, WorkFileCaptureSession>();
     const fileChangeJobs: Array<Promise<CapturedWorkFileChange | undefined>> = [];
     let pendingApprovalRequestId: string | undefined;
@@ -641,6 +643,10 @@ export async function createYuanpuChatSession(
           capabilityError?: { error?: unknown; approvalRequestId?: unknown };
         } | undefined;
         const status = event.isError || details?.capabilityError ? 'failed' : 'completed';
+        if (status === 'completed' && event.toolName === CAPABILITY_TOOL_NAMES.execute) {
+          const path = browserScreenshotPath(event.result?.details);
+          if (path) browserScreenshots.push(path);
+        }
         options.onProgress?.({ type: 'tool', id: event.toolCallId, name: event.toolName, status });
         toolStates.set(event.toolName, status);
         const start = toolStarts.get(event.toolCallId);
@@ -705,7 +711,8 @@ export async function createYuanpuChatSession(
         (change): change is CapturedWorkFileChange => Boolean(change),
       );
       return {
-        message: pendingApprovalRequestId ? '等待授权后执行当前操作。' : text.trim() || '完成。',
+        message: pendingApprovalRequestId ? '等待授权后执行当前操作。'
+          : withBrowserScreenshots(text.trim() || '完成。', browserScreenshots),
         tools: [...toolStates].map(([name, status]) => ({ name, status })),
         ...(toolResults.length ? { toolResults } : {}),
         ...(artifactCandidates.length ? { artifactCandidates } : {}),

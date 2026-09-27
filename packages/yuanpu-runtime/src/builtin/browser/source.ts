@@ -71,7 +71,10 @@ function resultToToolResult(result: BrowserControlResult, savedScreenshot?: { pa
   }
   if (result.text !== undefined) lines.push(result.text);
   if (!lines.length) lines.push('已完成 / Done.');
-  return { content: [...content, { type: 'text', text: lines.join('\n') }] };
+  return {
+    content: [...content, { type: 'text', text: lines.join('\n') }],
+    ...(savedScreenshot ? { structuredContent: { screenshot: { relativePath: savedScreenshot.relativePath } } } : {}),
+  };
 }
 
 /**

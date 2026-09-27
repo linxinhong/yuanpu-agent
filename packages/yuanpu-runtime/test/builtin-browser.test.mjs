@@ -107,6 +107,7 @@ test('browser screenshot retains image content and reports its saved conversatio
   assert.equal(result.content[0].type, 'image');
   assert.equal(result.content[0].data, base64);
   assert.match(result.content[1].text, /images\/browser-test\.png/);
+  assert.deepEqual(result.structuredContent, { screenshot: { relativePath: 'images/browser-test.png' } });
   assert.equal(captured[0].executionContext.conversationId, context.conversationId);
 });
 
