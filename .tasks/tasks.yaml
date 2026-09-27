@@ -1810,7 +1810,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-050
     title: "独立助理完整业务验收"
-    status: in_progress
+    status: done
     goal: "验证本地与企业微信个人助理从工作材料到评估、记忆、执行和主动跟进的完整闭环。"
     scope:
       in: ["真实桌面与企业微信单人私聊，记忆和工作评估生命周期", "子任务审批/取消/恢复、迁移和打包 App 生命周期", "本轮回归、未验证平台清单与最终交付证据"]
@@ -1839,10 +1839,16 @@ tasks:
       owner: "root-task050-verifier-10414-10414"
       attempts: 0
       claimed_at: "2026-09-26T23:58:32.844Z"
-      completed_at: null
+      completed_at: "2026-09-27T01:27:53.542Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-e2e-verification"
       branch: "task/task-050-assistant-full-acceptance"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-050 independent acceptance integrated on main", status: "passed", summary: "Independent verifier evidence 3239d3c merged at b5cc698; final redacted handoff and backup verification at fdbdb33. See .tasks/verification/TASK-050/results.md and .tasks/memory/TASK-050.md."}
+        - {type: "command", check: "Node 24 pnpm check on integrated product tree", status: "passed", summary: "main f405cc0 runner 1790471730579155000.log exit 0. Subsequent changes through fdbdb33 affect only TASK-050 Markdown evidence and synthetic screenshot."}
+        - {type: "test", check: "Independent temporary-Home Worker/Pi memory lifecycle and packaged Desktop", status: "passed", summary: "Corrected same-session/restart/forget probe 1790471966800243000.log exit 0; native/desktop packaged build 1790472068914628000.log exit 0; packaged business UI probe 1790472132705158000.log exit 0. Synthetic model and temporary Home."}
+        - {type: "business", check: "Authorized real Desktop to paired WeCom private reply", status: "passed", summary: "Single exact inbound: request completed via wecom, reply green-paper-crane test phrase, delivery accepted without failure; user confirmed receiving the four-character reply. Desktop UI corrected v1 to v2; saved Work test-marker count 0; UI forget removed test document and revisions; App/Runtime/Worker exited."}
+        - {type: "recovery", check: "Real Home backup before test", status: "passed", summary: "Private local full backup taken after previous App stopped; assistant and work SQLite backup integrity checks both ok. Backup and identifiers remain outside repository."}
+        - {type: "limit", check: "Platform and long-term semantics", status: "unverified", summary: "External-model breadth/long-term memory quality, Windows/Linux packaging, cloud synchronization and other IM channels were outside this local acceptance."}
       follow_up_candidates: []
   - id: TASK-052
     title: "工作对话右侧栏文件预览"
