@@ -309,13 +309,13 @@ export function ChatPanel({
   const [workConversationId, setWorkConversationId] = useState<string>();
   function restoreSidebarFor(nextId: string) {
     if (shownSidebarFor.current === nextId) return;
-    if (shownSidebarFor.current) sidebarSessions.current.set(shownSidebarFor.current, { open: activityOpen, tab: activityTab, reviewRunId, width: rightPanelWidth });
+    if (shownSidebarFor.current) sidebarSessions.current.set(shownSidebarFor.current, { open: activityOpen, tab: activityTab, reviewRunId, width: Math.max(rightPanelWidth, 260) });
     shownSidebarFor.current = nextId;
     const next = sidebarSessions.current.get(nextId);
     setActivityOpen(next?.open ?? false);
     setActivityTab(next?.tab ?? 'files');
     setReviewRunId(next?.reviewRunId);
-    setRightPanelWidth(next?.width ?? 320);
+    setRightPanelWidth(Math.max(next?.width ?? 320, 260));
     setRightPanelMaximized(false);
     setTopRenaming(false);
   }
@@ -560,10 +560,15 @@ export function ChatPanel({
     const panel = chatPanel.current;
     const fit = () => {
       const width = panel.getBoundingClientRect().width;
+      if (width < 260) return;
       if (surface === 'assistant') {
         // Preserve the split ratio when the window or left list changes size.
         setRightPanelWidth(rightPanelSpace(width, listOpen, false) * assistantPanelRatio.current);
-      } else setRightPanelWidth((current) => Math.min(current, maxRightPanelWidth(width, listOpen, true)));
+      } else {
+        const maximum = maxRightPanelWidth(width, listOpen, true);
+        if (maximum < 260) return;
+        setRightPanelWidth((current) => Math.min(Math.max(current, 260), maximum));
+      }
     };
     fit();
     const observer = new ResizeObserver(fit);
