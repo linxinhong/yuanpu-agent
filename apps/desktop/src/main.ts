@@ -181,8 +181,11 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('runtime:greeting', trustedHandler((name: string) => runtime.greeting(name)));
   ipcMain.handle('runtime:chat', trustedHandler((message: string) => runtime.chat(message)));
   ipcMain.handle('runtime:chat:submit', trustedHandler((message: string, surface?: 'work' | 'assistant', conversationId?: string,
-    clientMessageId?: string) => runtime.submitDesktopMessage(message, surface, conversationId, clientMessageId)));
-  ipcMain.handle('desktop:transcript', trustedHandler((surface: 'work' | 'assistant' | 'assistantArchive', conversationId?: string) => runtime.getDesktopTranscript(surface, conversationId)));
+    clientMessageId?: string, modelSelection?: import('@yuanpu-agent/protocol').AgentRunRequest['modelSelection'],
+    approvalMode?: import('@yuanpu-agent/protocol').AgentRunRequest['approvalMode']) =>
+    runtime.submitDesktopMessage(message, surface, conversationId, clientMessageId, modelSelection, approvalMode)));
+  ipcMain.handle('desktop:transcript', trustedHandler((surface: 'work' | 'assistant' | 'assistantArchive', conversationId?: string,
+    beforeId?: string, limit?: number) => runtime.getDesktopTranscript(surface, conversationId, beforeId, limit)));
   ipcMain.handle('work:conversations:list', trustedHandler(() => runtime.listWorkConversations()));
   ipcMain.handle('work:conversations:create', trustedHandler((folderId?: string, requestId?: string) => runtime.createWorkConversation(folderId, requestId)));
   ipcMain.handle('work:conversations:select', trustedHandler((conversationId: string, previewArchived?: boolean) => runtime.selectWorkConversation(conversationId, previewArchived)));
@@ -191,6 +194,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('work:search', trustedHandler((input: import('@yuanpu-agent/protocol').WorkSearchQuery) => runtime.searchWorkConversations(input)));
   ipcMain.handle('work:message-window', trustedHandler((conversationId: string, entryId: string, radius?: number) =>
     runtime.getWorkMessageWindow(conversationId, entryId, radius)));
+  ipcMain.handle('work:trajectory', trustedHandler((conversationId: string) => runtime.getWorkTrajectory(conversationId)));
   ipcMain.handle('work:folders:list', trustedHandler(() => runtime.listWorkFolders()));
   ipcMain.handle('work:folders:create', trustedHandler((parentId: string | null, name: string, iconId?: string, requestId?: string) => runtime.createWorkFolder(parentId, name, iconId, requestId)));
   ipcMain.handle('work:folders:update', trustedHandler((folderId: string, patch: { name?: string; iconId?: string }) => runtime.updateWorkFolder(folderId, patch)));

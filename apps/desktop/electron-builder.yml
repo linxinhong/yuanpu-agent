@@ -11,8 +11,8 @@ extraResources:
     to: app
     filter:
       - '**/*'
-  - from: ../app/skills
-    to: app/skills
+  - from: ../app/agents
+    to: app/agents
     filter:
       - '**/*'
   - from: ../app/emo.json

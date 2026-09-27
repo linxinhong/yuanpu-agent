@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,10 +13,13 @@ import type {
   CapabilityApprovalSummary,
   NotificationNavigationTarget,
   AgentRunRecord,
+  AgentRunRequest,
   PrivateImRunSummary,
   WorkConversation,
   WorkSearchItem,
   WorkMessageWindowResult,
+  SessionTrajectory,
+  DesktopTranscriptMessage,
 } from '@yuanpu-agent/protocol';
 import { effectiveHotkeyBinding } from '@yuanpu-agent/protocol';
 import mindlinkSeal from '../../themes/assets/mindlink-seal.png';
@@ -37,10 +41,11 @@ import { cacheReplyRun, findReplyRun, type ReplyRunInfo } from '../shared/reply-
 import { normalizeWorkspacePath } from '../shared/work-file-links.js';
 import { FileWorkspace, ImagePreviewPanel, type ImagePreviewRequest } from '../viewer/files/file-tabs.js';
 import { ReviewPanel } from '../viewer/review/review-panel.js';
-import type { ViewerBrowserHost } from '../viewer/host/browser-host.js';
+import { SessionTrajectoryViewer, SubagentViewer } from '../viewer/session-trajectory.js';import type { ViewerBrowserHost } from '../viewer/host/browser-host.js';
 import type { ViewerFileHost } from '../viewer/host/file-host.js';
 
 type ToolState = { name: string; status: 'started' | 'completed' | 'failed' };
+type LiveTool = NonNullable<SessionTrajectory['live']>['tools'][number];
 type ChatMessage = {
   id: number;
   entryId?: string;
@@ -48,6 +53,7 @@ type ChatMessage = {
   text: string;
   at?: string;
   tools?: ToolState[];
+  process?: LiveTool[];
   run?: ReplyRunInfo;
 };
 type ActivityEvent = {
@@ -58,6 +64,18 @@ type ActivityEvent = {
   at: string;
   tone: 'active' | 'done' | 'warning' | 'error';
 };
+
+const thinkingLevels = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+] as const;
+
+function threeStepThinking(level?: string): 'low' | 'medium' | 'high' {
+  if (level === 'minimal' || level === 'low') return 'low';
+  if (level === 'high' || level === 'xhigh' || level === 'max') return 'high';
+  return 'medium';
+}
 
 function runStatusLabel(status: AgentRunRecord['status']): string {
   return {
@@ -72,13 +90,85 @@ function runStatusLabel(status: AgentRunRecord['status']): string {
   }[status];
 }
 
+function toolLabel(name: string): string {
+  if (/subagent/i.test(name)) return '子智能体';
+  if (/search|fetch|web/i.test(name)) return 'Web 搜索';
+  if (/read|write|edit|patch/i.test(name)) return '文件';
+  if (/bash|shell|terminal/i.test(name)) return 'Bash';
+  if (/code|python/i.test(name)) return '代码执行';
+  if (/capability|mcp/i.test(name)) return 'MCP';
+  return '工具调用';
+}
+
+function capabilityName(id: string): string {
+  if (!id.startsWith('ypcap:')) return id.replaceAll('_', ' ');
+  const encoded = id.split(':')[2];
+  if (!encoded) return '外部能力';
+  try {
+    const padded = encoded.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(encoded.length / 4) * 4, '=');
+    const name = new TextDecoder().decode(Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)));
+    if (!/^[\w.-]{1,80}$/.test(name)) return '外部能力';
+    return ({ browser_evaluate: '在网页中执行操作', browser_snapshot: '查看网页状态',
+      browser_navigate: '打开网页', web_search: '搜索网页', fetch_content: '读取网页内容' } as Record<string, string>)[name]
+      ?? name.replaceAll('_', ' ');
+  } catch {
+    return '外部能力';
+  }
+}
+
+function capabilitySource(source: string): string {
+  if (source === 'builtin.host.browser') return '浏览器';
+  if (source.startsWith('builtin.web')) return '网页';
+  if (source.startsWith('builtin.')) return '内置能力';
+  return source;
+}
+
+function processPresentation(tool: LiveTool): { icon: 'file' | 'edit' | 'globe' | 'code' | 'lightning' | 'skills' | 'assistant' | 'briefcase'; title: string; detail: string } {
+  const rawDetail = tool.summary.includes(' · ') ? tool.summary.slice(tool.summary.indexOf(' · ') + 3).trim() : '';
+  const detail = rawDetail.startsWith('ypcap:') ? capabilityName(rawDetail) : rawDetail;
+  if (tool.category === '子智能体') return { icon: 'assistant', title: '子智能体正在协作', detail };
+  if (tool.category === 'Web 搜索') return { icon: 'globe', title: '搜索网页', detail };
+  if (tool.category === 'Skill') return { icon: 'skills', title: '使用技能', detail };
+  if (tool.category === 'MCP') return { icon: 'briefcase', title: '调用外部能力', detail };
+  if (tool.category === '浏览器') return { icon: 'globe', title: '浏览器操作', detail };
+  if (tool.category === '代码执行') return { icon: 'code', title: '运行代码', detail };
+  if (tool.category === 'Bash') return { icon: 'code', title: '执行命令', detail };
+  if (tool.name === 'read') return { icon: 'file', title: '读取文件', detail };
+  if (tool.name === 'write') return { icon: 'edit', title: '写入文件', detail };
+  if (tool.name === 'edit') return { icon: 'edit', title: '修改文件', detail };
+  if (tool.category === '文件') return { icon: 'file', title: '查看文件', detail };
+  return { icon: 'lightning', title: '使用工具', detail: detail || tool.name };
+}
+
+function ProcessList({ tools, live, onOpen, onReview }: { tools: LiveTool[]; live?: boolean;
+  onOpen: (tool: LiveTool) => void; onReview?: () => void }) {
+  if (!tools.length) return null;
+  const hasFileChanges = !live && tools.some((tool) => /(?:^|[._:/])(?:write|edit|apply_patch|patch)(?:$|[._:/])/i.test(tool.name));
+  return <div className="chat-process" aria-label="运行过程">
+    <div className="chat-process-heading"><strong>{live ? '正在处理' : '处理过程'} · {tools.length} 项操作</strong>
+      {hasFileChanges && onReview && <button type="button" className="chat-process-review" onClick={onReview}
+        title="审查本次文件修改"><AppIcon name="review" />审查修改</button>}</div>
+    {tools.map((tool) => {
+      const presentation = processPresentation(tool);
+      return <button type="button" key={tool.id} onClick={() => onOpen(tool)}
+        title={`查看${tool.category === '子智能体' ? '子智能体' : '运行轨迹'}详情`}>
+        <span className={`chat-process-icon ${tool.status}`}><AppIcon name={presentation.icon} /></span>
+        <span className="chat-process-content"><span>{presentation.title}</span>
+          {presentation.detail && <small>{presentation.detail}</small>}</span>
+        <small className={`chat-process-status ${tool.status}`}>{tool.status === 'running' ? '进行中' : tool.status === 'failed' ? '失败' : '已完成'}</small>
+      </button>;
+    })}
+  </div>;
+}
+
+function tokenLabel(value: number | undefined): string {
+  if (value === undefined) return '—';
+  return value >= 1_000 ? `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}K` : String(value);
+}
+
 function stoppedNotice(run: AgentRunRecord): string {
   const duration = elapsedLabel(run);
   return duration ? `你在 ${duration} 后停止了` : '你停止了当前任务';
-}
-
-function activityTime(at: string): string {
-  return new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
 function messageTime(at?: string): string | undefined {
@@ -153,6 +243,7 @@ export function ChatPanel({
   const pendingAssistantMessage = useRef<{ text: string; id: string; createdAt: number } | undefined>(undefined);
   const [attachmentError, setAttachmentError] = useState('');
   const [redactionPreviewEnabled, setRedactionPreviewEnabled] = useState(false);
+  const [unrestrictedConversationId, setUnrestrictedConversationId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [approvals, setApprovals] = useState<CapabilityApprovalSummary[]>([]);
   const [approvalBusy, setApprovalBusy] = useState<string>();
@@ -169,31 +260,86 @@ export function ChatPanel({
   const stoppedRuns = useRef(new Set<string>());
   const nextNoticeId = useRef(-1);
   const [activityOpen, setActivityOpen] = useState(surface === 'assistant');
+  const sidebarSessions = useRef(new Map<string, { open: boolean; tab: 'trajectory' | 'subagents' | 'files' | 'review'; reviewRunId?: string; width: number }>());
+  const shownSidebarFor = useRef<string | undefined>(undefined);
+  const [mountedWorkspaces, setMountedWorkspaces] = useState<string[]>([]);
   const [listOpen, setListOpen] = useState(false);
+  const [listMaximized, setListMaximized] = useState(false);
+  const [leftPanelResizing, setLeftPanelResizing] = useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
+    try {
+      const stored = Number(window.localStorage.getItem('yuanpu:left-panel-width'));
+      return stored >= 240 && stored <= 720 ? stored : 300;
+    } catch { return 300; }
+  });
+  const leftPanelDragCleanup = useRef<(() => void) | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(() => {
     if (surface === 'assistant') return (window.innerWidth - 50) / 2;
-    try {
-      const stored = Number(window.localStorage.getItem('yuanpu:right-panel-width'));
-      return stored >= 260 && stored <= 1600 ? stored : 320;
-    } catch { return 320; }
+    return 320;
   });
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [rightPanelMaximized, setRightPanelMaximized] = useState(false);
   const [workspaceTabHost, setWorkspaceTabHost] = useState<HTMLDivElement | null>(null);
-  const [activityTab, setActivityTab] = useState<'activity' | 'run' | 'files' | 'review'>(surface === 'work' ? 'files' : 'activity');
-  const [filePreviewPath, setFilePreviewPath] = useState<string>();
+  const [activityTab, setActivityTab] = useState<'trajectory' | 'subagents' | 'files' | 'review'>('files');
+  const [trajectory, setTrajectory] = useState<SessionTrajectory>();
+  const [contextOpen, setContextOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const modelControlsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!modelOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!modelControlsRef.current?.contains(event.target as Node)) setModelOpen(false);
+    };
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') setModelOpen(false); };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [modelOpen]);
+  const [modelSelection, setModelSelection] = useState<AgentRunRequest['modelSelection']>();  const [filePreviewPath, setFilePreviewPath] = useState<string>();
   const [imagePreviewRequest, setImagePreviewRequest] = useState<ImagePreviewRequest>();
-  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const activityEventsRef = useRef<ActivityEvent[]>([]);
   const [lastRun, setLastRun] = useState<AgentRunRecord>();
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
+  const [reviewRunId, setReviewRunId] = useState<string>();
   const [submittedTask, setSubmittedTask] = useState<{ runId: string; text: string }>();
   const [runRecovery, setRunRecovery] = useState<{ runId: string; text: string }>();
   const [bridgeError, setBridgeError] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [workConversationId, setWorkConversationId] = useState<string>();
+  function restoreSidebarFor(nextId: string) {
+    if (shownSidebarFor.current === nextId) return;
+    if (shownSidebarFor.current) sidebarSessions.current.set(shownSidebarFor.current, { open: activityOpen, tab: activityTab, reviewRunId, width: rightPanelWidth });
+    shownSidebarFor.current = nextId;
+    const next = sidebarSessions.current.get(nextId);
+    setActivityOpen(next?.open ?? false);
+    setActivityTab(next?.tab ?? 'files');
+    setReviewRunId(next?.reviewRunId);
+    setRightPanelWidth(next?.width ?? 320);
+    setRightPanelMaximized(false);
+    setTopRenaming(false);
+  }
+  useLayoutEffect(() => {
+    if (surface === 'work' && workConversationId) restoreSidebarFor(workConversationId);
+  }, [surface, workConversationId]);
+  useEffect(() => {
+    if (surface !== 'work' || !workConversationId || !activityOpen) return;
+    setMountedWorkspaces((current) => current.includes(workConversationId) ? current : [...current, workConversationId]);
+  }, [surface, workConversationId, activityOpen]);
+  useEffect(() => {
+    try { window.localStorage.setItem('yuanpu:left-panel-width', String(leftPanelWidth)); } catch { /* best effort */ }
+  }, [leftPanelWidth]);
+  useEffect(() => () => leftPanelDragCleanup.current?.(), []);
+  const [olderMessages, setOlderMessages] = useState<DesktopTranscriptMessage[]>([]);
+  const [olderHasMore, setOlderHasMore] = useState(true);
+  const [olderLoading, setOlderLoading] = useState(false);
+  const olderLoadingRef = useRef(false);
+  const olderLoadGeneration = useRef(0);
+  const latestWindowRef = useRef<{ conversationId: string; messages: DesktopTranscriptMessage[] } | undefined>(undefined);
+  const followConversationBottom = useRef(true);
+  const prependScrollAnchor = useRef<{ height: number; top: number } | undefined>(undefined);
   const sourceNavigationRef = useRef<string | undefined>(undefined);
-  const [renameRequest, setRenameRequest] = useState(0);
+  const [topRenaming, setTopRenaming] = useState(false);
+  const [topRenameDraft, setTopRenameDraft] = useState('');
   const [searchWindow, setSearchWindow] = useState<{ conversationId: string; entryId: string; result: Extract<WorkMessageWindowResult, { status: 'ok' }> }>();
   const [searchLocationError, setSearchLocationError] = useState('');
   const pendingWorkCreateRequest = useRef<{ folderId?: string; requestId: string } | undefined>(undefined);
@@ -205,6 +351,7 @@ export function ChatPanel({
   const [copiedUserMessageId, setCopiedUserMessageId] = useState<number>();
   const sending = useRef(false);
   const settledRuns = useRef(new Map<string, AgentRunRecord>());
+  const latestProcess = useRef(new Map<string, LiveTool[]>());
   const activityDialog = useRef<HTMLDialogElement>(null);
   const chatPanel = useRef<HTMLElement>(null);
   const rightPanelDragCleanup = useRef<(() => void) | null>(null);
@@ -221,6 +368,44 @@ export function ChatPanel({
   const [watermarkCount, setWatermarkCount] = useState(1);
   const desktop = window.yuanpu;
   const queryClient = useQueryClient();
+  const modelSettingsQuery = useQuery({ queryKey: ['settings', 'model'],
+    queryFn: () => desktop!.getModelSettings(), enabled: active && surface === 'work' && Boolean(desktop) });
+  useEffect(() => {
+    if (surface !== 'work' || !workConversationId) return;
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(`yuanpu:model:${workConversationId}`) ?? 'null') as AgentRunRequest['modelSelection'] | null;
+      setModelSelection(saved?.provider && saved.model
+        ? { ...saved, thinkingLevel: threeStepThinking(saved.thinkingLevel) } : undefined);
+    } catch { setModelSelection(undefined); }
+  }, [surface, workConversationId]);
+  useEffect(() => {
+    if (surface !== 'work' || !workConversationId) return;
+    try {
+      setUnrestrictedConversationId(window.localStorage.getItem(`yuanpu:full-access:${workConversationId}`) === 'true'
+        ? workConversationId : undefined);
+    } catch { setUnrestrictedConversationId(undefined); }
+  }, [surface, workConversationId]);
+  useEffect(() => {
+    if (!desktop || surface !== 'work' || !active || !workConversationId) {
+      setTrajectory(undefined);
+      return;
+    }
+    let stopped = false;
+    let timer: number | undefined;
+    const refresh = async () => {
+      try {
+        const next = await desktop.getWorkTrajectory(workConversationId);
+        if (!stopped) {
+          if (next.live) latestProcess.current.set(next.live.runId, next.live.tools);
+          setTrajectory(next);
+        }
+      } catch { /* Keep the last readable snapshot during a transient disconnect. */ }
+      if (!stopped) timer = window.setTimeout(() => void refresh(), busy ? 450
+        : ((activityOpen && (activityTab === 'trajectory' || activityTab === 'subagents')) || contextOpen ? 2_000 : 15_000));
+    };
+    void refresh();
+    return () => { stopped = true; if (timer !== undefined) window.clearTimeout(timer); };
+  }, [desktop, surface, active, workConversationId, busy, activityOpen, activityTab, contextOpen]);
   const workConversationsQuery = useQuery({
     queryKey: ['work', 'conversations'],
     queryFn: () => desktop!.listWorkConversations(),
@@ -250,7 +435,8 @@ export function ChatPanel({
   });
   const transcriptQuery = useQuery({
     queryKey: ['assistant', 'transcript', surface, workConversationId],
-    queryFn: () => desktop!.getDesktopTranscript(surface, surface === 'work' ? workConversationId : undefined),
+    queryFn: () => desktop!.getDesktopTranscript(surface, surface === 'work' ? workConversationId : undefined,
+      undefined, surface === 'work' ? 31 : undefined),
     enabled: active && Boolean(desktop) && (surface !== 'work' || Boolean(workConversationId)),
     refetchInterval: active ? 3000 : false,
   });
@@ -272,23 +458,70 @@ export function ChatPanel({
     refetchInterval: active && surface === 'assistant' && activeRunId ? 3000 : false,
   });
   const appliedTranscript = useRef('');
+  const transcriptData = useMemo(() => surface === 'work'
+    ? [...olderMessages, ...(transcriptQuery.data ?? []).slice(-30)]
+    : transcriptQuery.data, [surface, olderMessages, transcriptQuery.data]);
+  const canLoadOlder = surface === 'work' && Boolean(workConversationId) && !searchWindow && !archiveOpen
+    && !busy && !olderLoading && olderHasMore && (transcriptQuery.data?.length ?? 0) >= 31;
+
+  async function loadOlderMessages() {
+    if (!desktop || !canLoadOlder || olderLoadingRef.current || prependScrollAnchor.current || !workConversationId) return;
+    const firstId = transcriptData?.[0]?.id;
+    if (!firstId) return;
+    const generation = olderLoadGeneration.current;
+    const conversationId = workConversationId;
+    olderLoadingRef.current = true;
+    setOlderLoading(true);
+    try {
+      const page = await desktop.getDesktopTranscript('work', conversationId, firstId, 31);
+      if (generation !== olderLoadGeneration.current) return;
+      if (page.length) {
+        const pane = conversation.current;
+        if (pane) prependScrollAnchor.current = { height: pane.scrollHeight, top: pane.scrollTop };
+        setOlderMessages((current) => [...page.slice(-30), ...current]);
+      }
+      setOlderHasMore(page.length >= 31);
+    } finally {
+      if (generation === olderLoadGeneration.current) {
+        olderLoadingRef.current = false;
+        setOlderLoading(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (surface !== 'work' || !workConversationId || !transcriptQuery.data) return;
+    const latest = transcriptQuery.data.slice(-30);
+    const previous = latestWindowRef.current;
+    latestWindowRef.current = { conversationId: workConversationId, messages: latest };
+    if (!previous || previous.conversationId !== workConversationId) return;
+    const currentIds = new Set(latest.map((message) => message.id));
+    const displaced = previous.messages.filter((message) => !currentIds.has(message.id));
+    if (displaced.length) setOlderMessages((current) => {
+      if (!current.length) return current;
+      const known = new Set(current.map((message) => message.id));
+      return [...current, ...displaced.filter((message) => !known.has(message.id))];
+    });
+  }, [surface, workConversationId, transcriptQuery.data]);
 
   useEffect(() => {
     if (searchWindow?.conversationId === workConversationId) return;
-    if (busy || !transcriptQuery.data) return;
-    const key = `${workConversationId ?? surface}:${assistantLinkQuery.data?.contactId ?? 'local'}:${JSON.stringify(transcriptQuery.data)}`;
+    if (busy || !transcriptData) return;
+    const key = `${workConversationId ?? surface}:${assistantLinkQuery.data?.contactId ?? 'local'}:${JSON.stringify(transcriptData)}`;
     if (key === appliedTranscript.current) return;
     appliedTranscript.current = key;
-    nextId.current = transcriptQuery.data.length + 1;
+    nextId.current = Math.max(nextId.current, transcriptData.length + 1);
     setMessages((current) => {
       const notices = current.filter((message) => message.role === 'notice');
       const regular = current.filter((message) => message.role !== 'notice');
-      const refreshed: ChatMessage[] = transcriptQuery.data!.length
-      ? transcriptQuery.data!.map((item, index) => {
-        const previous = regular[index];
+      const previousByEntryId = new Map(regular.filter((message) => message.entryId)
+        .map((message) => [message.entryId!, message]));
+      const refreshed: ChatMessage[] = transcriptData.length
+      ? transcriptData.map((item) => {
+        const previous = previousByEntryId.get(item.id);
         const sameMessage = previous?.role === item.role && previous.text === item.text;
         const run = item.role === 'assistant' ? (sameMessage ? previous?.run : undefined) ?? findReplyRun(surface, item.id, item.text, item.at) ?? item.run : undefined;
-        return sameMessage ? { ...previous, entryId: item.id, at: item.at, run } : { id: index + 1, entryId: item.id, role: item.role, text: item.text, at: item.at, run };
+        return sameMessage ? { ...previous, entryId: item.id, at: item.at, run } : { id: nextId.current++, entryId: item.id, role: item.role, text: item.text, at: item.at, run };
       })
       : workArchived ? [] : surface === 'assistant'
         ? [{ ...initialMessages[0]!, text: assistantGreeting }]
@@ -300,7 +533,7 @@ export function ChatPanel({
       }
       return refreshed;
     });
-  }, [busy, transcriptQuery.data, assistantLinkQuery.data?.contactId, surface, workConversationId, workArchived, searchWindow]);
+  }, [busy, transcriptData, assistantLinkQuery.data?.contactId, surface, workConversationId, workArchived, searchWindow]);
 
   useEffect(() => {
     if (!searchWindow || searchWindow.conversationId !== workConversationId) return;
@@ -317,12 +550,6 @@ export function ChatPanel({
     try { window.localStorage.setItem(`yuanpu:draft:${surface}`, input); }
     catch { /* Storage can be unavailable in a restricted preview. */ }
   }, [input, surface]);
-
-  useEffect(() => {
-    if (surface === 'assistant') return;
-    try { window.localStorage.setItem('yuanpu:right-panel-width', String(rightPanelWidth)); }
-    catch { /* Storage can be unavailable in a restricted preview. */ }
-  }, [rightPanelWidth, surface]);
 
   useEffect(() => {
     if (!active || !chatPanel.current) return;
@@ -381,7 +608,6 @@ export function ChatPanel({
   function recordActivity(runId: string, title: string, tone: ActivityEvent['tone'], detail?: string, at = new Date().toISOString()) {
     const event = { id: nextActivityId.current++, runId, title, tone, detail, at };
     activityEventsRef.current = [...activityEventsRef.current, event];
-    setActivityEvents((current) => [...current, event]);
   }
 
   function showStoppedNotice(run: AgentRunRecord) {
@@ -392,6 +618,7 @@ export function ChatPanel({
       id: nextNoticeId.current--,
       role: 'notice',
       text: stoppedNotice(run),
+      process: latestProcess.current.get(run.runId),
       at: run.updatedAt,
       run: {
         runId: run.runId,
@@ -485,9 +712,17 @@ export function ChatPanel({
     return () => window.clearInterval(timer);
   }, [desktop, active, navigationTarget?.runId, privateImSummary]);
 
-  useEffect(() => {
-    conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, busy]);
+  useLayoutEffect(() => {
+    const pane = conversation.current;
+    if (!pane) return;
+    const anchor = prependScrollAnchor.current;
+    if (anchor) {
+      pane.scrollTop = anchor.top + pane.scrollHeight - anchor.height;
+      prependScrollAnchor.current = undefined;
+    } else if (followConversationBottom.current) {
+      pane.scrollTop = pane.scrollHeight;
+    }
+  }, [messages, busy, trajectory?.live?.text]);
 
   useEffect(() => {
     if (navigationTarget?.runId && locatedRun && typeof locatedRun !== 'string') {
@@ -517,20 +752,23 @@ export function ChatPanel({
         if (terminal) {
           run.output?.tools.forEach((tool) => recordActivity(run.runId,
             tool.status === 'completed' ? '工具调用完成' : '工具调用失败',
-            tool.status === 'completed' ? 'done' : 'error', tool.name, run.updatedAt));
+            tool.status === 'completed' ? 'done' : 'error', capabilityName(tool.name), run.updatedAt));
           const replyText = run.status === 'succeeded' ? run.output?.message ?? '任务已完成；可在运行记录中查看结果。'
             : run.failure?.message ?? `任务结束：${runStatusLabel(run.status)}`;
           const replyRun = run.status === 'succeeded' ? cacheReplyRun(surface, replyText, run,
             activityEventsRef.current.filter((event) => event.runId === run.runId)) : undefined;
           const stoppedByUser = run.status === 'cancelled'
             && (requestedStops.current.has(run.runId) || stoppedRuns.current.has(run.runId));
+          const process = latestProcess.current.get(run.runId);
           if (stoppedByUser) showStoppedNotice(run);
           else setMessages((current) => [...current, {
             id: nextId.current++, role: run.status === 'succeeded' ? 'assistant' : 'error',
             text: replyText,
             tools: run.output?.tools.map((tool) => ({ name: tool.name, status: tool.status })),
+            process,
             run: replyRun,
           }]);
+          latestProcess.current.delete(run.runId);
           if (run.status !== 'succeeded' && !stoppedByUser) setInput((current) => current || text);
           setRunRecovery(undefined);
           setActiveRunId(undefined);
@@ -560,7 +798,16 @@ export function ChatPanel({
     setWorkListError('');
     try {
       await desktop.selectWorkConversation(item.id, item.archived ? true : undefined);
+      restoreSidebarFor(item.id);
       setWorkConversationId(item.id);
+      olderLoadGeneration.current += 1;
+      olderLoadingRef.current = false;
+      setOlderLoading(false);
+      latestWindowRef.current = undefined;
+      setOlderMessages([]);
+      setOlderHasMore(true);
+      followConversationBottom.current = true;
+      prependScrollAnchor.current = undefined;
       setSearchWindow(undefined);
       setSearchLocationError('');
       setMessages([]);
@@ -572,7 +819,6 @@ export function ChatPanel({
       setAttachmentError('');
       setLastRun(undefined);
       setActiveRunId(undefined);
-      setActivityEvents([]);
       activityEventsRef.current = [];
       appliedTranscript.current = '';
       setFilePreviewPath(undefined);
@@ -607,7 +853,16 @@ export function ChatPanel({
       pendingWorkCreateRequest.current = { folderId, requestId };
       const item = await desktop.createWorkConversation(folderId, requestId);
       pendingWorkCreateRequest.current = undefined;
+      restoreSidebarFor(item.id);
       setWorkConversationId(item.id);
+      olderLoadGeneration.current += 1;
+      olderLoadingRef.current = false;
+      setOlderLoading(false);
+      latestWindowRef.current = undefined;
+      setOlderMessages([]);
+      setOlderHasMore(true);
+      followConversationBottom.current = true;
+      prependScrollAnchor.current = undefined;
       setSearchWindow(undefined);
       setMessages([initialMessages[0]!]);
       setApprovals([]);
@@ -618,13 +873,25 @@ export function ChatPanel({
       setAttachmentError('');
       setLastRun(undefined);
       setActiveRunId(undefined);
-      setActivityEvents([]);
       activityEventsRef.current = [];
       appliedTranscript.current = '';
       setFilePreviewPath(undefined);
       setImagePreviewRequest(undefined);
       void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
     } catch (error) { setWorkListError(formatError(error)); }
+  }
+
+  async function saveTopRename() {
+    if (!topRenaming || !desktop || !selectedWork || selectedWork.id === 'default') return;
+    const title = topRenameDraft.trim();
+    if (!title) { setWorkListError('会话名称不能为空。'); setTopRenaming(false); return; }
+    setTopRenaming(false);
+    if (title === selectedWork.title) return;
+    try {
+      await desktop.updateWorkConversation(selectedWork.id, { title });
+      void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
+      setWorkListError('');
+    } catch (error) { setWorkListError(`重命名失败：${formatError(error)}`); }
   }
 
   async function openWorkSearchHit(hit: WorkSearchItem): Promise<void> {
@@ -653,6 +920,7 @@ export function ChatPanel({
       ? `${draft || '请阅读附件。'}\n\n${includedAttachments.map((file) => `附件 ${file.name}：\n${file.contents}`).join('\n\n')}`
       : draft;
     sending.current = true;
+    followConversationBottom.current = true;
     setMessages((current) => [...current, { id: nextId.current++, role: 'user', text, at: new Date().toISOString() }]);
     setInput('');
     setAttachments([]);
@@ -689,12 +957,15 @@ export function ChatPanel({
             JSON.stringify(pendingAssistantMessage.current)); } catch { /* optional retry cache */ }
         }
         const receipt = await desktop.submitDesktopMessage(text, surface,
-          surface === 'work' ? workConversationId : undefined, clientMessageId);
+          surface === 'work' ? workConversationId : undefined, clientMessageId,
+          surface === 'work' ? modelSelection : undefined,
+          surface === 'work' && unrestrictedConversationId === workConversationId ? 'unrestricted' : undefined);
         if (surface === 'assistant') {
           pendingAssistantMessage.current = undefined;
           try { window.localStorage.removeItem('yuanpu:assistant-pending-message'); } catch { /* optional retry cache */ }
         }
         setSubmittedTask({ runId: receipt.runId, text: draft || '请阅读附件' });
+        if (surface === 'work') void queryClient.invalidateQueries({ queryKey: ['work', 'conversations'] });
         setActiveRunId(receipt.runId);
         setActiveRunStatus(receipt.status);
         recordActivity(receipt.runId, '已提交任务', 'done');
@@ -798,7 +1069,7 @@ export function ChatPanel({
       resolvedApprovals.current.add(approval.requestId);
       setApprovals((current) => current.filter((item) => item.requestId !== approval.requestId));
       if (approval.runId && [activeRunId, lastRun?.runId, navigationTarget?.runId].includes(approval.runId)) {
-        recordActivity(approval.runId, decision === 'approved' ? '已允许一次' : '已拒绝授权', decision === 'approved' ? 'done' : 'warning', approval.capabilityId);
+        recordActivity(approval.runId, decision === 'approved' ? '已允许一次' : '已拒绝授权', decision === 'approved' ? 'done' : 'warning', capabilityName(approval.capabilityId));
       }
       if (decision === 'denied') {
         setMessages((current) => [...current, {
@@ -806,7 +1077,7 @@ export function ChatPanel({
           role: 'assistant',
           text: approval.assistantDelegation
             ? `已拒绝专业任务 ${approval.assistantDelegation.taskId}，未启动执行。`
-            : `已拒绝能力 ${approval.capabilityId} 的本次调用，没有执行外部操作。`,
+            : `已拒绝${capabilityName(approval.capabilityId)}，没有执行这次操作。`,
         }]);
         return;
       }
@@ -817,7 +1088,7 @@ export function ChatPanel({
       setMessages((current) => [...current, {
         id: nextId.current++,
         role: 'assistant',
-        text: result.message ?? `能力 ${approval.capabilityId} 已执行。`,
+        text: result.message ?? `${capabilityName(approval.capabilityId)}已执行。`,
       }]);
       await refreshApprovals();
     } catch (error) {
@@ -863,16 +1134,7 @@ export function ChatPanel({
     composerInput.current?.focus();
   }
 
-  // Session association lives here; the viewer only receives its host seam.
-  const fileHost: ViewerFileHost | undefined = surface === 'work' && workConversationId && desktop
-    ? {
-      listDirectory: (dirPath?: string, options?: { recursive?: boolean }) => desktop.listWorkFiles(workConversationId, dirPath, options),
-      readFile: (filePath: string) => desktop.readWorkFile(workConversationId, filePath),
-      openFile: (filePath: string) => desktop.openWorkFile(workConversationId, filePath),
-    }
-    : undefined;
-
-  const [browserRequest, setBrowserRequest] = useState(0);
+  const [browserRequest, setBrowserRequest] = useState<{ conversationId: string; serial: number }>();
   const browserHost: ViewerBrowserHost | undefined = useMemo(() => surface === 'work' && desktop
     ? {
       attachGuest: (payload) => desktop.browserAttachGuest(payload),
@@ -889,7 +1151,7 @@ export function ChatPanel({
       if (conversationId !== workConversationId) return;
       setActivityOpen(true);
       setActivityTab('files');
-      setBrowserRequest((value) => value + 1);
+      setBrowserRequest((value) => ({ conversationId, serial: (value?.serial ?? 0) + 1 }));
     });
   }, [desktop, surface, workConversationId]);
 
@@ -897,9 +1159,35 @@ export function ChatPanel({
     ? (locatedRun && typeof locatedRun !== 'string' ? locatedRun : undefined)
     : lastRun;
   const currentStatus = visibleRun?.status ?? (navigationTarget?.runId ? undefined : activeRunStatus);
-  const visibleEvents = navigationTarget?.runId
-    ? activityEvents.filter((event) => event.runId === navigationTarget.runId)
-    : activityEvents;
+  const activeLive = activeRunId && trajectory?.live?.runId === activeRunId ? trajectory.live : undefined;
+  const configuredModel = modelSettingsQuery.data;
+  const currentModel = modelSelection ?? (configuredModel?.provider && configuredModel.model
+    ? { provider: configuredModel.provider, model: configuredModel.model } : undefined);
+  const thinkingLevelIndex = thinkingLevels.findIndex((level) => level.value === threeStepThinking(modelSelection?.thinkingLevel));
+  const contextPercent = trajectory?.context?.percent;
+  const contextRingPercent = typeof contextPercent === 'number' && Number.isFinite(contextPercent)
+    ? Math.min(100, Math.max(0, contextPercent)) : undefined;
+  const modelChoices = configuredModel ? [
+    { provider: configuredModel.provider, model: configuredModel.model, name: configuredModel.model },
+    ...configuredModel.customModels.map((item) => ({ provider: item.provider, model: item.model, name: item.name })),
+  ].filter((item, index, all) => all.findIndex((other) => other.provider === item.provider && other.model === item.model) === index) : [];
+  function chooseModel(next: NonNullable<AgentRunRequest['modelSelection']>) {
+    setModelSelection(next);
+    if (workConversationId) {
+      try { window.localStorage.setItem(`yuanpu:model:${workConversationId}`, JSON.stringify(next)); }
+      catch { /* The selection still applies to this session. */ }
+    }
+  }
+  const fullAccessEnabled = surface === 'work' && unrestrictedConversationId === workConversationId;
+  function toggleFullAccess() {
+    if (surface !== 'work' || !workConversationId || busy || workArchived || archiveOpen) return;
+    const next = !fullAccessEnabled;
+    setUnrestrictedConversationId(next ? workConversationId : undefined);
+    try {
+      if (next) window.localStorage.setItem(`yuanpu:full-access:${workConversationId}`, 'true');
+      else window.localStorage.removeItem(`yuanpu:full-access:${workConversationId}`);
+    } catch { /* Current session retains the chosen mode. */ }
+  }
   const emptyConversation = !archiveOpen && !busy && !locatedRun && !runRecovery
     && approvals.length === 0 && messages.length === 1 && messages[0]?.id === 1
     && messages[0].role === 'assistant'
@@ -936,25 +1224,37 @@ export function ChatPanel({
   }
 
   return (
-    <section ref={chatPanel} className={`chat-panel ${surface}-mode ${emptyConversation && surface === 'work' ? 'is-empty' : ''} ${listOpen ? 'list-open' : 'list-closed'} ${activityOpen ? 'activity-open' : 'activity-closed'} ${rightPanelMaximized ? 'right-panel-maximized' : ''} ${rightPanelResizing ? 'right-panel-resizing' : ''} ${active ? '' : 'view-hidden'}`}
-      style={{ '--yp-right-panel-width': `${rightPanelWidth}px` } as CSSProperties} aria-hidden={!active}>
+    <section ref={chatPanel} className={`chat-panel ${surface}-mode ${emptyConversation && surface === 'work' ? 'is-empty' : ''} ${listOpen ? 'list-open' : 'list-closed'} ${activityOpen ? 'activity-open' : 'activity-closed'} ${rightPanelMaximized ? 'right-panel-maximized' : ''} ${listMaximized ? 'list-maximized' : ''} ${leftPanelResizing ? 'left-panel-resizing' : ''} ${rightPanelResizing ? 'right-panel-resizing' : ''} ${active ? '' : 'view-hidden'}`}
+      style={{ '--yp-right-panel-width': `${rightPanelWidth}px`, '--yp-left-panel-width': `${leftPanelWidth}px` } as CSSProperties} aria-hidden={!active}>
       <PageToolbar active={active}><header className={`chat-header ${surface === 'work' && activityOpen ? 'has-workspace-tabs' : ''}`}
         style={{ '--workspace-toolbar-width': rightPanelMaximized ? 'calc(100% - 300px)' : `${rightPanelWidth}px` } as CSSProperties}>
           <div className="chat-heading">
             <button type="button" className="chat-list-toggle" title={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`}
               aria-label={`${listOpen ? '收起' : '打开'}${surface === 'work' ? '工作列表' : '会话列表'}`} aria-expanded={listOpen}
-              onClick={() => setListOpen((value) => !value)}><AppIcon name="panel-left" /></button>
+              onClick={() => {
+                if (listOpen) {
+                  setListOpen(false);
+                  setListMaximized(false);
+                } else {
+                  setListOpen(true);
+                  setListMaximized(rightPanelMaximized);
+                }
+              }}><AppIcon name="panel-left" /></button>
             <span className="chat-toolbar-divider" aria-hidden="true" />
             <nav className="chat-breadcrumb" aria-label="会话位置">
               <span>{surface === 'work' ? '工作' : '助理'}</span><AppIcon name="chevron" />
               {surface === 'work' && workPath.map((folder) => <span className="chat-breadcrumb-part" key={folder.id} title={folder.name}>{folder.name}<AppIcon name="chevron" /></span>)}
-              <strong title={surface === 'work' ? (selectedWork?.title || '未命名会话') : undefined}>{surface === 'work'
-                ? workConversationId === 'default' ? '旧工作归档' : selectedWork?.title || '未命名会话'
-                : archiveOpen ? '原桌面会话' : scheduleOrigin ? '定时任务会话' : '当前会话'}</strong>
+              {surface === 'work' && topRenaming ? <input className="chat-title-input" autoFocus
+                aria-label="会话名称" value={topRenameDraft} onChange={(event) => setTopRenameDraft(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') setTopRenaming(false); }}
+                onBlur={() => void saveTopRename()} />
+                : <strong title={surface === 'work' ? (selectedWork?.title || '未命名会话') : undefined}>{surface === 'work'
+                  ? workConversationId === 'default' ? '旧工作归档' : selectedWork?.title || '未命名会话'
+                  : archiveOpen ? '原桌面会话' : scheduleOrigin ? '定时任务会话' : '当前会话'}</strong>}
             </nav>
             {surface === 'work' && selectedWork?.id !== 'default' && <button type="button" className="chat-rename-preview"
               disabled={!selectedWork || workTreeLocked} title="重命名会话" aria-label="重命名会话"
-              onClick={() => { setListOpen(true); setRenameRequest((value) => value + 1); }}><AppIcon name="edit" /></button>}
+              onClick={() => { setTopRenameDraft(selectedWork?.title ?? ''); setTopRenaming(true); }}><AppIcon name="edit" /></button>}
           </div>
           {surface === 'work' && activityOpen && <div className="workspace-tab-host" ref={setWorkspaceTabHost} />}
           <div className="runtime-meta">
@@ -978,7 +1278,14 @@ export function ChatPanel({
             )}
             {activityOpen && <button type="button" className="panel-maximize-toggle" title={rightPanelMaximized ? '还原右侧面板' : '铺满右侧面板'}
               aria-label={rightPanelMaximized ? '还原右侧面板' : '铺满右侧面板'} aria-pressed={rightPanelMaximized}
-              onClick={() => setRightPanelMaximized((value) => !value)}><AppIcon name={rightPanelMaximized ? 'collapse' : 'expand'} /></button>}
+              onClick={() => {
+                if (rightPanelMaximized) setRightPanelMaximized(false);
+                else {
+                  setRightPanelMaximized(true);
+                  setListOpen(false);
+                  setListMaximized(false);
+                }
+              }}><AppIcon name={rightPanelMaximized ? 'collapse' : 'expand'} /></button>}
             <button ref={activityToggle} type="button" className="panel-toggle" title={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '右侧面板'}`}
               aria-label={`${activityOpen ? '收起' : '打开'}${surface === 'assistant' ? '助理面板' : '右侧面板'}`} aria-expanded={activityOpen}
               onClick={() => { restoreActivityFocus.current = true; if (activityOpen) setRightPanelMaximized(false); setActivityOpen((value) => !value); }}><AppIcon name="panel" /><span className="panel-toggle-label">{surface === 'assistant' ? '助理面板' : '右侧面板'}</span></button>
@@ -993,7 +1300,7 @@ export function ChatPanel({
           </div>}
       </header></PageToolbar>
       {listOpen && <aside className="conversation-list-preview" aria-label={surface === 'work' ? '工作列表' : '会话列表预览'}>
-        <div className="conversation-list-heading"><strong>{surface === 'work' ? '工作列表' : '会话列表'}</strong></div>
+        {surface !== 'work' && <div className="conversation-list-heading"><strong>会话列表</strong></div>}
         {surface === 'work' ? <>
           {workConversationsQuery.isLoading && <p>正在读取工作列表…</p>}
           {workConversationsQuery.error && <p role="alert">工作列表读取失败：{formatError(workConversationsQuery.error)}</p>}
@@ -1002,18 +1309,66 @@ export function ChatPanel({
           {workListError && <p role="alert">{workListError}</p>}
           {desktop && <WorkTree desktop={desktop} conversations={workConversationsQuery.data ?? []}
             folders={workFoldersQuery.data ?? []} tags={workTagsQuery.data ?? []}
-            currentId={workConversationId} locked={workTreeLocked} renameRequest={renameRequest}
+            currentId={workConversationId} locked={workTreeLocked} maximized={listMaximized}
+            onToggleMaximized={() => {
+              if (listMaximized) setListMaximized(false);
+              else {
+                setListMaximized(true);
+                setActivityOpen(false);
+                setRightPanelMaximized(false);
+              }
+            }}
             onOpen={openWorkConversation} onCreate={newWorkConversation} onSearchHit={openWorkSearchHit} />}
         </> : <><div className="conversation-list-current"><span>{archiveOpen ? '原桌面会话' : '当前会话'}</span><small>当前</small></div>
           <p>历史会话列表尚未接入，此处为界面预览。</p></>}
+        {surface === 'work' && !listMaximized && <div className="left-panel-resize-handle" role="separator" tabIndex={0}
+          aria-label="调整工作列表宽度" aria-orientation="vertical" aria-valuemin={240} aria-valuemax={720} aria-valuenow={leftPanelWidth}
+          onPointerDown={(event) => {
+            if (window.matchMedia('(max-width: 900px)').matches) return;
+            event.preventDefault();
+            leftPanelDragCleanup.current?.();
+            setLeftPanelResizing(true);
+            const pointerId = event.pointerId;
+            const left = event.currentTarget.closest<HTMLElement>('.chat-panel')?.getBoundingClientRect().left ?? 0;
+            const move = (moveEvent: PointerEvent) => {
+              if (moveEvent.pointerId === pointerId) setLeftPanelWidth(Math.max(240, Math.min(720, moveEvent.clientX - left)));
+            };
+            const finish = (finishEvent: PointerEvent) => {
+              if (finishEvent.pointerId !== pointerId) return;
+              leftPanelDragCleanup.current?.();
+              leftPanelDragCleanup.current = null;
+              setLeftPanelResizing(false);
+            };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', finish);
+            window.addEventListener('pointercancel', finish);
+            leftPanelDragCleanup.current = () => {
+              window.removeEventListener('pointermove', move);
+              window.removeEventListener('pointerup', finish);
+              window.removeEventListener('pointercancel', finish);
+            };
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              event.preventDefault();
+              setLeftPanelWidth((width) => Math.max(240, Math.min(720, width + (event.key === 'ArrowRight' ? 20 : -20))));
+            }
+          }} />}
       </aside>}
       <div className="chat-main">
         {surface === 'work' && emptyConversation && <div className="mindlink-work-background" aria-hidden="true">
           <img src={mindlinkSeal} alt="" /><strong>元朴思联</strong><span>MindLink</span>
         </div>}
 
-        <div className="conversation" ref={conversation} aria-live="polite">
+        <div className="conversation" ref={conversation} aria-live="polite" onScroll={() => {
+          const pane = conversation.current;
+          if (!pane) return;
+          followConversationBottom.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
+          if (pane.scrollTop < 120) void loadOlderMessages();
+        }}>
           <div className="conversation-inner" ref={conversationInner}>
+            {canLoadOlder && <button type="button" className="chat-load-older" disabled={olderLoading}
+              onClick={() => void loadOlderMessages()}>加载更早消息</button>}
             {surface === 'work' && !emptyConversation && <div className="mindlink-work-background-track" aria-hidden="true">
               {Array.from({ length: watermarkCount }, (_, index) =>
                 <div className="mindlink-work-background" key={index} style={{ top: `${400 + index * 800}px` }}>
@@ -1062,22 +1417,30 @@ export function ChatPanel({
             {(archiveOpen ? (archiveQuery.data ?? []).map((item, index): ChatMessage => ({ id: index + 1, role: item.role, text: item.text, at: item.at, run: item.run }))
               : searchWindow && searchWindow.conversationId === workConversationId ? searchWindow.result.messages.map((item, index): ChatMessage => ({ id: index + 1, entryId: item.id, role: item.role, text: item.text, at: item.at, run: item.run }))
                 : emptyConversation ? [] : messages).map((message) => message.role === 'notice'
-              ? <div key={message.id} className="conversation-stop-run" role="status"><ReplyRunDetails run={message.run} summary={message.text} /></div>
+              ? <div key={message.id} className="conversation-stop-run" role="status"><ReplyRunDetails run={message.run} summary={message.text} />
+                  {message.process?.length ? <ProcessList tools={message.process} onOpen={(tool) => {
+                    setActivityOpen(true); setActivityTab(tool.category === '子智能体' ? 'subagents' : 'trajectory');
+                  }} /> : null}
+                </div>
               : <article key={message.entryId ?? message.id} data-message-entry-id={message.entryId} className={`message ${message.role}`}>
                 {surface === 'assistant' && message.role === 'assistant' && <span className="assistant-message-avatar" role="img" aria-label="助理标识"><img src={new URL('../assets/assistant/portrait-resting.png', import.meta.url).href} alt="" /></span>}
                 <div className="message-label">
                   {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
                 </div>
                 <div className="message-body">
+                  {message.process?.length ? <ProcessList tools={message.process} onOpen={(tool) => {
+                    setActivityOpen(true); setActivityTab(tool.category === '子智能体' ? 'subagents' : 'trajectory');
+                  }} onReview={surface === 'work' && message.role === 'assistant'
+                    ? () => { setReviewRunId(message.run?.runId); setActivityOpen(true); setActivityTab('review'); } : undefined} /> : null}
                   {message.role === 'assistant' ? <AssistantReply text={message.text} surface={surface} run={message.run}
                     onOpenFilePath={surface === 'work' ? openWorkspaceFile : undefined}
                     resolveWorkspaceImage={surface === 'work' ? resolveWorkspaceImage : undefined}
                     onOpenImageInSidebar={openImageInSidebar}
                     onAddToConversation={archiveOpen || workArchived ? undefined : addPreviewToConversation} /> : <p>{message.text}</p>}
-                  {message.role !== 'assistant' && message.tools?.map((tool) => (
+                  {!message.process?.length && message.tools?.map((tool) => (
                     <div className={`tool-event ${tool.status}`} key={`${message.id}-${tool.name}`}>
                       <span className="tool-check">{tool.status === 'completed' ? '✓' : '!'}</span>
-                      <span>调用 MCP</span><code>{tool.name}</code>
+                      <span>{toolLabel(tool.name)}</span><code>{tool.name}</code>
                       <small>{tool.status === 'completed' ? '已完成' : '失败'}</small>
                     </div>
                   ))}
@@ -1101,40 +1464,46 @@ export function ChatPanel({
                 <span>{mirror.part === 'user' ? '消息' : '回复'}：{mirror.status === 'accepted' ? '企业微信已接收' : mirror.status === 'pending' ? '等待投递' : mirror.status === 'delivering' ? '正在投递' : mirror.status === 'unknown' ? '结果未知' : '投递失败'}</span>
               </div>)}
             </div> : null}
-            {!archiveOpen && !workArchived && readyApprovalContextRef.current === approvalContext && approvals.map((approval) => (
-              <article className="approval-card" key={approval.requestId}>
-                <div className="approval-heading">
-                  <span>待确认</span>
-                  <strong>{approval.assistantDelegation ? '专业任务授权' : '外部能力请求一次性授权'}</strong>
-                </div>
-                {approval.assistantDelegation ? <DelegationApprovalDetails delegation={approval.assistantDelegation} /> : <dl>
-                  <div><dt>能力</dt><dd>{approval.capabilityId}</dd></div>
-                  <div><dt>来源</dt><dd>{approval.sourceInstanceId}</dd></div>
-                  <div><dt>版本</dt><dd>{approval.packageVersion ?? '未声明'}</dd></div>
-                  <div><dt>参数摘要</dt><dd><code>{approval.argumentsDigest.slice(0, 16)}…</code></dd></div>
-                </dl>}
-                <p>{approval.assistantDelegation
-                  ? '仅允许此任务使用列出的来源和能力；具体敏感能力调用仍需单独审批。'
-                  : '允许只对当前会话、当前参数和当前版本生效一次；刷新或重放不会复用。'}</p>
-                <div className="approval-actions">
-                  <button type="button" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'denied')}>拒绝</button>
-                  <button type="button" className="primary" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'approved')}>
-                    {approvalBusy === approval.requestId ? '处理中…' : !readyApprovals.has(approval.requestId) ? '正在准备授权…' : '允许一次'}
-                  </button>
-                </div>
-              </article>
-            ))}
             {!archiveOpen && !workArchived && busy && (
               <article className="message assistant pending">
                 {surface === 'assistant' && <span className="assistant-message-avatar" aria-hidden="true"><img src={new URL('../assets/assistant/portrait-resting.png', import.meta.url).href} alt="" /></span>}
                 <div className="message-label">YuanpuAgent</div>
-                <div className="thinking"><span /><span /><span /> {activeRunStatus === 'waiting_approval' ? '等待授权' : '正在处理'}{activeRunId && <button type="button" className="runtime-link" disabled={cancelBusy} onClick={() => void cancelRun(activeRunId)}>取消任务</button>}</div>
+                {surface === 'work' && activeLive && activeLive.tools.length > 0 &&
+                  <ProcessList tools={activeLive.tools.slice(-8)} live onOpen={(tool) => {
+                    setActivityOpen(true); setActivityTab(tool.category === '子智能体' ? 'subagents' : 'trajectory');
+                  }} />}
+                {surface === 'work' && activeLive?.text
+                  ? <div className="message-body"><AssistantReply text={activeLive.text} surface="work"
+                    onOpenFilePath={openWorkspaceFile} resolveWorkspaceImage={resolveWorkspaceImage}
+                    onOpenImageInSidebar={openImageInSidebar} onAddToConversation={addPreviewToConversation} /></div>
+                  : <div className="thinking"><span /><span /><span /> {activeRunStatus === 'waiting_approval' ? '等待授权' : '正在处理'}</div>}
               </article>
             )}
           </div>
         </div>
 
         <div className="composer-wrap">
+          {!archiveOpen && !workArchived && readyApprovalContextRef.current === approvalContext && approvals.map((approval) => (
+            <article className="approval-card composer-approval" key={approval.requestId} role="alert">
+              <div className="approval-heading">
+                <span>等待你的决定</span>
+                <strong>{approval.assistantDelegation ? '专业任务授权' : `${capabilitySource(approval.sourceInstanceId)}操作需要授权`}</strong>
+              </div>
+              {approval.assistantDelegation ? <DelegationApprovalDetails delegation={approval.assistantDelegation} /> : <dl>
+                <div><dt>操作</dt><dd>{capabilityName(approval.capabilityId)}</dd></div>
+                <div><dt>来源</dt><dd>{capabilitySource(approval.sourceInstanceId)}</dd></div>
+              </dl>}
+              <p>{approval.assistantDelegation
+                ? '仅允许此任务使用列出的来源和能力；具体敏感能力调用仍需单独审批。'
+                : '本次决定仅对当前操作生效。'}</p>
+              <div className="approval-actions">
+                <button type="button" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'denied')}>拒绝</button>
+                <button type="button" className="primary" disabled={Boolean(approvalBusy) || !readyApprovals.has(approval.requestId)} onClick={() => void decideApproval(approval, 'approved')}>
+                  {approvalBusy === approval.requestId ? '处理中…' : !readyApprovals.has(approval.requestId) ? '正在准备授权…' : '允许这次操作'}
+                </button>
+              </div>
+            </article>
+          ))}
           {bridgeError && <p role="status">暂时无法读取授权状态，正在重连…</p>}
           {runRecovery && <div className="run-recovery" role="alert">
             <span>无法获取任务状态。任务可能仍在执行，请恢复查看后再发送。</span>
@@ -1164,19 +1533,84 @@ export function ChatPanel({
               <div className="composer-actions">
                 <button type="button" className="composer-utility" title="添加文本附件" aria-label="添加附件" disabled={archiveOpen || workArchived || busy}
                   onClick={() => attachmentInput.current?.click()}><AppIcon name="plus" /></button>
+                {surface === 'work' && <button type="button" className="composer-permission" title={fullAccessEnabled
+                  ? '完全权限已开启 · 后续任务无需逐次审批' : '逐次审批 · 点击开启完全权限'}
+                  aria-label={fullAccessEnabled ? '关闭完全权限，恢复逐次审批' : '开启完全权限，后续任务无需逐次审批'}
+                  aria-pressed={fullAccessEnabled} disabled={!workConversationId || workArchived || archiveOpen || busy}
+                  onClick={toggleFullAccess}><AppIcon name={fullAccessEnabled ? 'unlock' : 'lock'} /></button>}
                 <button type="button" className="composer-redaction-preview" title={`脱敏${redactionPreviewEnabled ? '已选中' : '未选中'} · 界面预览，尚未生效`}
                   aria-label={`${redactionPreviewEnabled ? '关闭' : '启用'}脱敏（界面预览，尚未生效）`} aria-pressed={redactionPreviewEnabled}
                   onClick={() => setRedactionPreviewEnabled((value) => !value)}><AppIcon name={redactionPreviewEnabled ? 'shield-filled' : 'shield'} /></button>
               </div>
-              {(archiveOpen || workArchived || busy) && <span className="composer-hint">{workArchived ? workConversationId === 'default' ? '旧工作归档只读' : '会话已归档 · 只读' : archiveOpen ? '原桌面会话归档只读' : '任务执行中'}</span>}
-              <button type="button" onClick={() => void sendMessage()} disabled={archiveOpen || workArchived || (surface === 'work' && Boolean(desktop) && !workConversationId) || (!input.trim() && attachments.length === 0) || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>
+              {(archiveOpen || workArchived) && <span className="composer-hint">{workArchived ? workConversationId === 'default' ? '旧工作归档只读' : '会话已归档 · 只读' : '原桌面会话归档只读'}</span>}
+              {surface === 'work' && <div ref={modelControlsRef} className="composer-runtime-controls">
+                <button type="button" className="composer-model-button" aria-label="选择模型" aria-expanded={modelOpen}
+                  onClick={() => { setContextOpen(false); setModelOpen((value) => !value); }}>
+                  <span className="composer-model-label">{currentModel?.model ?? '选择模型'}</span>
+                  <svg aria-hidden="true" viewBox="0 0 16 16" fill="none"><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
+                {modelOpen && <div className="composer-model-popover" role="dialog" aria-label="选择模型">
+                  <strong>模型</strong>
+                  {modelChoices.length ? <div className="composer-model-list">{modelChoices.map((item) =>
+                    <button type="button" key={`${item.provider}/${item.model}`}
+                      className={currentModel?.provider === item.provider && currentModel.model === item.model ? 'selected' : ''}
+                      onClick={() => { chooseModel({ ...item, thinkingLevel: threeStepThinking(modelSelection?.thinkingLevel) }); setModelOpen(false); }}>
+                      <span>{item.name}</span><small>{item.provider}</small>
+                    </button>)}</div> : <p>请先在模型设置中配置模型。</p>}
+                  {surface === 'work' && currentModel && <div className="composer-thinking">
+                      <div className="composer-thinking-heading"><span>思考强度</span><output>{thinkingLevels[thinkingLevelIndex]?.label}</output></div>
+                      <div className="composer-thinking-slider">
+                        <div className="composer-thinking-track" aria-hidden="true">
+                          <i style={{ width: `${thinkingLevelIndex / (thinkingLevels.length - 1) * 100}%` }} />
+                          {thinkingLevels.map((level, index) => <span key={level.value} data-active={index <= thinkingLevelIndex} />)}
+                        </div>
+                        <input type="range" min={0} max={thinkingLevels.length - 1} step={1} value={thinkingLevelIndex}
+                          aria-label="思考强度" aria-valuetext={thinkingLevels[thinkingLevelIndex]?.label}
+                          onChange={(event) => {
+                            const level = thinkingLevels[Number(event.target.value)];
+                            if (!level) return;
+                            chooseModel({ ...currentModel, ...(level.value ? { thinkingLevel: level.value } : {}) });
+                          }} />
+                      </div>
+                      <div className="composer-thinking-ends"><span>低</span><span>高</span></div>
+                    </div>}
+                </div>}
+                <button type="button" className="composer-context-ring"
+                  data-tooltip={contextRingPercent === undefined ? '上下文用量暂不可用' : `上下文已用 ${Math.round(contextRingPercent)}%`}
+                  aria-label={contextRingPercent === undefined ? '查看上下文用量，当前用量暂不可用' : `查看上下文用量，已用 ${Math.round(contextRingPercent)}%`}
+                  aria-expanded={contextOpen}
+                  onClick={() => { setModelOpen(false); setContextOpen((value) => !value); }}>
+                  <svg aria-hidden="true" viewBox="0 0 36 36" fill="none">
+                    <circle className="composer-context-track" cx="18" cy="18" r="13" pathLength="100" />
+                    {contextRingPercent !== undefined && contextRingPercent > 0 &&
+                      <circle className="composer-context-value" cx="18" cy="18" r="13" pathLength="100"
+                        strokeDasharray={`${contextRingPercent} ${100 - contextRingPercent}`} />}
+                  </svg>
+                </button>
+                {contextOpen && <div className="composer-context-popover" role="dialog" aria-label="上下文用量">
+                  <strong>上下文已用 {trajectory?.context?.percent == null ? '—' : `${Math.round(trajectory.context.percent)}%`}</strong>
+                  <span>{trajectory?.context?.tokens == null ? '—' : trajectory.context.tokens.toLocaleString('en-US')}
+                    {' / '}{trajectory?.context?.contextWindow?.toLocaleString('en-US') ?? '—'}</span>
+                  <div className="composer-context-progress"><i style={{ width: `${Math.min(100, Math.max(0, trajectory?.context?.percent ?? 0))}%` }} /></div>
+                  <dl><div><dt>系统提示词</dt><dd>{tokenLabel(trajectory?.context?.breakdown?.systemPrompt)}</dd></div>
+                    <div><dt>工具定义</dt><dd>{tokenLabel(trajectory?.context?.breakdown?.tools)}</dd></div>
+                    <div><dt>对话消息</dt><dd>{tokenLabel(trajectory?.context?.breakdown?.messages)}</dd></div>
+                    <div><dt>其他</dt><dd>{tokenLabel(trajectory?.context?.breakdown?.other)}</dd></div></dl>
+                  <button type="button" className="composer-open-trajectory" onClick={() => {
+                    setContextOpen(false); setActivityOpen(true); setActivityTab('trajectory');
+                  }}>打开运行轨迹 →</button>
+                </div>}
+              </div>}
+              {busy && activeRunId ? <button type="button" className="composer-stop" onClick={() => void cancelRun(activeRunId, false)}
+                disabled={cancelBusy} aria-label="停止任务" title="停止当前任务"><AppIcon name="pause" /></button>
+                : <button type="button" onClick={() => void sendMessage()} disabled={archiveOpen || workArchived || (surface === 'work' && Boolean(desktop) && !workConversationId) || (!input.trim() && attachments.length === 0) || busy || Boolean(runRecovery)} aria-label="发送消息"><AppIcon name="send" /></button>}
             </div>
           </div>
           {attachmentError && <p className="composer-attachment-error" role="alert">{attachmentError}</p>}
         </div>
       </div>
-      {(activityOpen || surface === 'assistant') && (
-        <dialog ref={activityDialog} className={`activity-panel ${surface === 'assistant' ? 'assistant-home-panel' : ''}`} aria-label={surface === 'assistant' ? '助理面板' : '当前会话动态'} onCancel={() => { setActivityOpen(false); setRightPanelMaximized(false); }}>
+      {(surface === 'work' || surface === 'assistant') && (
+        <dialog ref={activityDialog} className={`activity-panel ${surface === 'assistant' ? 'assistant-home-panel' : ''}`} aria-label={surface === 'assistant' ? '助理面板' : '当前会话侧栏'} onCancel={() => { setActivityOpen(false); setRightPanelMaximized(false); }}>
           <div className="activity-resize-handle" role="separator" aria-label="调整右侧栏宽度" aria-orientation="vertical" aria-valuemin={260}
             aria-valuemax={maxRightPanelWidth(chatPanel.current?.clientWidth ?? window.innerWidth - 50, listOpen, surface === 'work')} aria-valuenow={rightPanelWidth} tabIndex={0}
             onPointerDown={(event) => {
@@ -1231,52 +1665,33 @@ export function ChatPanel({
               disconnected: Boolean(runRecovery) || locatedRun === 'error',
             }}
             run={visibleRun} archiveOpen={archiveOpen} onToggleArchive={() => setArchiveOpen((value) => !value)} /> : <>
-          <FileWorkspace key={`${workConversationId ?? 'empty'}:${selectedWork?.workingDirectory ?? ''}`}
-            host={fileHost} browserHost={browserHost} browserRequest={browserRequest} scopeKey={workConversationId ?? 'empty'}
-            rootName={selectedWork?.workingDirectory?.split(/[\\/]/).filter(Boolean).at(-1) || '工作区'}
-            requestPath={filePreviewPath} requestImage={imagePreviewRequest} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
-            view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); setImagePreviewRequest(undefined); }}
-            reviewContent={<ReviewPanel conversationId={workConversationId}
-              lastRunId={lastRun?.runId ?? [...messages].reverse().find((message) => message.run?.runId)?.run?.runId}
-              refreshKey={reviewRefreshKey} active={active && activityOpen && activityTab === 'review'} />}
-            runContent={activityTab === 'activity' ? (
-            <div className="activity-content">
-              <div className="activity-section-heading">
-                <h2>当前会话</h2>
-                <span>{currentStatus ? runStatusLabel(currentStatus) : '等待新任务'}</span>
-              </div>
-              {visibleRun && <div className={`activity-current ${visibleRun.status}`}>
-                <span className="activity-current-dot" />
-                <div><strong>{runStatusLabel(visibleRun.status)}</strong><small>{visibleRun.owner.entryPoint === 'scheduler' ? '定时任务' : visibleRun.owner.entryPoint === 'im' ? '企业微信任务' : '桌面对话任务'}</small></div>
-                <time>{activityTime(visibleRun.updatedAt)}</time>
-              </div>}
-              <h3>活动记录</h3>
-              {visibleEvents.length > 0 ? (
-                <ol className="activity-list">
-                  {[...visibleEvents].reverse().map((event) => <li className={`activity-item ${event.tone}`} key={event.id}>
-                    <span className="activity-symbol" aria-hidden="true">{event.tone === 'done' ? '✓' : event.tone === 'error' ? '!' : event.tone === 'warning' ? '·' : '••'}</span>
-                    <div><strong>{event.title}</strong>{event.detail && <small>{event.detail}</small>}<time>{activityTime(event.at)}</time></div>
-                  </li>)}
-                </ol>
-              ) : visibleRun ? (
-                <div className="activity-empty"><strong>{runStatusLabel(visibleRun.status)}</strong><span>该任务的详细过程暂无记录。</span></div>
-              ) : (
-                <div className="activity-empty"><strong>还没有运行记录</strong><span>发送消息后，当前会话的任务状态会显示在这里。</span></div>
-              )}
-            </div>
-          ) : (
-            <div className="activity-content">
-              <h2>最近一次运行</h2>
-              {visibleRun ? <dl className="activity-run-facts">
-                <div><dt>状态</dt><dd>{runStatusLabel(visibleRun.status)}</dd></div>
-                <div><dt>来源</dt><dd>{visibleRun.owner.entryPoint === 'scheduler' ? '定时任务' : visibleRun.owner.entryPoint === 'im' ? '企业微信' : '桌面'}</dd></div>
-                <div><dt>开始</dt><dd>{new Date(visibleRun.createdAt).toLocaleString('zh-CN')}</dd></div>
-                <div><dt>更新</dt><dd>{new Date(visibleRun.updatedAt).toLocaleString('zh-CN')}</dd></div>
-                <div><dt>运行 ID</dt><dd><code>{visibleRun.runId}</code></dd></div>
-              </dl> : <div className="activity-empty"><strong>还没有运行记录</strong><span>任务提交后可在这里查看状态与时间。</span></div>}
-            </div>
-          )} />
-          </>}
+          {mountedWorkspaces.map((sessionId) => {
+            const isCurrent = sessionId === workConversationId;
+            const session = workConversationsQuery.data?.find((item) => item.id === sessionId);
+            const sessionHost: ViewerFileHost | undefined = desktop ? {
+              listDirectory: (dirPath, options) => desktop.listWorkFiles(sessionId, dirPath, options),
+              readFile: (path) => desktop.readWorkFile(sessionId, path),
+              openFile: (path) => desktop.openWorkFile(sessionId, path),
+            } : undefined;
+            return <div key={sessionId} className="session-sidebar-instance" style={{ display: isCurrent ? undefined : 'none' }}
+              aria-hidden={!isCurrent}>
+              <FileWorkspace host={sessionHost} browserHost={browserHost}
+                browserRequest={isCurrent && browserRequest?.conversationId === sessionId ? browserRequest.serial : undefined}
+                scopeKey={sessionId} rootName={session?.workingDirectory?.split(/[\\/]/).filter(Boolean).at(-1) || '工作区'}
+                requestPath={isCurrent ? filePreviewPath : undefined} requestImage={isCurrent ? imagePreviewRequest : undefined}
+                onActiveFileChange={isCurrent ? setFilePreviewPath : undefined} tabHost={isCurrent ? workspaceTabHost : null}
+                view={isCurrent ? activityTab : sidebarSessions.current.get(sessionId)?.tab ?? 'files'}
+                onViewChange={isCurrent ? setActivityTab : () => undefined}
+                onClose={isCurrent ? () => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); setImagePreviewRequest(undefined); } : () => undefined}
+                reviewContent={isCurrent ? <ReviewPanel conversationId={sessionId}
+                  lastRunId={reviewRunId ?? lastRun?.runId ?? [...messages].reverse().find((message) => message.run?.runId)?.run?.runId}
+                  refreshKey={reviewRefreshKey} active={active && activityOpen && activityTab === 'review'} /> : null}
+                runContent={isCurrent ? activityTab === 'trajectory'
+                  ? <SessionTrajectoryViewer trajectory={trajectory} title={selectedWork?.title ?? '工作会话'}
+                      onRefresh={() => { if (desktop) void desktop.getWorkTrajectory(sessionId).then(setTrajectory); }} />
+                  : <SubagentViewer trajectory={trajectory} onOpenTrajectory={() => setActivityTab('trajectory')} /> : null} />
+            </div>;
+          })}</>}
         </dialog>
       )}
     </section>
