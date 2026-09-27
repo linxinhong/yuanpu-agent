@@ -72,6 +72,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { smokeBuiltinAgentTools } from './agent-tools-smoke.js';
+import { saveBrowserScreenshot } from './browser-screenshot.js';
 import { RuntimeAgentExecutor } from './agent-runtime.js';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { AssistantWorkerManager } from './assistant-worker-manager.js';
@@ -543,6 +544,13 @@ async function serve(): Promise<void> {
   if (browserControlClient) {
     capabilitySources.push(createBuiltinBrowserSource({
       execute: (command) => browserControlClient.execute(command),
+      saveScreenshot: (base64, context) => {
+        const conversationId = context.conversationId;
+        const workspaceRoot = conversationId === 'default' ? home.config.workingDirectory
+          : conversationId ? metadata.workConversations.row(home.config.workingDirectory, conversationId)?.working_directory : undefined;
+        if (!workspaceRoot) throw new Error('浏览器截图没有有效的 Work 会话工作目录。');
+        return saveBrowserScreenshot(workspaceRoot, base64);
+      },
     }));
   }
   let pythonSource = createConfiguredPythonSource(

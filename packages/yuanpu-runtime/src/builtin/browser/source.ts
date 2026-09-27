@@ -56,7 +56,7 @@ function requireCoordinate(args: Record<string, unknown>, field: string): number
   return value;
 }
 
-function resultToToolResult(result: BrowserControlResult): CallToolResult {
+function resultToToolResult(result: BrowserControlResult, savedScreenshot?: { path: string; relativePath: string }): CallToolResult {
   if (!result.ok) {
     return { content: [{ type: 'text', text: `浏览器操作失败 / Browser command failed: ${result.error ?? 'unknown error'}` }], isError: true };
   }
@@ -67,6 +67,7 @@ function resultToToolResult(result: BrowserControlResult): CallToolResult {
   if (result.base64 !== undefined) {
     content.push({ type: 'image', data: result.base64, mimeType: 'image/png' });
     lines.push('已捕获视口截图 / Screenshot captured as image content.');
+    if (savedScreenshot) lines.push(`截图已保存到当前会话工作目录：${savedScreenshot.relativePath}\n绝对路径：${savedScreenshot.path}`);
   }
   if (result.text !== undefined) lines.push(result.text);
   if (!lines.length) lines.push('已完成 / Done.');
@@ -78,7 +79,10 @@ function resultToToolResult(result: BrowserControlResult): CallToolResult {
  * process through the injected loopback executor and operate on the same
  * webview session the user sees in the work conversation side panel.
  */
-export function createBuiltinBrowserSource(options: { execute: BrowserControlExecutor }): CapabilitySource {
+export function createBuiltinBrowserSource(options: {
+  execute: BrowserControlExecutor;
+  saveScreenshot?: (base64: string, context: CapabilityContext) => Promise<{ path: string; relativePath: string }>;
+}): CapabilitySource {
   return {
     sourceInstanceId: 'builtin.host.browser',
     async list(): Promise<CapabilityDefinition[]> {
@@ -112,7 +116,9 @@ export function createBuiltinBrowserSource(options: { execute: BrowserControlExe
       }
       if (method === 'evaluate') command.expression = requireString(args, 'expression', 8000);
       const result = await options.execute(command, context);
-      return resultToToolResult(result);
+      const savedScreenshot = result.ok && method === 'screenshot' && result.base64 && options.saveScreenshot
+        ? await options.saveScreenshot(result.base64, context) : undefined;
+      return resultToToolResult(result, savedScreenshot);
     },
   };
 }

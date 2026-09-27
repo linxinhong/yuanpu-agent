@@ -93,6 +93,23 @@ test('browser capability validates arguments and builds commands per method', as
   assert.equal(seen[0].command.conversationId, 'work:demo');
 });
 
+test('browser screenshot retains image content and reports its saved conversation path', async () => {
+  const captured = [];
+  const base64 = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64');
+  const source = createBuiltinBrowserSource({
+    execute: async () => ({ ok: true, method: 'screenshot', base64, url: 'https://example.com/' }),
+    saveScreenshot: async (image, executionContext) => {
+      captured.push({ image, executionContext });
+      return { relativePath: 'images/browser-test.png', path: '/workspace/images/browser-test.png' };
+    },
+  });
+  const result = await source.execute({ capabilityId: 'ypcap.browser_screenshot', originalName: 'browser_screenshot', arguments: {} }, context);
+  assert.equal(result.content[0].type, 'image');
+  assert.equal(result.content[0].data, base64);
+  assert.match(result.content[1].text, /images\/browser-test\.png/);
+  assert.equal(captured[0].executionContext.conversationId, context.conversationId);
+});
+
 test('browser control client posts bearer-authenticated commands and maps http errors', async (t) => {
   const server = fakeServer((command) => command.method === 'navigate'
     ? { ok: true, method: 'navigate', url: command.url, title: 'Example' }

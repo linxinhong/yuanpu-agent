@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { createRequire } from 'node:module';
@@ -347,6 +347,13 @@ try {
   'Screenshot request did not reveal the browser tab', 10_000);
   await eventually(() => screenshotHasPng, 'Agent screenshot did not return a real PNG image', 75_000);
   await eventually(() => renderer.evaluate('!document.querySelector(".composer-hint")?.textContent.includes("任务执行中")'), 'Screenshot run did not finish');
+  const activeWork = await renderer.evaluate('window.yuanpu.listWorkConversations().then((items) => items.find((item) => item.current))');
+  const screenshotRoot = activeWork?.workingDirectory ?? workspace;
+  const screenshotFiles = await readdir(join(screenshotRoot, 'images'));
+  assert.equal(screenshotFiles.length, 1, 'Browser screenshot was not saved in this Work conversation');
+  assert.match(screenshotFiles[0], /^browser-.*\.png$/);
+  assert.deepEqual((await readFile(join(screenshotRoot, 'images', screenshotFiles[0]))).subarray(0, 8),
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   await renderer.evaluate(`Array.from(document.querySelectorAll('.file-tab-close')).find((button) => button.getAttribute('aria-label')?.includes('Browser fixture first')).click()`);
   await eventually(() => renderer.evaluate('!document.querySelector("webview")'), 'Browser guest did not detach when its tab closed');
   await renderer.evaluate(`document.querySelector('button[aria-label="添加面板标签"]').click()`);
