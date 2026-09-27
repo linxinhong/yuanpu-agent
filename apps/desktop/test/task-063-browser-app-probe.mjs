@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { createRequire } from 'node:module';
@@ -15,35 +15,76 @@ const appRoot = join(root, 'apps', 'desktop');
 const home = join(root, 'home');
 const workspace = join(home, 'workspace');
 const userData = join(root, 'electron-user-data');
+const externalOpenLog = join(root, 'external-open.txt');
+const guestPreferencesLog = join(root, 'guest-preferences.json');
+let secondPageHits = 0;
 const browserPage = createServer((request, response) => {
   const second = request.url === '/second';
+  const slow = request.url === '/slow';
+  if (second) secondPageHits += 1;
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-  response.end(`<html><head><title>Browser fixture ${second ? 'second' : 'first'}</title></head><body><h1>${second ? 'Second' : 'First'} page</h1><a href="/second">Next page</a></body></html>`);
+  const html = `<html><head><title>Browser fixture ${slow ? 'slow' : second ? 'second' : 'first'}</title></head><body><h1>${second ? 'Second' : 'First'} page</h1><a href="/second">Next page</a><button onclick="window.browserClickCount=(window.browserClickCount||0)+1">Count click</button></body></html>`;
+  if (slow) setTimeout(() => response.end(html), 500);
+  else response.end(html);
 });
 let browserPort = 0;
 let providerRequests = 0;
+let browserSkillAdvertised = false;
+let providerMode = 'navigate';
+let screenshotHasPng = false;
+let noGuestErrorSeen = false;
+let screenshotToolSummary = '';
+const providerTrace = [];
 const provider = createServer(async (request, response) => {
   let body = '';
   for await (const chunk of request) body += chunk.toString();
   const messages = JSON.parse(body).messages;
+  const lastUser = messages.findLastIndex((message) => message.role === 'user'
+    && /browser_(navigate|screenshot|click|evaluate|snapshot)/.test(JSON.stringify(message.content)));
+  const currentMessages = messages.slice(lastUser);
+  browserSkillAdvertised ||= messages.some((message) => message.role === 'system'
+    && JSON.stringify(message.content).includes('browser-control'));
   providerRequests += 1;
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   const chunk = (delta, finishReason = null) => `data: ${JSON.stringify({ id: `fixture-${providerRequests}`,
     object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
-  const latestTool = [...messages].reverse().find((message) => message.role === 'tool');
-  const latestToolCall = [...messages].reverse().find((message) => message.role === 'assistant' && message.tool_calls?.length)?.tool_calls[0]?.function?.name;
+  if (!messages.some((message) => message.role === 'system' && String(message.content).includes('You are YuanpuAgent'))) {
+    response.end(chunk({ role: 'assistant', content: 'Fixture idle.' }, 'stop') + 'data: [DONE]\n\n');
+    return;
+  }
+  const latestTool = [...currentMessages].reverse().find((message) => message.role === 'tool');
+  const latestToolCall = [...currentMessages].reverse().find((message) => message.role === 'assistant' && message.tool_calls?.length)?.tool_calls[0]?.function?.name;
   const toolText = latestTool ? JSON.stringify(latestTool.content) : '';
   const capabilityId = /ypcap:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+/.exec(toolText)?.[0];
+  const capability = providerMode === 'screenshot' ? 'browser_screenshot'
+    : providerMode === 'click-deny' ? 'browser_click'
+    : providerMode === 'evaluate-deny' ? 'browser_evaluate'
+    : providerMode === 'no-guest' ? 'browser_snapshot' : 'browser_navigate';
+  const args = providerMode === 'screenshot' ? { fullPage: false }
+    : providerMode === 'click-deny' ? { x: 145, y: 80 }
+    : providerMode === 'evaluate-deny' ? { expression: 'window.browserEvaluateCount=(window.browserEvaluateCount||0)+1' }
+    : providerMode === 'no-guest' ? {}
+    : { url: `http://127.0.0.1:${browserPort}/first` };
+  providerTrace.push({ mode: providerMode, latestToolCall, hasCapabilityId: Boolean(capabilityId),
+    lastTool: toolText.slice(0, 120) });
   if (!latestTool) {
     response.write(chunk({ role: 'assistant', tool_calls: [{ index: 0, id: `call-${providerRequests}`, type: 'function',
-      function: { name: 'search_capabilities', arguments: JSON.stringify({ query: 'browser_navigate' }) } }] }));
+      function: { name: 'search_capabilities', arguments: JSON.stringify({ query: capability }) } }] }));
     response.end(chunk({}, 'tool_calls') + 'data: [DONE]\n\n');
   } else if (latestToolCall === 'search_capabilities' && capabilityId) {
     response.write(chunk({ role: 'assistant', tool_calls: [{ index: 0, id: `call-${providerRequests}`, type: 'function',
       function: { name: 'execute_capability', arguments: JSON.stringify({ name: capabilityId,
-        arguments: { url: `http://127.0.0.1:${browserPort}/first` } }) } }] }));
+        arguments: args }) } }] }));
     response.end(chunk({}, 'tool_calls') + 'data: [DONE]\n\n');
   } else {
+    if (providerMode === 'screenshot' && latestToolCall === 'execute_capability') {
+      screenshotHasPng = JSON.stringify(currentMessages).includes('iVBORw0KGgo');
+      screenshotToolSummary = JSON.stringify({ lastToolCall: latestToolCall, contentType: typeof latestTool?.content,
+        textLength: toolText.length, textStart: toolText.slice(0, 300) });
+    }
+    if (providerMode === 'no-guest' && latestToolCall === 'execute_capability') {
+      noGuestErrorSeen = toolText.includes('该会话尚未打开浏览器标签');
+    }
     response.write(chunk({ role: 'assistant', content: `Browser capability finished: ${toolText.slice(0, 120)}` }));
     response.end(chunk({}, 'stop') + 'data: [DONE]\n\n');
   }
@@ -72,11 +113,11 @@ async function eventually(check, message, timeoutMs = 20_000) {
   throw new Error(message);
 }
 
-async function connectRenderer(port) {
+async function connectRenderer(port, targetFilter = (item) => item.type === 'page') {
   const target = await eventually(async () => {
     const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-    return (await response.json()).find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
-  }, 'Electron renderer debugger did not start');
+    return (await response.json()).find((item) => targetFilter(item) && item.webSocketDebuggerUrl);
+  }, 'Electron target debugger did not start');
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((done, fail) => {
     socket.addEventListener('open', done, { once: true });
@@ -132,10 +173,16 @@ try {
   await symlink(resolve(desktopRoot, '../runtime/dist'), join(root, 'apps', 'runtime', 'dist'), 'dir');
   await writeFile(join(appRoot, 'package.json'), JSON.stringify({ name: 'yuanpu-browser-probe', version: '1.0.0', main: 'entry.cjs' }));
   await writeFile(join(appRoot, 'entry.cjs'), `
-    const { app } = require('electron');
+    const { app, shell, webContents } = require('electron');
+    shell.openExternal = async (url) => require('node:fs').writeFileSync(${JSON.stringify(externalOpenLog)}, url);
     app.setPath('userData', ${JSON.stringify(userData)});
     process.on('SIGUSR2', () => app.quit());
     require(${JSON.stringify(join(desktopRoot, 'dist/main.cjs'))});
+    setInterval(() => {
+      const guest = webContents.getAllWebContents().find((item) => item.getType() === 'webview');
+      if (guest) require('node:fs').writeFileSync(${JSON.stringify(guestPreferencesLog)},
+        JSON.stringify(guest.getLastWebPreferences()));
+    }, 100).unref();
   `);
   browserPort = await listen(browserPage);
   const providerPort = await listen(provider);
@@ -143,6 +190,11 @@ try {
     schemaVersion: 1, provider: 'browser-fixture', model: 'fixture-model', apiKeyEnv: 'TASK_063_PROVIDER_KEY',
     workingDirectory: workspace, baseUrl: `http://127.0.0.1:${providerPort}/v1`, api: 'openai-completions',
   }));
+  await writeFile(join(home, 'app', 'models.json'), JSON.stringify({ providers: { 'browser-fixture': {
+    baseUrl: `http://127.0.0.1:${providerPort}/v1`, api: 'openai-completions',
+    models: [{ id: 'fixture-model', name: 'fixture-model', reasoning: false,
+      input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 1024 }],
+  } } }));
   const vitePort = await freePort();
   vite = spawn('pnpm', ['--filter', '@yuanpu-agent/app', 'run', 'dev', '--host', '127.0.0.1', '--port', String(vitePort), '--strictPort'], {
     cwd: repositoryRoot, stdio: ['ignore', 'pipe', 'pipe'],
@@ -167,6 +219,15 @@ try {
   await renderer.evaluate(`Array.from(document.querySelectorAll('.workspace-tab-menu button')).find((button) => button.textContent.includes('浏览器')).click()`);
   await eventually(() => renderer.evaluate('document.querySelector("webview")?.getWebContentsId?.()'), 'Browser webview did not attach');
   const guestId = await renderer.evaluate('document.querySelector("webview").getWebContentsId()');
+  const guestPreferences = await eventually(async () => {
+    const raw = await readFile(guestPreferencesLog, 'utf8').catch(() => '');
+    return raw ? JSON.parse(raw) : undefined;
+  }, 'Guest preferences were not observable');
+  assert.equal(guestPreferences.sandbox, true, 'Guest sandbox is disabled');
+  assert.equal(guestPreferences.contextIsolation, true, 'Guest context isolation is disabled');
+  assert.equal(guestPreferences.nodeIntegration, false, 'Guest Node integration is enabled');
+  assert.notEqual(guestPreferences.webSecurity, false, 'Guest web security is disabled');
+  assert.equal(guestPreferences.preload, undefined, 'Guest inherited a privileged preload');
   const firstUrl = `http://127.0.0.1:${browserPort}/first`;
   await renderer.evaluate(`(() => {
     const input = document.querySelector('.browser-address');
@@ -177,10 +238,54 @@ try {
   await eventually(() => renderer.evaluate(`document.querySelector('webview')?.getURL() === ${JSON.stringify(firstUrl)}`), 'Browser did not navigate to the local page');
   await eventually(() => renderer.evaluate('document.querySelector("webview")?.getTitle() === "Browser fixture first"'), 'Browser title did not update');
   await eventually(() => renderer.evaluate('!document.querySelector("webview")?.isLoading()'), 'First page did not finish loading');
+  const slowUrl = `http://127.0.0.1:${browserPort}/slow`;
+  await renderer.evaluate(`(() => {
+    const input = document.querySelector('.browser-address');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(slowUrl)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.closest('form').requestSubmit();
+  })()`);
+  await eventually(() => renderer.evaluate('Boolean(document.querySelector(".browser-reloading"))'), 'Browser loading state did not appear');
+  await eventually(() => renderer.evaluate('document.querySelector("webview")?.getTitle() === "Browser fixture slow"'), 'Slow page did not load');
+  await renderer.evaluate(`(() => {
+    const input = document.querySelector('.browser-address');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'http://127.0.0.1:65534/fail');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.closest('form').requestSubmit();
+  })()`);
+  await eventually(() => renderer.evaluate('Boolean(document.querySelector(".browser-error")?.textContent.trim())'),
+    'Browser navigation error state did not appear');
+  await renderer.evaluate(`(() => {
+    const input = document.querySelector('.browser-address');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(firstUrl)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.closest('form').requestSubmit();
+  })()`);
+  await eventually(() => renderer.evaluate(`document.querySelector('webview')?.getURL() === ${JSON.stringify(firstUrl)} && !document.querySelector('.browser-error')`),
+    'Browser did not recover from the navigation error');
+  assert.equal(await renderer.evaluate(`document.querySelector('webview').executeJavaScript('typeof process + ":" + typeof require')`),
+    'undefined:undefined', 'Guest page can access Node globals');
+  const beforeWidth = await renderer.evaluate('Number(document.querySelector(".activity-resize-handle").getAttribute("aria-valuenow"))');
+  await renderer.evaluate(`(() => {
+    const handle = document.querySelector('.activity-resize-handle');
+    const x = handle.getBoundingClientRect().left + 5;
+    handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 7, clientX: x }));
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 7, clientX: x - 80 }));
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, clientX: x - 80 }));
+  })()`);
+  await eventually(() => renderer.evaluate(`Number(document.querySelector('.activity-resize-handle').getAttribute('aria-valuenow')) > ${beforeWidth}`),
+    'Browser panel did not follow the resize drag');
+  await renderer.evaluate(`document.querySelector('button[aria-label="在系统浏览器中打开"]').click()`);
+  await eventually(async () => (await readFile(externalOpenLog, 'utf8').catch(() => '')) === firstUrl,
+    'System browser action did not hand off the current URL');
+  await renderer.evaluate(`document.querySelector('webview').executeJavaScript('window.open("https://example.com/popup")', true)`);
+  await eventually(async () => (await readFile(externalOpenLog, 'utf8').catch(() => '')) === 'https://example.com/popup',
+    'Guest HTTP popup was not handed to the system browser');
+  await renderer.evaluate(`document.querySelector('webview').executeJavaScript('window.open("file:///etc/passwd")', true)`);
+  assert.equal(await readFile(externalOpenLog, 'utf8'), 'https://example.com/popup', 'Blocked file popup escaped the guest');
   await renderer.evaluate(`document.querySelector('button[aria-label="添加面板标签"]').click()`);
   await renderer.evaluate(`Array.from(document.querySelectorAll('.workspace-tab-menu button')).find((button) => button.textContent.includes('文件列表')).click()`);
   assert.equal(await renderer.evaluate('document.querySelector("webview")?.getWebContentsId()'), guestId, 'Switching tabs destroyed the shared browser guest');
-  await renderer.evaluate(`Array.from(document.querySelectorAll('.file-tab-title')).find((button) => button.textContent.includes('Browser fixture first')).click()`);
   await new Promise((done) => setTimeout(done, 300));
   await renderer.evaluate(`document.querySelector('webview').executeJavaScript('document.querySelector("a").click()', true)`);
   await eventually(() => renderer.evaluate('document.querySelector("webview")?.getURL().endsWith("/second")'), 'Browser link did not navigate');
@@ -191,6 +296,10 @@ try {
   await eventually(() => renderer.evaluate('!document.querySelector("webview")?.isLoading() && document.querySelector("webview")?.canGoForward()'), 'Back navigation did not finish');
   await renderer.evaluate(`document.querySelector('button[aria-label="前进"]').click()`);
   await eventually(() => renderer.evaluate('document.querySelector("webview")?.getURL().endsWith("/second")'), 'Browser forward button failed');
+  const hitsBeforeReload = secondPageHits;
+  await eventually(() => renderer.evaluate('!document.querySelector("webview")?.isLoading()'), 'Forward navigation did not finish');
+  await renderer.evaluate(`document.querySelector('button[aria-label="重新加载"]').click()`);
+  await eventually(() => secondPageHits > hitsBeforeReload, 'Browser reload did not request the page again');
   assert.equal(await renderer.evaluate('document.querySelector("webview")?.getWebContentsId()'), guestId);
   await renderer.evaluate(`document.querySelector('button[aria-label="添加面板标签"]').click()`);
   await renderer.evaluate(`Array.from(document.querySelectorAll('.workspace-tab-menu button')).find((button) => button.textContent.includes('文件列表')).click()`);
@@ -204,10 +313,72 @@ try {
   await eventually(() => renderer.evaluate('document.querySelector("webview")?.getURL().endsWith("/first")'),
     'Agent browser_navigate did not control the shared guest', 30_000);
   assert.equal(await renderer.evaluate('document.querySelector("webview")?.getWebContentsId()'), guestId);
-  console.log(JSON.stringify({ status: 'passed', guestId, providerRequests,
-    firstUrl, secondUrl: `http://127.0.0.1:${browserPort}/second` }));
+  assert.equal(browserSkillAdvertised, true, 'Pi did not discover the bundled browser-control skill');
+  await eventually(() => renderer.evaluate('!document.querySelector(".composer-hint")?.textContent.includes("任务执行中")'), 'Navigation run did not finish');
+  await renderer.evaluate(`Array.from(document.querySelectorAll('.file-tab-title')).find((button) => button.textContent.includes('Browser fixture first')).click()`);
+
+  async function sendBrowserTask(mode, text) {
+    providerMode = mode;
+    await renderer.evaluate(`(() => {
+      const input = document.querySelector('textarea[aria-label="消息"]');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(text)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await eventually(() => renderer.evaluate('!document.querySelector(\'button[aria-label="发送消息"]\')?.disabled'),
+      `${mode} prompt was not ready`);
+    await renderer.evaluate(`document.querySelector('button[aria-label="发送消息"]').click()`);
+  }
+
+  await sendBrowserTask('screenshot', '请用 browser_screenshot 截取当前浏览器页面。');
+  await eventually(() => renderer.evaluate(`Boolean(Array.from(document.querySelectorAll('.file-tab-title'))
+    .find((button) => button.textContent.includes('Browser fixture first'))?.getAttribute('aria-selected') === 'true')`),
+  'Screenshot request did not reveal the browser tab', 10_000);
+  await eventually(() => screenshotHasPng, 'Agent screenshot did not return a real PNG image', 75_000);
+  await eventually(() => renderer.evaluate('!document.querySelector(".composer-hint")?.textContent.includes("任务执行中")'), 'Screenshot run did not finish');
+  await renderer.evaluate(`Array.from(document.querySelectorAll('.file-tab-close')).find((button) => button.getAttribute('aria-label')?.includes('Browser fixture first')).click()`);
+  await eventually(() => renderer.evaluate('!document.querySelector("webview")'), 'Browser guest did not detach when its tab closed');
+  await renderer.evaluate(`document.querySelector('button[aria-label="添加面板标签"]').click()`);
+  await renderer.evaluate(`Array.from(document.querySelectorAll('.workspace-tab-menu button')).find((button) => button.textContent.includes('浏览器')).click()`);
+  await eventually(() => renderer.evaluate(`document.querySelector('webview')?.getURL() === ${JSON.stringify(firstUrl)}`),
+    'Browser URL was not restored from conversation memory');
+  const restoredGuestId = await renderer.evaluate('document.querySelector("webview").getWebContentsId()');
+  assert.notEqual(restoredGuestId, guestId, 'Reopening browser tab did not create a fresh guest');
+
+  for (const [mode, command] of [['click-deny', 'browser_click'], ['evaluate-deny', 'browser_evaluate']]) {
+    const before = providerRequests;
+    await sendBrowserTask(mode, `请使用 ${command} 测试授权，等待我拒绝。`);
+    await eventually(() => providerRequests >= before + 2, `${command} discovery did not reach the provider`, 30_000);
+    await eventually(() => renderer.evaluate('window.yuanpu.listCapabilityApprovals().then(items => items.length > 0)'),
+      `${command} did not request approval`, 30_000);
+    await eventually(() => renderer.evaluate('Array.from(document.querySelectorAll(".approval-actions button")).some(button => button.textContent.trim() === "拒绝" && !button.disabled)'),
+      `${command} approval card did not render`, 30_000);
+    await renderer.evaluate(`Array.from(document.querySelectorAll('.approval-actions button')).find(button => button.textContent.trim() === '拒绝').click()`);
+    await eventually(() => renderer.evaluate('window.yuanpu.listCapabilityApprovals().then(items => items.length === 0)'),
+      `${command} rejection did not settle`, 30_000);
+    await eventually(() => renderer.evaluate('!document.querySelector(".composer-hint")?.textContent.includes("任务执行中")'),
+      `${command} run did not settle`, 30_000);
+  }
+  assert.equal(await renderer.evaluate('document.querySelector("webview").executeJavaScript("window.browserClickCount||0")'), 0);
+  assert.equal(await renderer.evaluate('document.querySelector("webview").executeJavaScript("window.browserEvaluateCount||0")'), 0);
+  const guestDebugger = await connectRenderer(debuggerPort, (item) => item.url === firstUrl);
+  await Promise.race([guestDebugger.command('Page.crash').catch(() => undefined),
+    new Promise((done) => setTimeout(done, 3_000))]);
+  guestDebugger.close();
+  await eventually(() => renderer.evaluate(`document.querySelector('webview')?.getWebContentsId() !== ${restoredGuestId}`),
+    'Crashed browser guest was not rebuilt');
+  await eventually(() => renderer.evaluate(`document.querySelector('webview')?.getURL() === ${JSON.stringify(firstUrl)}`),
+    'Crashed browser guest did not restore its URL');
+  const inactiveConversation = await renderer.evaluate('window.yuanpu.createWorkConversation()');
+  providerMode = 'no-guest';
+  await renderer.evaluate(`window.yuanpu.submitDesktopMessage('请使用 browser_snapshot 测试未激活会话', 'work', ${JSON.stringify(inactiveConversation.id)})`);
+  await eventually(() => noGuestErrorSeen, 'Inactive conversation did not receive a clear missing-browser error', 20_000);
+  assert.equal(await renderer.evaluate(`document.querySelector('webview')?.getURL() === ${JSON.stringify(firstUrl)}`), true,
+    'Inactive browser command disturbed the active conversation');
+  console.log(JSON.stringify({ status: 'passed', guestId, restoredGuestId, providerRequests, screenshotHasPng,
+    noGuestErrorSeen, firstUrl, secondUrl: `http://127.0.0.1:${browserPort}/second` }));
 } catch (error) {
-  throw new Error(`${error.message}; diagnostics=${diagnostics.slice(-1800)}`);
+  const ui = await renderer?.evaluate('({ text: document.body.innerText.slice(-1000), approvals: document.querySelectorAll(".approval-actions").length })').catch(() => null);
+  throw new Error(`${error.message}; screenshotToolSummary=${screenshotToolSummary}; providerTrace=${JSON.stringify(providerTrace.slice(-8))}; ui=${JSON.stringify(ui)}; diagnostics=${diagnostics.slice(-1800)}`);
 } finally {
   renderer?.close();
   await stop(app);

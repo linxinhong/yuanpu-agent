@@ -155,6 +155,7 @@ export class RuntimeManager {
     if (this.packaged) {
       const root = join(this.resourcesPath, 'capabilities', 'builtin.python.echo', 'YuanpuEchoMcp');
       return {
+        YUANPU_BUILTIN_SKILLS_ROOT: join(this.resourcesPath, 'app', 'skills'),
         YUANPU_PYTHON_MCP_EXECUTABLE: join(root, process.platform === 'win32' ? 'YuanpuEchoMcp.exe' : 'YuanpuEchoMcp'),
         YUANPU_PYTHON_MCP_ROOT: root,
         YUANPU_PYTHON_MCP_ARGS: '[]',
@@ -168,6 +169,7 @@ export class RuntimeManager {
     }
     const pythonRoot = resolve(this.appPath, '../python-capabilities');
     return {
+      YUANPU_BUILTIN_SKILLS_ROOT: resolve(__dirname, '../../app/src/skills'),
       YUANPU_PYTHON_MCP_EXECUTABLE: process.platform === 'win32'
         ? join(pythonRoot, '.venv', 'Scripts', 'python.exe')
         : join(pythonRoot, '.venv', 'bin', 'python'),

@@ -60,7 +60,10 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
     const webview = webviewRef.current;
     memory.remember(scopeKey, url);
     setState((current) => ({ ...current, url, isLoading: Boolean(webview), errorMessage: '' }));
-    if (webview && state.isReady) void webview.loadURL(url).catch(() => undefined);
+    if (webview && state.isReady) void webview.loadURL(url).catch((error: unknown) => {
+      setState((current) => ({ ...current, isLoading: false,
+        errorMessage: error instanceof Error ? error.message : '页面加载失败。' }));
+    });
     else pendingUrl.current = url;
   }, [scopeKey, state.isReady]);
 
@@ -110,12 +113,17 @@ export function BrowserView({ host, scopeKey, hidden, onTitleChange }: {
       if (pendingUrl.current) {
         const url = pendingUrl.current;
         pendingUrl.current = undefined;
-        void webview.loadURL(url).catch(() => undefined);
+        void webview.loadURL(url).catch((error: unknown) => {
+          if (!disposed) setState((current) => ({ ...current, isLoading: false,
+            errorMessage: error instanceof Error ? error.message : '页面加载失败。' }));
+        });
       }
     };
-    const handleFail = (event: CustomEvent<{ errorCode: number; errorDescription: string }>) => {
-      if (disposed || event.detail.errorCode === -3) return;
-      setState((current) => ({ ...current, isLoading: false, errorMessage: event.detail.errorDescription || '页面加载失败。' }));
+    const handleFail = (event: Event & { errorCode?: number; errorDescription?: string;
+      detail?: { errorCode?: number; errorDescription?: string } }) => {
+      const failure = event.detail ?? event;
+      if (disposed || failure.errorCode === -3) return;
+      setState((current) => ({ ...current, isLoading: false, errorMessage: failure.errorDescription || '页面加载失败。' }));
     };
     const handleGone = () => {
       if (disposed) return;

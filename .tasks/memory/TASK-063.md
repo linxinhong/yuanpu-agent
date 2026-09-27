@@ -31,3 +31,11 @@
 - 修复两处端到端测试发现的问题：`RuntimeManager` 构造时保存控制端点并交给 Runtime；`BrowserView` 在 guest 已附着或 React StrictMode effect 重放时补做注册。首次地址导航固定 `src=about:blank`，避免重复加载干扰历史。
 - `apps/desktop/test/task-063-browser-app-probe.mjs` 用临时 Home 和独立 Electron/Vite 实例实测地址栏导航、标签切换保持 guest、页面链接、前进后退、Agent 经 `search_capabilities`/`execute_capability` 调用 `browser_navigate` 驱动同一个 guest；结果通过，guest ID 保持一致。
 - 在同步后的主线基底上 `pnpm check` 通过，真实 Electron probe 再次通过。其它 TASK-063 验收项仍按任务卡继续验证。
+
+## 2026-09-27 完整验收与内置技能
+- 检索：Pi `DefaultResourceLoader.additionalSkillPaths` 与 Electron Runtime 启动路径由工作区检索定位；随后以 scoped `rg`/文件范围确认实际调用链。内置 `browser-control` 源文件位于 `apps/app/src/skills/browser-control/SKILL.md`，开发态由 `RuntimeManager` 传入源目录，打包态通过 `extraResources` 进入 `resources/app/skills`。只在 Work Pi 会话中加载；隔离 Electron probe 已确认 Pi 系统提示包含该技能。
+- 真实 Electron/Vite + 临时 Home + 本地 OpenAI 兼容 fixture：工作右侧栏「+」打开浏览器，地址导航、慢加载/失败提示、前进后退、刷新、系统浏览器交接、弹窗限制、面板拖宽、标签切换保留 guest、关闭重开按会话恢复 URL 均通过。
+- 同一 Work 会话的 `search_capabilities` → `execute_capability` 驱动既有 guest 导航；`browser_screenshot` 返回真实 PNG 图像内容并传给支持图像的模型。发现隐藏 webview 的 CDP 截图会超时，现先请求激活共享标签、等待绘制后截图；隔离探针从文件标签触发截图成功。R2 `browser_click`、R3 `browser_evaluate` 均出现真实审批卡，拒绝后页面计数保持 0。
+- `getLastWebPreferences()` 在真实 guest 上确认 sandbox/contextIsolation 开、nodeIntegration 关、webSecurity 未关、无 preload；页面内 `process`/`require` 不存在。HTTP 弹窗被拦截并转交系统浏览器，file 弹窗未转交。CDP `Page.crash` 后 guest 重建且恢复 URL；在另一未激活 Work 会话执行 `browser_snapshot` 返回明确缺少浏览器错误，未影响活跃 guest。
+- 修复错误态：Electron `did-fail-load` 的字段可直接位于 event，且 `loadURL` 可直接 reject；两条路径现在都呈现失败原因。`pnpm check` 与 `node apps/desktop/test/task-063-browser-app-probe.mjs` 在 Node 24.15.0、macOS arm64 通过。浏览器控制服务的 Bearer/Origin/体积限制和能力风险级由仓库单测覆盖。
+- 边界：本次没有构建 SEA/安装包，Windows/Linux 与签名发布未验证。浏览器能力当前限 Work，会话外的助理不加载此技能。

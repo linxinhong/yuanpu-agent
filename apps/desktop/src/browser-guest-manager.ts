@@ -85,16 +85,25 @@ export class BrowserGuestManager {
   }
 
   async execute(command: BrowserControlCommand): Promise<BrowserControlResult> {
+    // Chromium cannot capture a hidden webview. Bring its shared tab forward
+    // before issuing Page.captureScreenshot, including when the guest exists.
+    if (command.method === 'screenshot') {
+      const windowId = this.options.getMainWindowId();
+      if (windowId !== undefined) this.options.onSessionRequest(windowId, command.conversationId);
+    }
     const guest = this.findGuest(command.conversationId);
     if (!guest) {
       const windowId = this.options.getMainWindowId();
-      if (windowId !== undefined) this.options.onSessionRequest(windowId, command.conversationId);
+      if (windowId !== undefined && command.method !== 'screenshot') this.options.onSessionRequest(windowId, command.conversationId);
       const appeared = await this.waitForGuest(command.conversationId);
       if (!appeared) {
         return { ok: false, method: command.method, error: '该会话尚未打开浏览器标签；请先在右侧栏打开浏览器或稍后重试。' };
       }
     }
-    return await this.executeOnGuest(this.findGuest(command.conversationId)!, command);
+    if (command.method === 'screenshot') await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const readyGuest = this.findGuest(command.conversationId);
+    if (!readyGuest) return { ok: false, method: command.method, error: '浏览器标签已被关闭。' };
+    return await this.executeOnGuest(readyGuest, command);
   }
 
   private findGuest(conversationId: string): ManagedGuest | undefined {

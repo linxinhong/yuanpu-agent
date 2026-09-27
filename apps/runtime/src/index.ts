@@ -653,6 +653,8 @@ async function serve(): Promise<void> {
       cwd: home.config.workingDirectory,
       provider: home.config.provider,
       model: home.config.model,
+      builtinSkillPaths: process.env.YUANPU_BUILTIN_SKILLS_ROOT
+        ? [resolve(process.env.YUANPU_BUILTIN_SKILLS_ROOT)] : [],
     },
   });
   const assistantSources = new RuntimeAssistantSourceHost(workConversations, metadata.assistantHost,
