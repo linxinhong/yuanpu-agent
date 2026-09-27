@@ -12,7 +12,7 @@
     "build:native": "pnpm --filter @yuanpu-agent/runtime run build:native",
     "build:pi": "node scripts/hydrate-pi-model-data.mjs && pnpm --dir packages/chord run build && pnpm --dir packages/tui run build && pnpm --dir packages/telemetry run build && pnpm --dir packages/ai run build:offline && pnpm --dir packages/durable run build && pnpm --dir packages/agent run build && pnpm --dir packages/session-backends/sqlite-node run build && pnpm --dir packages/protocol run build && pnpm --dir packages/client run build && pnpm --dir packages/server run build && pnpm --dir packages/coding-agent run build",
     "check": "pnpm run build && pnpm run typecheck:yuanpu && pnpm run test",
-    "dev": "pnpm build:runtime && pnpm build:desktop && pnpm --filter @yuanpu-agent/desktop run dev",
+    "dev": "pnpm build && pnpm --filter @yuanpu-agent/desktop run dev",
     "dev:catalog": "pnpm --filter @yuanpu-agent/catalog-server run dev",
     "package:desktop": "pnpm run build && pnpm run build:native && pnpm run smoke:native && pnpm --filter @yuanpu-agent/desktop run package",
     "package:native": "pnpm --filter @yuanpu-agent/runtime run package:native",

@@ -1,11 +1,13 @@
 ---
 name: browser-control
-description: Operate the shared browser tab in a Work conversation when the user asks to open or inspect a page, navigate, take a screenshot, click, type, or scroll.
+description: Read text and inspect content in the shared right-side browser tab of a Work conversation; also navigate, screenshot, click, type, and scroll that tab.
 ---
 
 # Browser control
 
 The browser tab in the Work side panel is shared with the user. Use `search_capabilities` to find the browser command you need, then pass its exact returned capability ID and arguments to `execute_capability`. Do not guess IDs or use a separate browser session.
+
+If the user asks what the side-panel browser says or whether you can read its text, use `browser_snapshot` before answering. It returns the page's DOM text, title, and links. This is browser-page access, not general screen reading or access to other apps; do not ask the user to copy the page text before trying it.
 
 | Goal | Search for | Arguments |
 | --- | --- | --- |

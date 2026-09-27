@@ -30,8 +30,10 @@ const browserPage = createServer((request, response) => {
 let browserPort = 0;
 let providerRequests = 0;
 let browserSkillAdvertised = false;
+let sidebarBrowserPromptAdvertised = false;
 let providerMode = 'navigate';
 let screenshotHasPng = false;
+let snapshotHasPageText = false;
 let noGuestErrorSeen = false;
 let screenshotToolSummary = '';
 const providerTrace = [];
@@ -40,10 +42,12 @@ const provider = createServer(async (request, response) => {
   for await (const chunk of request) body += chunk.toString();
   const messages = JSON.parse(body).messages;
   const lastUser = messages.findLastIndex((message) => message.role === 'user'
-    && /browser_(navigate|screenshot|click|evaluate|snapshot)/.test(JSON.stringify(message.content)));
+    && /browser_(navigate|screenshot|click|evaluate|snapshot)|侧边栏浏览器的文本内容/.test(JSON.stringify(message.content)));
   const currentMessages = messages.slice(lastUser);
   browserSkillAdvertised ||= messages.some((message) => message.role === 'system'
     && JSON.stringify(message.content).includes('browser-control'));
+  sidebarBrowserPromptAdvertised ||= messages.some((message) => message.role === 'system'
+    && String(message.content).includes('browser_snapshot reads the page DOM text'));
   providerRequests += 1;
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   const chunk = (delta, finishReason = null) => `data: ${JSON.stringify({ id: `fixture-${providerRequests}`,
@@ -57,13 +61,14 @@ const provider = createServer(async (request, response) => {
   const toolText = latestTool ? JSON.stringify(latestTool.content) : '';
   const capabilityId = /ypcap:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+/.exec(toolText)?.[0];
   const capability = providerMode === 'screenshot' ? 'browser_screenshot'
+    : providerMode === 'snapshot' ? 'browser_snapshot'
     : providerMode === 'click-deny' ? 'browser_click'
     : providerMode === 'evaluate-deny' ? 'browser_evaluate'
     : providerMode === 'no-guest' ? 'browser_snapshot' : 'browser_navigate';
   const args = providerMode === 'screenshot' ? { fullPage: false }
     : providerMode === 'click-deny' ? { x: 145, y: 80 }
     : providerMode === 'evaluate-deny' ? { expression: 'window.browserEvaluateCount=(window.browserEvaluateCount||0)+1' }
-    : providerMode === 'no-guest' ? {}
+    : providerMode === 'no-guest' || providerMode === 'snapshot' ? {}
     : { url: `http://127.0.0.1:${browserPort}/first` };
   providerTrace.push({ mode: providerMode, latestToolCall, hasCapabilityId: Boolean(capabilityId),
     lastTool: toolText.slice(0, 120) });
@@ -81,6 +86,9 @@ const provider = createServer(async (request, response) => {
       screenshotHasPng = JSON.stringify(currentMessages).includes('iVBORw0KGgo');
       screenshotToolSummary = JSON.stringify({ lastToolCall: latestToolCall, contentType: typeof latestTool?.content,
         textLength: toolText.length, textStart: toolText.slice(0, 300) });
+    }
+    if (providerMode === 'snapshot' && latestToolCall === 'execute_capability') {
+      snapshotHasPageText = toolText.includes('First page') && toolText.includes('Browser fixture first');
     }
     if (providerMode === 'no-guest' && latestToolCall === 'execute_capability') {
       noGuestErrorSeen = toolText.includes('该会话尚未打开浏览器标签');
@@ -314,6 +322,7 @@ try {
     'Agent browser_navigate did not control the shared guest', 30_000);
   assert.equal(await renderer.evaluate('document.querySelector("webview")?.getWebContentsId()'), guestId);
   assert.equal(browserSkillAdvertised, true, 'Pi did not discover the bundled browser-control skill');
+  assert.equal(sidebarBrowserPromptAdvertised, true, 'Pi was not told how to read the shared sidebar browser');
   await eventually(() => renderer.evaluate('!document.querySelector(".composer-hint")?.textContent.includes("任务执行中")'), 'Navigation run did not finish');
   await renderer.evaluate(`Array.from(document.querySelectorAll('.file-tab-title')).find((button) => button.textContent.includes('Browser fixture first')).click()`);
 
@@ -329,6 +338,9 @@ try {
     await renderer.evaluate(`document.querySelector('button[aria-label="发送消息"]').click()`);
   }
 
+  await sendBrowserTask('snapshot', '侧边栏浏览器的文本内容是什么？');
+  await eventually(() => snapshotHasPageText, 'Agent browser_snapshot did not read the visible page text', 30_000);
+  await eventually(() => renderer.evaluate('!document.querySelector(".composer-hint")?.textContent.includes("任务执行中")'), 'Snapshot run did not finish');
   await sendBrowserTask('screenshot', '请用 browser_screenshot 截取当前浏览器页面。');
   await eventually(() => renderer.evaluate(`Boolean(Array.from(document.querySelectorAll('.file-tab-title'))
     .find((button) => button.textContent.includes('Browser fixture first'))?.getAttribute('aria-selected') === 'true')`),
@@ -374,7 +386,7 @@ try {
   await eventually(() => noGuestErrorSeen, 'Inactive conversation did not receive a clear missing-browser error', 20_000);
   assert.equal(await renderer.evaluate(`document.querySelector('webview')?.getURL() === ${JSON.stringify(firstUrl)}`), true,
     'Inactive browser command disturbed the active conversation');
-  console.log(JSON.stringify({ status: 'passed', guestId, restoredGuestId, providerRequests, screenshotHasPng,
+  console.log(JSON.stringify({ status: 'passed', guestId, restoredGuestId, providerRequests, screenshotHasPng, snapshotHasPageText,
     noGuestErrorSeen, firstUrl, secondUrl: `http://127.0.0.1:${browserPort}/second` }));
 } catch (error) {
   const ui = await renderer?.evaluate('({ text: document.body.innerText.slice(-1000), approvals: document.querySelectorAll(".approval-actions").length })').catch(() => null);
