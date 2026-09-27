@@ -1,6 +1,6 @@
 # 独立助理完整业务验收（TASK-050）阶段记录
 
-状态：**部分通过，整卡仍在进行。** 本次验证者不是 TASK-049/062 的主要实现者。验收基线为 main `15a1430`（产品树 `5e9a4f1` 加 TASK-050 领卡提交）；本卡新增打包业务探针与历史探针清理修正，没有产品源码修改。所有新数据均在自动清理的临时 `YUANPU_HOME`、独立 Electron `user-data` 和合成 loopback 模型中；未读真实用户 Home、未用真实凭据、未发送企微消息。
+状态：**部分通过，整卡仍在进行。** 本次验证者不是 TASK-049/062 的主要实现者。产品验收基线为 main `15a1430`（产品树 `5e9a4f1` 加 TASK-050 领卡提交）；验收增量 `8417d12` 已集成 main，并在该修订重跑 `pnpm check` exit 0。本卡新增打包业务探针与历史探针清理修正，没有产品源码修改。所有新数据均在自动清理的临时 `YUANPU_HOME`、独立 Electron `user-data` 和合成 loopback 模型中；未读真实用户 Home、未用真实凭据、未发送企微消息。
 
 环境：macOS arm64，Node 24.15.0，pnpm 11.22.0，uv。独立 worktree `.worktrees/assistant-e2e-verification`；`worktree-kit.py` 的 runner 记录保存在此 worktree 私有 Git 目录的 `coding-owner/` 下。首次 `pnpm check` 因新 worktree 缺少忽略的模型目录且 models.dev 连接超时，在测试前失败；从主线同版本 `packages/ai/src/providers/data` 复制忽略的离线目录后，完整检查通过。没有创建或刷新 zvec 索引；当前宿主无 zvec 工具，已知任务卡、设计、阶段证据和测试入口用限定 `rg` 与定向读取。
 
@@ -18,7 +18,7 @@
 
 执行命令与结果：
 
-1. `pnpm check`：runner `1790467376378716000.log`，exit 0（Assistant 45、Runtime 128、runtime-kit 189、Desktop 21 等均通过）。首次下载失败 runner `1790467257389091000.log`，不计产品失败。
+1. `pnpm check`：分支 runner `1790467376378716000.log`，exit 0（Assistant 45、Runtime 128、runtime-kit 189、Desktop 21 等均通过）；集成 main `8417d12` 的直接复跑 exit 0（Runtime 128/128）。首次下载失败 runner `1790467257389091000.log`，不计产品失败。
 2. `pnpm package:desktop`：runner `1790467509360909000.log`，exit 0；包括 `build:native`、`smoke:native` 与 `smoke:runtime-update`。
 3. `node apps/desktop/test/task-050-packaged-assistant-probe.mjs`：最终 runner `1790468060790104000.log`，exit 0；包含七技能目录断言、真实桌面点击和合成截图。早期通过的 runner `1790467782588067000.log` 未含最终七技能断言。
 4. `node apps/desktop/test/task-021-packaged-electron-app-probe.mjs`：最终 runner `1790468015649433000.log`，exit 0。早期失败 runner `1790467842769413000.log` 和 `1790467959237961000.log` 分别暴露测试清理竞态与过时模型请求计数。
