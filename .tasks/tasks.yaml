@@ -2387,3 +2387,191 @@ tasks:
         - {type: "test", check: "Request-level correction, forget, source and recovery", status: "passed", summary: "Assistant focused 1790471566742683000.log; real Worker/Pi memory probe 1790471132379238000.log; Worker refresh/backlog/pagination 1790471355685923000.log. All exited 0."}
         - {type: "review", check: "Independent read-only TASK-065 review", status: "passed", summary: "Reviewer /root/task043_readonly_review inspected 53786b6 and found no remaining card blocker. Limits: prior conversation history, unindexed legacy file review, semantic paraphrase."}
       follow_up_candidates: []
+  - id: TASK-066
+    title: "建立跨设备助理来源同步协议与持久队列"
+    status: ready
+    goal: "本地已授权的 Work/助理来源能可靠送达另一台机器，并以版本和撤回语义供云端唯一助理读取。"
+    scope:
+      in: ["Yuanpu 自有跨设备来源协议、设备身份与受众校验", "本地持久 outbox 和云端持久 inbox/ACK、内容快照读取、撤回与遗忘传播", "合成数据的断网、乱序、重复、重启、权限拒绝回归"]
+      out: ["迁移正在写入的 SQLite/JSONL 文件", "生产云端部署、企微连接转移和多主同步", "把完整 Work 历史自动加入助理提示词"]
+    constraints: ["以 docs/assistant-memory-proposal.md 的唯一写入者和来源版本/受众边界为准；远端必须能读取获授权的正文或受控产物快照，而不是本机绝对路径", "协议兼容旧本地 Home；设备认证、加密传输和请求限额在公网使用前必须落地；秘密不进事件、日志与测试制品", "单一 owner 修改共享协议，消费方经公开接口适配；集成 main 后才可标 done"]
+    forbidden: ["用 rsync/网盘双向同步运行中的助理 Home", "ACK 早于远端持久提交", "撤回后离线旧事件把内容复活"]
+    acceptance:
+      - type: assertion
+        expect: "两个设备身份提交合成来源，云端按来源 ID、版本、受众和内容摘要确认；断线及重启后从持久队列续传，重复/乱序提交不产生第二份有效事实"
+      - type: assertion
+        expect: "来源不可用与撤回、用户遗忘分别传播；撤回后云端拒绝旧内容读取与记忆注入；未授权设备、错误受众和过期版本被拒绝且有脱敏可查询状态"
+      - type: assertion
+        expect: "临时双 Home/loopback 故障探针记录每次 ACK、游标、来源版本和最后有效内容；独立复核协议与数据边界"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-050", "TASK-062"]
+    risk_level: L4
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["从 packages/yuanpu-protocol/src/assistant.ts、apps/runtime/src/assistant-source-host.ts、apps/runtime/src/assistant-worker.ts 与 packages/yuanpu-assistant 的来源存储接缝入手；先核对当前 IPC 与落盘来源状态，不把本地 source pump 当网络实现", "先做临时 Home 的协议/队列行为测试，再做双主机 loopback 故障测试与 pnpm check；云端真实网络与迁移留给后续卡；验收矩阵见 .tasks/verification/assistant-next-stage-acceptance.md"]
+    escalation_conditions: ["若来源不能形成可授权的独立快照，先收紧上传范围与内容契约，不复制整份 Work 数据库", "若撤回无法端到端收敛，阻断云端迁移而非容忍旧内容继续读取"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-067
+    title: "在云端运行权威助理并接入远程桌面"
+    status: pending
+    goal: "Linux 云端宿主持有唯一可写助理 Home、会话和企微连接，本地桌面通过受认证的服务接入并继续提供工作来源。"
+    scope:
+      in: ["无 Electron 的 Linux x64 Runtime/Assistant Worker 宿主和服务生命周期", "远程桌面认证、会话/状态订阅、来源同步接入及断线重连", "本地到云端的停写快照、备份/恢复、渠道配对与投递状态转移流程"]
+      out: ["飞书、微信、钉钉接入", "企业多租户与公开部署服务", "自动抢主或双活写入"]
+    constraints: ["同一时间只允许一个权威助理写入者；云端接管前本地停写并核对快照，失败时可回退且不能让企微两个连接同时消费", "凭据只在目标宿主单独配置；桌面与企微共享记忆但聊天 Session 独立；服务最小暴露且不占用 jump 现有 80/443 服务", "先以隔离合成数据部署；目标机 glibc 2.32、约 1.8 GiB RAM，需在实机验证 Linux x64 制品兼容与资源上限"]
+    forbidden: ["直接把真实 ~/.yuanpu 或企微密钥复制到云机当作部署方案", "本地与云端同时启动可写助理 Home", "界面断开就误判云端任务取消或盲目重放外部发送"]
+    acceptance:
+      - type: assertion
+        expect: "合成账号在 jump 上启动权威 Worker，关闭本地桌面后云端整理/调度仍受宿主策略运行；重开桌面后同一会话/记忆/队列状态可见，错误设备和会话访问被拒绝"
+      - type: assertion
+        expect: "迁移演练可核对旧端停写、快照完整性、来源 ACK 和渠道连接唯一性；故障回退只恢复一个 owner，未知外发状态不自动重发"
+      - type: assertion
+        expect: "记录 Linux 制品 SHA、目标机 ABI/内存/进程生命周期、备份恢复与服务认证证据；部署不影响 jump 既有服务"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-066"]
+    risk_level: L4
+    recommended_model: "gpt-6 astra"
+    investigation_hints: ["从 apps/runtime/src/index.ts、assistant-worker-manager.ts、apps/desktop/src/runtime-manager.ts、wecom-channel.ts 和 docs/assistant-memory-proposal.md 的云端权威边界入手；核对现有宿主 API 与 App 退出约束后再决定远程传输适配", "先在 CI 产出 Linux x64 制品，在 jump 的独立用户目录/用户级服务跑合成数据；先服务级迁移与恢复，再连接桌面 UI；验收由 TASK-068 独立执行"]
+    escalation_conditions: ["目标机资源或 ABI 不足则记录需求并更换制品/机器，不改既有线上服务", "任何双主、认证绕过或不可恢复迁移都阻断真实数据切换"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-068
+    title: "云端权威与跨设备同步阶段验收"
+    status: pending
+    goal: "独立证明本地工作来源到 jump 云端助理的真实网络闭环、唯一写入、恢复和桌面/企微接入边界。"
+    scope:
+      in: ["真实本地↔jump 网络路径与合成来源全旅程", "断网、重复、乱序、撤回、遗忘、重启、迁移/回退和客户端重连", "经授权的单次真实渠道/用户资料试点与脱敏证据记录"]
+      out: ["在验收卡中补做缺失的产品实现", "生产签名、多租户和其他 IM 平台", "未经范围确认上传私人历史"]
+    constraints: ["验收者独立于 TASK-066/067 主要实现者；先合成数据与故障注入，后进行有备份和回退点的真实资料试点", "逐场景记录 commit、制品 SHA、两机环境、真实/fixture 模式及 pass/fail/unverified；结果写 .tasks/verification/TASK-068/results.md", "任何双写、越权、撤回复活或无法恢复的数据丢失立即停止真实试点"]
+    forbidden: ["把 SSH 可达、拷贝目录或本地 loopback 通过当作云端同步验收", "把云端企微投递 accepted 当成真人已收件"]
+    acceptance:
+      - type: assertion
+        expect: "本地两个 Work 来源在云端形成准确当前版本；离线积压恢复后 ACK/游标收敛，无重复事实；来源撤回/遗忘后云端模型输入不含旧事实，原始本地 Work 不变"
+      - type: assertion
+        expect: "本地完整退出后云端 Worker 保持唯一可写且调度继续；远程桌面恢复连接可读同一助理状态；企微只有云端 owner，若做真实私聊则以用户收件确认单列结果"
+      - type: assertion
+        expect: "备份恢复和错误设备拒绝均实测；报告逐项分辨合成/真实、服务/GUI/渠道与未验证边界"
+    dependencies: ["TASK-067"]
+    risk_level: L4
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["场景表见 .tasks/verification/assistant-next-stage-acceptance.md；复用 TASK-050 的临时 Home/打包探针与 TASK-062 的撤回场景，但替换为真实本地↔jump 网络", "先跑最近行为测试和 pnpm check，再独立运行双机故障、迁移、恢复和桌面/渠道旅程；缺陷另建修复卡并回归"]
+    escalation_conditions: ["目标机不可部署、缺少合适 Linux 制品或无法提供真实渠道条件时按场景标 unverified，不把合成成功扩大为真实迁移"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-069
+    title: "Linux 与 Windows 独立助理业务验收"
+    status: ready
+    goal: "在目标平台的打包 App 中证明独立助理 Worker、来源记忆和退出回收可用，补足本机 macOS 验收的环境缺口。"
+    scope:
+      in: ["Linux x64 与 Windows x64 的当前 revision 打包制品和独立助理旅程", "Linux jump 无界面 Runtime/Worker 实机探针及 Linux/Windows GUI 打包探针", "跨平台差异、失败/未验证项和脱敏证据"]
+      out: ["云端来源同步与常驻部署", "生产签名、公网更新源和真实 Windows/Linux 企微账号", "其他 IM 平台"]
+    constraints: ["复用 TASK-021 平台 workflow 与 TASK-050 助理旅程，只补新助理行为；真实 GUI 必须在目标平台运行，jump 的 headless 成功只算 Linux 服务层", "临时 Home 与合成模型，不读取或复制真实个人数据；逐平台记录制品 SHA 和进程退出；非 TASK-050 主要实现者验收"]
+    forbidden: ["拿旧 TASK-021 打包通过当作助理平台通过", "拿构建、类型检查或 macOS 结果推断 Windows/Linux GUI 行为"]
+    acceptance:
+      - type: assertion
+        expect: "Linux/Windows 打包 App 分别启动 Runtime+Assistant Worker，初始化专属技能；两个 Work 来源整理后助理读取，修订/遗忘/撤回与重启持久，完整退出后无遗留子进程"
+      - type: assertion
+        expect: "Linux jump 上实跑与目标 ABI 兼容的无界面 SEA/Worker 并记录内存/退出；GUI 场景由 Linux Xvfb/桌面与 Windows runner/机器分别执行，缺环境项明确 unverified"
+      - type: assertion
+        expect: "结果写 .tasks/verification/TASK-069/results.md，保留每个平台的 revision、制品 SHA、探针、截图或状态记录及模型/渠道模式"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-050"]
+    risk_level: L3
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["复用 .github/workflows/task-021-platform-app.yml、apps/desktop/test/task-021-platform-app-probe.mjs 和 apps/desktop/test/task-050-packaged-assistant-probe.mjs；先查测试能否在 Windows/Linux 运行，必要时仅补平台适配", "先目标平台构建及 smoke，再打包 App 旅程与退出清理；独立核对 TASK-021 的旧证据和当前助理制品差异"]
+    escalation_conditions: ["jump 缺 Linux x64 SEA/Node 环境、Windows runner 不可用或 GUI 无法运行时保持对应场景 unverified，不以 headless 代替"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-070
+    title: "建立助理长期语义评测基准"
+    status: ready
+    goal: "用冻结的来源时间线、盲测标签和可复跑真实模型入口，衡量助理对用户的理解、工作审阅及建议质量。"
+    scope:
+      in: ["合成或经许可的多周来源时间线、纠正/遗忘/矛盾/来源撤回与工作完成证据案例", "离线回放、模型/提示词版本记录、独立标签与评分报告", "事实准确率/召回、无证据完成、建议有用性/打扰率、成本与延迟指标"]
+      out: ["把 packages/evals 作为生产依赖", "在每个真实 Work 运行 Docker/Vitest 评测", "在此卡宣称长期真实使用质量已通过"]
+    constraints: ["评测助理自身只发生在离线验收体系；产品助理在运行时评估的是用户工作内容，这两种职责分开", "holdout 与阈值在首次评测前冻结；来源正文与人工标签分离，私有样本只保存在受控位置，仓库提交合成样本和脱敏统计", "真实模型至少三次重复，报告分母和场景拆分；保留可复现实验版本"]
+    forbidden: ["拿四字口令或单次 loopback 回复代替长期理解", "评完再修改 holdout 或阈值掩盖失败", "把模型自述当作工作完成事实"]
+    acceptance:
+      - type: assertion
+        expect: "数据集覆盖兴趣/偏好/工作/经历/知识的有来源表达与不确定性，跨会话长期项目、承诺、矛盾、过期、纠正和遗忘；标签含正确事实、应克制、建议机会和证据等级"
+      - type: assertion
+        expect: "同一版本可回放 30/90 天时间线并输出逐案例与汇总评分、成本/延迟、模型版本和失败原因；严重越权、遗忘复活、无证据完成单列硬失败"
+      - type: assertion
+        expect: "评分规则和首轮门槛见 .tasks/verification/assistant-next-stage-acceptance.md；评测运行不改生产助理 Home，不依赖 packages/evals 的 Docker harness"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-050"]
+    risk_level: L3
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["入口 packages/yuanpu-assistant/src/executor.ts、来源/记忆/工作审阅/建议模块及 apps/runtime/test 的真实 Worker/Pi 探针；packages/evals/README.md 和 scripts/verification/jev-evidence-review.mjs 仅借鉴离线案例/证据方法", "先确定固定案例与盲测标签，再实现临时 Home/虚拟时钟回放；先跑最近行为测试、脚本自身检验及 pnpm check，真实模型不入普通 CI"]
+    escalation_conditions: ["私有语料缺少使用授权则只用合成数据并标明外部效度限制", "如果评分受模型版本/上下文变化影响，保留原始分组结果，不用单个均值掩盖"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
+  - id: TASK-071
+    title: "长期语义质量业务验收"
+    status: pending
+    goal: "独立判断真实模型下助理是否持续、准确且克制地理解用户并整理工作，同时记录真实使用反馈。"
+    scope:
+      in: ["冻结 holdout 的真实模型重复评测与独立盲审", "跨自然日的建议反馈和记忆纠正观察", "场景失败分类、成本/延迟和改进回归证据"]
+      out: ["在验收卡内修复助理语义实现", "把短期虚拟时钟回放宣称为长期真人使用", "自动上传完整真实用户资料到云端"]
+    constraints: ["验收者独立于 TASK-070 基准主要实现者；先锁定模型/提示词/数据集与阈值，再运行 holdout", "所有语义主张写明样本数、标签来源、模型版本、真实/合成模式和不确定性；真实用户反馈仅以用户授权的脱敏摘要入库", "结果写 .tasks/verification/TASK-071/results.md；硬失败不得用平均分抵消"]
+    forbidden: ["用静态单测或一次正确口令宣称语义质量通过", "把未提出建议一律算正确而回避机会召回", "把用户未确认的模型推断写成用户事实"]
+    acceptance:
+      - type: assertion
+        expect: "在冻结 holdout 上三次真实模型运行，逐案审阅事实、来源、完成证据、纠正/遗忘、建议时机；达到预登记门槛且严重越权/撤回复活/无证据完成均为零"
+      - type: assertion
+        expect: "30/90 天回放与至少跨两个自然周的试用观察分别报告；有实际反馈的建议统计有用/无用与打扰原因，缺试用或反馈则纵向部分 unverified"
+      - type: assertion
+        expect: "发布逐场景 pass/fail/unverified、分母、置信区间、成本/延迟、模型和产品 revision；失败交独立修复卡并在原 holdout 复测，不重写历史结果"
+    dependencies: ["TASK-070"]
+    risk_level: L3
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["以 .tasks/verification/assistant-next-stage-acceptance.md 的指标和 TASK-070 冻结语料为准；对照 TASK-050 的单次真实企微口令边界", "先验证基准完整性，再运行真实模型和盲审；自然日观察另记日期及版本，不能由虚拟时钟或 CI 替代"]
+    escalation_conditions: ["没有真实模型凭据、获许可语料或足够自然日观察时明确 unverified；发现高风险错误立即停止扩大投递范围"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
+      follow_up_candidates: []
