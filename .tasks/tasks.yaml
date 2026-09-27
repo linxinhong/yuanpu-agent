@@ -1830,7 +1830,7 @@ tasks:
         expect: "七项默认技能全部交付并从助理专属目录加载，主动回顾与前期六项技能形成真实闭环；沿用前阶段无界面/来源适配/单写入边界证据，不把本地通过宣称为云端已可部署"
       - type: command
         run: "pnpm check"
-    dependencies: ["TASK-049", "TASK-062"]
+    dependencies: ["TASK-049", "TASK-062", "TASK-065"]
     risk_level: "L3"
     recommended_model: "gpt-6 sol"
     investigation_hints: ["先复用两个阶段验证的有效证据，再执行新增 UI/主动建议组合；历史 .tasks/verification/TASK-021 可参考但不能替代新版本", "pnpm check、pnpm build:native && pnpm smoke:native、pnpm package:desktop；仅对可用平台运行，其他保持 unverified", "真人企微外发仅使用明确授权的测试目标；无需第二名真人、真实群聊或其他 IM 平台"]
@@ -2344,4 +2344,36 @@ tasks:
         - {type: "test", check: "independent Electron legacy retest", status: "passed", summary: "TASK-060 independent verifier reran real isolated Electron+preload+Runtime with correctly persisted old default Pi JSONL. Legacy messages display and composer is read-only; script exited 0. Evidence .tasks/verification/TASK-060/results.md and electron-legacy-readonly.png."}
         - {type: "command", check: "pnpm check on integrated main", status: "passed", summary: "Full build, TypeScript and test gate passed on main c74ef49 after repair and verification merges; apps/runtime 128/128."}
         - {type: "limitation", check: "platform scope", status: "unverified", summary: "Electron retest executed on macOS only; Windows/Linux packaged SEA not exercised."}
+      follow_up_candidates: []
+  - id: TASK-065
+    title: "让持续助理会话读取最新个人记忆"
+    status: ready
+    goal: "助理个人记忆被纠正、遗忘或来源撤销后，已打开的桌面与企业微信助理会话在下一次模型请求中只使用仍有效的最新版本。"
+    scope:
+      in: ["助理 Worker 单写入记忆库到 Pi 助理会话的动态个人记忆读取", "版本、受众、来源有效性和提示词预算边界", "同会话纠正/遗忘/重启与渠道共用路径回归"]
+      out: ["把原始 Work 对话或文件自动注入助理或新 Work", "外部模型语义质量、企微真实账号验收和云端同步"]
+    constraints: ["保持独立 Assistant Home、冻结的 SOUL/技能身份与 Work 会话隔离；只读取 personal/local-user 的已提交有效记忆", "下一次模型请求读取当前版本，不从旧 session prompt 快照或对话历史复活已纠正、遗忘或撤销的记忆", "记忆内容是资料而非指令，限制单回合字数/条数；无法确认有效性时拒绝注入"]
+    forbidden: ["仅在新建会话读取记忆", "直接拼入不受控的工作材料或跨受众记忆", "把已撤销来源的旧事实继续写入后续模型请求"]
+    acceptance:
+      - type: assertion
+        expect: "临时 Home 的真实 Worker/Pi 同一助理 session：导入纯测试记忆、纠正为第二版后，下一次模型请求只含第二版；重启后仍如此。"
+      - type: assertion
+        expect: "遗忘与来源撤销后，下次请求不再含旧文本；其他仍有效的个人记忆保留，工作/其他受众内容不注入，容量超限时有确定性的有界选择。"
+      - type: assertion
+        expect: "桌面和企业微信入口复用该会话执行路径；离线/重复事件与重试不导致旧记忆复活；独立复核者核对读取时序与受众隔离。"
+      - type: command
+        run: "pnpm check"
+    dependencies: ["TASK-049", "TASK-062"]
+    risk_level: "L3"
+    recommended_model: "gpt-6 sol"
+    investigation_hints: ["TASK-050 红测 apps/runtime/test/task-050-memory-refresh-probe.mjs：真实 Worker/Pi 同 session 的第二回合未看到纠正记忆，runner 1790469379939975000.log", "packages/yuanpu-assistant/src/executor.ts 从 sessions/system-prompts 读取冻结提示词；packages/agent 的 systemPrompt 回调可按 provider request 求值；apps/runtime/src/assistant-worker.ts 持有单写入记忆库", "先让红测变绿，再加遗忘/来源撤销与受众负向回归，最后 Node24 pnpm check 和独立阶段复测"]
+    escalation_conditions: ["若 Pi 请求级提示词无法保证当前版本与恢复语义，先固定最小差异并调整助理会话契约，不改 Pi 上游镜像", "若当前来源状态无法可靠核实，拒绝把该记忆用于新模型请求"]
+    result:
+      owner: null
+      attempts: 0
+      claimed_at: null
+      completed_at: null
+      worktree: null
+      branch: null
+      evidence: []
       follow_up_candidates: []
