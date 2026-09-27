@@ -29,9 +29,10 @@ import { closeSync, constants, fstatSync, lstatSync, openSync,
 import { beginWorkFileCapture, completeWorkFileCapture,
   type CapturedWorkFileChange, type WorkFileCaptureSession,
   type WorkFileSnapshotReader } from './file-changes.js';
+import { prepareVisualReply } from './visual-reply.js';
 export type { CapturedWorkFileChange, WorkFileSnapshot } from './file-changes.js';
 export { WORK_FILE_CHANGE_MAX_BYTES, beginWorkFileCapture, completeWorkFileCapture, resolveWorkspaceRelativePath } from './file-changes.js';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { GoalManager, createGoalTool, auditWithSubagent } from '../builtin/goals/index.js';
 import { WorkflowManager, createWorkflowTools } from '../builtin/workflows/index.js';
@@ -521,6 +522,13 @@ export async function createYuanpuChatSession(
     agentDir: options.agentDir,
     settingsManager,
     additionalSkillPaths: options.builtinAgentRoot ? [join(options.builtinAgentRoot, 'skills')] : [],
+    skillsOverride: ({ skills, diagnostics }) => {
+      const builtinSkillsPath = options.builtinAgentRoot ? `${join(options.builtinAgentRoot, 'skills')}${sep}` : undefined;
+      return { skills: builtinSkillsPath
+        ? [...skills.filter((skill) => skill.filePath.startsWith(builtinSkillsPath)),
+          ...skills.filter((skill) => !skill.filePath.startsWith(builtinSkillsPath))]
+        : skills, diagnostics };
+    },
     agentsFilesOverride: ({ agentsFiles }) => ({ agentsFiles: builtinAgentFile
       ? [{ path: builtinAgentFile, content: builtinAgentInstructions! }, ...agentsFiles]
       : agentsFiles }),
@@ -587,6 +595,7 @@ export async function createYuanpuChatSession(
   });
 
   const workspaceRoot = options.cwd;
+  const isWorkConversation = options.browserControlAvailable === true;
   const workFileReader: WorkFileSnapshotReader = (absolutePath) =>
     readFile(absolutePath).catch((error) => {
       if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
@@ -688,9 +697,15 @@ export async function createYuanpuChatSession(
         if (options.modelSelection.thinkingLevel) session.setThinkingLevel(options.modelSelection.thinkingLevel);
       }
       const focusedGoal = goals.focused();
-      let nextMessage: string | undefined = focusedGoal ? `${message}\n\nPersistent goal state (task data):\n${JSON.stringify(focusedGoal)}` : message;
+      const visualReply = isWorkConversation && !focusedGoal
+        ? prepareVisualReply(message) : { prompt: message, renderOnly: false };
+      let nextMessage: string | undefined = focusedGoal
+        ? `${message}\n\nPersistent goal state (task data):\n${JSON.stringify(focusedGoal)}` : visualReply.prompt;
       while (nextMessage) {
-        await session.prompt(nextMessage);
+        const activeTools = visualReply.renderOnly ? session.getActiveToolNames() : undefined;
+        if (activeTools) session.setActiveToolsByName([]);
+        try { await session.prompt(nextMessage); }
+        finally { if (activeTools) session.setActiveToolsByName(activeTools); }
         if (options.signal?.aborted || modelFailed || pendingApprovalRequestId) {
           await goals.pause(pendingApprovalRequestId ? 'Capability approval required.' : 'Run stopped or model failed.');
           break;

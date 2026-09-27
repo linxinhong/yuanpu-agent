@@ -11,6 +11,8 @@ The Work chat renders ordinary Markdown around two visual formats. Use a visual 
 
 Put a complete, closed `html-preview` fenced code block between Markdown paragraphs. It becomes a preview card after the closing fence arrives. Write self-contained, static HTML with inline CSS and SVG; SVG is useful for precise boxes, arrows, and labels. The card supplies its own preview, enlarge, source, download, and add-to-conversation controls.
 
+Put `html-preview` immediately after the opening backticks. Do not put an `<html-preview>` element inside a block tagged `html`; that spelling is accepted only as a compatibility fallback.
+
 ````markdown
 请求进入运行时，再交给工具层处理：
 

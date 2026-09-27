@@ -18,10 +18,13 @@ test('Work Pi session loads bundled AGENTS.md before workspace context and disco
   await writeFile(join(workspace, 'AGENTS.md'), '# Workspace instructions\n\nPROJECT_CONTEXT_MARKER\n');
 
   let systemPrompt = '';
+  const requests = [];
   const server = createServer(async (request, response) => {
     let body = '';
     for await (const chunk of request) body += chunk;
-    const messages = JSON.parse(body).messages;
+    const payload = JSON.parse(body);
+    requests.push(payload);
+    const messages = payload.messages;
     systemPrompt = String(messages.find((message) => message.role === 'system')?.content ?? '');
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     response.end('data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture","choices":[{"index":0,"delta":{"role":"assistant","content":"Ready."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
@@ -51,4 +54,16 @@ test('Work Pi session loads bundled AGENTS.md before workspace context and disco
   assert.match(systemPrompt, /Save user-facing artifacts with relative paths under cwd, not \/tmp/);
   assert.match(systemPrompt, /Do not create a file, start a server, or navigate the browser merely to display a diagram/);
   assert.ok(systemPrompt.indexOf('Yuanpu Agent conversation guide') < systemPrompt.indexOf('PROJECT_CONTEXT_MARKER'));
+  assert.ok(systemPrompt.indexOf('<name>markdown-visuals</name>') < systemPrompt.indexOf('<name>low-ai-ui-design</name>'));
+
+  await chat.prompt('你生成一个架构图给我看下吧');
+  const visualRequest = requests.at(-1);
+  assert.match(JSON.stringify(visualRequest.messages.at(-1)), /yuanpu_visual_reply_contract/);
+  assert.match(JSON.stringify(visualRequest.messages.at(-1)), /do not inspect the workspace or call tools/);
+  assert.equal(visualRequest.tools?.length ?? 0, 0);
+
+  await chat.prompt('请根据当前项目代码生成架构图');
+  const projectRequest = requests.at(-1);
+  assert.ok(projectRequest.tools.length > 0);
+  assert.match(JSON.stringify(projectRequest.messages.at(-1)), /If the user names a specific project/);
 });

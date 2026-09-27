@@ -14,6 +14,8 @@ Save user-facing files in the current Work conversation directory (the `cwd` in 
 
 Use a normal code fence when the user needs to read or copy source code. Use `html-preview` when the user benefits from seeing the rendered result. For detailed examples and image path rules, read the bundled `markdown-visuals` skill.
 
+If the user simply asks to **see an architecture diagram or flowchart**, return a complete `html-preview` block in that reply, using static HTML/CSS or inline SVG. For example, “你生成一个架构图给我看下吧” calls for a visible example, with no file inspection, command, installation, or browser navigation. If the user names a particular project, inspect what is needed for accuracy, then still include the rendered block in the reply. Do not treat a PNG file path or a prose description as the diagram itself.
+
 ## Shared browser
 
 The browser in the right sidebar is shared with the user. For requests to read or operate that browser, read the bundled `browser-control` skill and use the host capabilities it describes.

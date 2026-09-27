@@ -16,6 +16,13 @@ export function completePreviewFence(token: Tokens.Code, language: string): bool
   return new RegExp(`(?:^|\\n)${marker === '~' ? '~' : '`'}{${count},}[ \\t]*(?:\\n|$)`).test(token.raw.slice(opening[0].length));
 }
 
+/** Accept a common model spelling: an html fence wrapping an html-preview element. */
+export function wrappedHtmlPreview(token: Tokens.Code): string | undefined {
+  if (token.lang?.trim() !== 'html' || !completePreviewFence(token, 'html')) return undefined;
+  const match = token.text.match(/^\s*<html-preview>\s*([\s\S]*?)\s*<\/html-preview>\s*$/i);
+  return match?.[1]?.trim() || undefined;
+}
+
 /** The same inert document is used in the sandbox and for downloads. */
 export function htmlPreviewDocument(content: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{box-sizing:border-box}*,*:before,*:after{box-sizing:inherit}body{margin:0;padding:16px;color:#20272d;background:#fff;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}svg{display:block;max-width:100%;height:auto;margin:auto}svg:not([width]){width:min(100%,760px)}</style></head><body>${content}</body></html>`;

@@ -4,7 +4,7 @@ import { marked, type Token, type Tokens } from 'marked';
 import { HtmlPreviewCard } from './html-preview-card.js';
 import { MermaidPreviewCard } from './mermaid-preview-card.js';
 import { MessageImage, type ImagePreview } from './message-image.js';
-import { completeHtmlPreview, completePreviewFence } from './preview-content.js';
+import { completeHtmlPreview, completePreviewFence, wrappedHtmlPreview } from './preview-content.js';
 import { splitTextByFilePaths } from './work-file-links.js';
 
 type RenderOptions = {
@@ -96,6 +96,12 @@ function blocks(tokens: Token[], options: RenderOptions): ReactNode[] {
         if (code.lang?.trim() === 'html-preview') {
           return completeHtmlPreview(code)
             ? <HtmlPreviewCard key={key} html={code.text} onAddToConversation={options.onAddToConversation} />
+            : <div key={key} className="html-preview-pending" role="status">正在生成图示…</div>;
+        }
+        if (code.lang?.trim() === 'html' && /^\s*<html-preview>/i.test(code.text)) {
+          const wrapped = wrappedHtmlPreview(code);
+          return wrapped
+            ? <HtmlPreviewCard key={key} html={wrapped} onAddToConversation={options.onAddToConversation} />
             : <div key={key} className="html-preview-pending" role="status">正在生成图示…</div>;
         }
         const language = code.lang?.trim();

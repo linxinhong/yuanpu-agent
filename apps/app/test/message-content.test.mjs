@@ -8,7 +8,7 @@ import { register } from 'tsx/esm/api';
 
 register();
 const { MessageContent } = await import('../src/shared/message-content.tsx');
-const { completeHtmlPreview, completePreviewFence, htmlPreviewDocument, safeImageSource } = await import('../src/shared/preview-content.ts');
+const { completeHtmlPreview, completePreviewFence, htmlPreviewDocument, safeImageSource, wrappedHtmlPreview } = await import('../src/shared/preview-content.ts');
 
 test('assistant messages render Markdown structure without executing raw HTML', () => {
   const html = renderToStaticMarkup(createElement(MessageContent, {
@@ -56,4 +56,15 @@ test('mermaid graph waits for a complete fence before rendering', () => {
   assert.match(rendered, /正在生成图表/);
   assert.match(rendered, /完成。/);
   assert.match(renderToStaticMarkup(createElement(MessageContent, { text: partial })), /正在生成图表/);
+});
+
+test('an html fence wrapping html-preview displays a card instead of source code', () => {
+  const input = '说明\n\n```html\n<html-preview>\n<div>架构图</div>\n</html-preview>\n```\n\n结束';
+  const token = marked.lexer(input).find((item) => item.type === 'code');
+  assert.equal(wrappedHtmlPreview(token), '<div>架构图</div>');
+  const rendered = renderToStaticMarkup(createElement(MessageContent, { text: input }));
+  assert.match(rendered, /aria-label="图示预览"/);
+  assert.match(rendered, /结束/);
+  assert.doesNotMatch(rendered, /<pre><code>&lt;html-preview&gt;/);
+  assert.equal(wrappedHtmlPreview(marked.lexer('```html\n<div>普通代码</div>\n```')[0]), undefined);
 });
