@@ -143,7 +143,7 @@ export interface SaveModelSettingsInput {
 }
 
 export type DesktopConversationSurface = 'work' | 'assistant';
-export type DesktopTranscriptSurface = DesktopConversationSurface | 'assistantArchive';
+export type DesktopTranscriptSurface = DesktopConversationSurface | 'assistantAll' | 'assistantArchive';
 
 export interface WorkConversation {
   id: string;
@@ -325,6 +325,7 @@ export interface DesktopTranscriptMessage {
   role: 'user' | 'assistant';
   text: string;
   at: string;
+  channel?: 'desktop' | 'wecom';
   run?: DesktopReplyRunInfo;
 }
 

@@ -300,6 +300,15 @@ export class AssistantHostService {
     return this.store.transcript(this.store.desktop().conversationId);
   }
 
+  timeline(): DesktopTranscriptMessage[] {
+    const desktop = this.transcript().map((message) => ({ ...message, channel: 'desktop' as const }));
+    const link = this.store.wecomLink();
+    if (!link) return desktop;
+    const wecom = this.store.transcript(link.conversationId)
+      .map((message) => ({ ...message, channel: 'wecom' as const }));
+    return [...desktop, ...wecom].sort((a, b) => a.at.localeCompare(b.at));
+  }
+
   sourceChanges(afterEventId = 0): Array<{ eventId: number; change: AssistantSourceChange }> {
     return this.store.sourceChanges(afterEventId);
   }

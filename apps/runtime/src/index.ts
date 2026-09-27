@@ -1540,7 +1540,8 @@ async function serve(): Promise<void> {
 
       if (url.pathname === RUNTIME_ROUTES.desktopTranscript && request.method === 'GET') {
         const surface = url.searchParams.get('surface');
-        if (surface !== 'work' && surface !== 'assistant' && surface !== 'assistantArchive') {
+        if (surface !== 'work' && surface !== 'assistant' && surface !== 'assistantAll'
+          && surface !== 'assistantArchive') {
           response.statusCode = 400;
           response.end(JSON.stringify({ error: 'Unknown desktop conversation surface.' }));
           return;
@@ -1556,6 +1557,10 @@ async function serve(): Promise<void> {
         }
         if (surface === 'assistant') {
           response.end(JSON.stringify(assistantHost.transcript()));
+          return;
+        }
+        if (surface === 'assistantAll') {
+          response.end(JSON.stringify(assistantHost.timeline()));
           return;
         }
         if (surface === 'assistantArchive') {

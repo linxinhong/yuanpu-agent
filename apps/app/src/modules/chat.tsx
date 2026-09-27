@@ -52,6 +52,7 @@ type ChatMessage = {
   role: 'user' | 'assistant' | 'error' | 'notice';
   text: string;
   at?: string;
+  channel?: DesktopTranscriptMessage['channel'];
   tools?: ToolState[];
   process?: LiveTool[];
   run?: ReplyRunInfo;
@@ -435,7 +436,8 @@ export function ChatPanel({
   });
   const transcriptQuery = useQuery({
     queryKey: ['assistant', 'transcript', surface, workConversationId],
-    queryFn: () => desktop!.getDesktopTranscript(surface, surface === 'work' ? workConversationId : undefined,
+    queryFn: () => desktop!.getDesktopTranscript(surface === 'assistant' ? 'assistantAll' : surface,
+      surface === 'work' ? workConversationId : undefined,
       undefined, surface === 'work' ? 31 : undefined),
     enabled: active && Boolean(desktop) && (surface !== 'work' || Boolean(workConversationId)),
     refetchInterval: active ? 3000 : false,
@@ -521,7 +523,9 @@ export function ChatPanel({
         const previous = previousByEntryId.get(item.id);
         const sameMessage = previous?.role === item.role && previous.text === item.text;
         const run = item.role === 'assistant' ? (sameMessage ? previous?.run : undefined) ?? findReplyRun(surface, item.id, item.text, item.at) ?? item.run : undefined;
-        return sameMessage ? { ...previous, entryId: item.id, at: item.at, run } : { id: nextId.current++, entryId: item.id, role: item.role, text: item.text, at: item.at, run };
+        return sameMessage ? { ...previous, entryId: item.id, at: item.at, channel: item.channel, run }
+          : { id: nextId.current++, entryId: item.id, role: item.role, text: item.text,
+            at: item.at, channel: item.channel, run };
       })
       : workArchived ? [] : surface === 'assistant'
         ? [{ ...initialMessages[0]!, text: assistantGreeting }]
@@ -1292,7 +1296,7 @@ export function ChatPanel({
           </div>
           {surface === 'assistant' && <div className="assistant-channel-state" role="status">
             {archiveOpen ? '旧助理会话归档 · 只读' : assistantLinkQuery.data?.linked
-              ? '已绑定企业微信私聊 · 双渠道对话独立'
+              ? '桌面与企业微信消息汇总 · 上下文独立'
               : assistantLinkQuery.error ? '助理连接状态不可用' : '桌面助理 · 可在设置中绑定企业微信私聊'}
             <button type="button" className="runtime-link" onClick={() => setArchiveOpen((value) => !value)}>
               {archiveOpen ? '返回助理对话' : '查看旧助理会话'}
@@ -1427,6 +1431,9 @@ export function ChatPanel({
                 <div className="message-label">
                   {message.role === 'user' ? '你' : message.role === 'error' ? '运行错误' : 'YuanpuAgent'}
                 </div>
+                {surface === 'assistant' && message.channel && <span className="assistant-message-channel">
+                  {message.channel === 'wecom' ? '企业微信' : '桌面'}
+                </span>}
                 <div className="message-body">
                   {message.process?.length ? <ProcessList tools={message.process} onOpen={(tool) => {
                     setActivityOpen(true); setActivityTab(tool.category === '子智能体' ? 'subagents' : 'trajectory');
@@ -1543,6 +1550,7 @@ export function ChatPanel({
                   onClick={() => setRedactionPreviewEnabled((value) => !value)}><AppIcon name={redactionPreviewEnabled ? 'shield-filled' : 'shield'} /></button>
               </div>
               {(archiveOpen || workArchived) && <span className="composer-hint">{workArchived ? workConversationId === 'default' ? '旧工作归档只读' : '会话已归档 · 只读' : '原桌面会话归档只读'}</span>}
+              {surface === 'assistant' && !archiveOpen && <span className="composer-hint">此处发送到桌面助理</span>}
               {surface === 'work' && <div ref={modelControlsRef} className="composer-runtime-controls">
                 <button type="button" className="composer-model-button" aria-label="选择模型" aria-expanded={modelOpen}
                   onClick={() => { setContextOpen(false); setModelOpen((value) => !value); }}>

@@ -124,6 +124,8 @@ test('real Runtime HTTP accepts desktop assistant once and two independent clien
   assert.equal(done.output.message, 'Assistant live reply.');
   const transcript = (await isolatedClient(base, token, '/v1/desktop/transcript?surface=assistant')).body;
   assert.deepEqual(transcript.map((item) => item.role), ['user', 'assistant']);
+  const timeline = (await isolatedClient(base, token, '/v1/desktop/transcript?surface=assistantAll')).body;
+  assert.deepEqual(timeline.map((item) => item.channel), ['desktop', 'desktop']);
   assert.equal(fixture.calls, 1);
 });
 
@@ -175,6 +177,10 @@ test('WeCom ChannelRouter and desktop use one real Assistant Worker with separat
   assert.equal(replies[0].content, 'Assistant live reply.');
   assert.equal(fixture.calls, 2);
   assert.notEqual(metadata.assistantHost.desktop().sessionId, metadata.assistantHost.wecomLink().sessionId);
+  const timeline = service.timeline();
+  assert.deepEqual(timeline.map((item) => item.channel).sort(), ['desktop', 'desktop', 'wecom', 'wecom']);
+  assert.equal(timeline.find((item) => item.channel === 'wecom' && item.role === 'user')?.text, 'wecom live');
+  assert.equal(timeline.find((item) => item.channel === 'wecom' && item.role === 'assistant')?.text, 'Assistant live reply.');
   assert.equal(manager.workerPid > 0, true);
   await router.close();
 });
