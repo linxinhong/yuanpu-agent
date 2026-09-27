@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -20,6 +20,73 @@ async function temporaryHome(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   return join(root, 'assistant');
 }
+
+test('interactive personal memory context follows corrections, forget and source withdrawal', async (t) => {
+  const home = await temporaryHome(t);
+  const host = fakeHost();
+  const repo = await AssistantMemoryRepository.open(home);
+  t.after(() => repo.close());
+  const base = { section: 'memories', kind: 'explicit', audience: person,
+    context: '测试偏好', verifiedAt: now, evidence: [], dependsOn: [],
+    manualAuthority: true, reason: 'User supplied' };
+  await repo.commit({ ...base, id: 'current-preference', expectedVersion: 0,
+    revisionId: 'preference-v1', text: '蓝色纸鹤' });
+  await repo.commit({ ...base, id: 'other-audience', audience: other, expectedVersion: 0,
+    revisionId: 'other-v1', text: '其他用户秘密' });
+  await repo.commit({ ...base, id: 'work-note', section: 'work', expectedVersion: 0,
+    revisionId: 'work-note-v1', text: '工作原文秘密' });
+  const old = await repo.get('current-preference');
+  await repo.commit({ ...old, expectedVersion: 1, revisionId: 'preference-v2',
+    text: '绿色纸鹤', reason: 'User correction' });
+  let current = await repo.personalPromptContext();
+  assert.match(current, /绿色纸鹤/);
+  assert.doesNotMatch(current, /蓝色纸鹤|其他用户秘密|工作原文秘密/);
+
+  const sourceId = 'work-turn:fixture:one';
+  const contentRef = 'work-content:fixture-one';
+  repo.sources.enqueuePage('work', '0', { nextCursor: '1', events: [{ eventId: '1',
+    change: change(sourceId, 'work-v1', contentRef) }] });
+  host.current.set(sourceId, { status: 'available', sourceVersion: 'work-v1' });
+  host.contents.set(contentRef, { status: 'available', sourceVersion: 'work-v1', text: '来源内容' });
+  await repo.processNext(host);
+  await repo.commit({ ...base, id: 'source-bound', kind: 'observed', manualAuthority: false,
+    expectedVersion: 0, revisionId: 'source-bound-v1', text: '来源支持的偏好',
+    evidence: [{ sourceId, sourceVersion: 'work-v1', observedAt: now }] });
+  await repo.commit({ ...base, id: 'dependent-memory', kind: 'inferred', manualAuthority: false,
+    expectedVersion: 0, revisionId: 'dependent-v1', text: '由来源推断的偏好',
+    dependsOn: ['source-bound'] });
+  current = await repo.personalPromptContext();
+  assert.match(current, /来源支持的偏好/);
+  assert.match(current, /由来源推断的偏好/);
+  assert.doesNotMatch(await repo.personalPromptContext(8_000, false), /来源支持的偏好|由来源推断的偏好/);
+  repo.sources.database.prepare("UPDATE source_current SET availability='temporarily_unavailable' WHERE source_id=?")
+    .run(sourceId);
+  assert.doesNotMatch(await repo.personalPromptContext(), /来源支持的偏好|由来源推断的偏好/);
+  repo.sources.database.prepare("UPDATE source_current SET availability='available' WHERE source_id=?")
+    .run(sourceId);
+  await repo.forget('current-preference');
+  current = await repo.personalPromptContext();
+  assert.doesNotMatch(current, /绿色纸鹤/);
+  assert.match(current, /来源支持的偏好/);
+  repo.sources.enqueuePage('work', '1', { nextCursor: '2', events: [{ eventId: '2',
+    change: change(sourceId, 'deleted-v1', undefined, 'deleted') }] });
+  host.current.set(sourceId, { status: 'deleted', sourceVersion: 'deleted-v1' });
+  await repo.processNext(host);
+  assert.doesNotMatch(await repo.personalPromptContext(), /来源支持的偏好/);
+  assert.equal(await repo.personalPromptContext(), '');
+});
+
+test('unindexed legacy core files are preserved and excluded until reviewed', async (t) => {
+  const home = await temporaryHome(t);
+  const path = join(home, 'memories', 'USER.md');
+  await mkdir(join(home, 'memories'), { recursive: true });
+  await writeFile(path, '# About the user\n\nLegacy user fact.\n');
+  const repo = await AssistantMemoryRepository.open(home);
+  t.after(() => repo.close());
+  assert.deepEqual(await repo.unindexedLegacyCoreFiles(), [path]);
+  assert.doesNotMatch(await repo.personalPromptContext(), /Legacy user fact/);
+  assert.equal(await readFile(path, 'utf8'), '# About the user\n\nLegacy user fact.\n');
+});
 
 function fakeHost() {
   const feeds = new Map();
@@ -269,7 +336,7 @@ test('forget includes core summary and all same-source records; a recorded forge
   reopened.close();
 });
 
-test('deleting one of two sources retains a supported claim; forgetting does not erase its other source', async (t) => {
+test('partial source withdrawal preserves a record but excludes stale mixed text until correction', async (t) => {
   const home = await temporaryHome(t);
   const host = fakeHost();
   const repo = await AssistantMemoryRepository.open(home);
@@ -286,8 +353,9 @@ test('deleting one of two sources retains a supported claim; forgetting does not
     sourceVersion: `v${index + 1}`, observedAt: now }));
   await repo.commit({ id: 'two-source-claim', expectedVersion: 0, revisionId: 'two-r1',
     section: 'memories', kind: 'observed', audience: person, context: '项目证据',
-    verifiedAt: now, text: '项目证据已核对。', evidence, dependsOn: [],
+    verifiedAt: now, text: '来源一事实；来源二事实。', evidence, dependsOn: [],
     manualAuthority: false, reason: 'Two sources' });
+  assert.match(await repo.personalPromptContext(), /来源一事实/);
   repo.sources.enqueuePage('work', '2', { nextCursor: '3', events: [{ eventId: '3',
     change: change('work:one', 'deleted', undefined, 'deleted') }] });
   host.current.set('work:one', { status: 'deleted', sourceVersion: 'deleted' });
@@ -295,6 +363,18 @@ test('deleting one of two sources retains a supported claim; forgetting does not
   const remaining = await repo.get('two-source-claim');
   assert.equal(remaining.status, 'active');
   assert.deepEqual(remaining.evidence.map((ref) => ref.sourceId), ['work:two']);
+  assert.doesNotMatch(await repo.personalPromptContext(), /来源一事实|来源二事实/);
+  await repo.commit({ ...remaining, expectedVersion: remaining.version,
+    revisionId: 'two-r3', text: '来源二事实。', reason: 'Reviewed remaining source' });
+  assert.match(await repo.personalPromptContext(), /来源二事实/);
+  assert.doesNotMatch(await repo.personalPromptContext(), /来源一事实/);
+  const reviewed = await repo.get('two-source-claim');
+  await repo.commit({ ...reviewed, expectedVersion: reviewed.version,
+    revisionId: 'two-r4', text: '临时表述。', reason: 'Draft wording' });
+  const draft = await repo.get('two-source-claim');
+  await repo.commit({ ...draft, expectedVersion: draft.version,
+    revisionId: 'two-r5', text: '来源一事实；来源二事实。', reason: 'Reverted wording' });
+  assert.doesNotMatch(await repo.personalPromptContext(), /来源一事实|来源二事实/);
   await repo.forget('two-source-claim');
   assert.equal(repo.sources.isForgotten('work:two'), true);
   assert.equal(repo.sources.isForgotten('work:one'), true,

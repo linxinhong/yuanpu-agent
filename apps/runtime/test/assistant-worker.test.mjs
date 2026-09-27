@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { AssistantMemoryRepository } from '@yuanpu-agent/assistant';
 
 const entry = resolve(import.meta.dirname, '../dist/index.cjs');
 const childrenByHome = new Map();
@@ -123,6 +124,88 @@ test('headless Worker performs local daily and weekly checks, then stops with th
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checkpoints').get().n, 2);
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM automation_checks').get().n, 2);
   } finally { database.close(); }
+});
+
+test('a refresh received during a source scan starts a second scan before the periodic timer', async (t) => {
+  const assistantHome = await home(t);
+  const { child } = startWorker(assistantHome);
+  let firstWorkRequest;
+  let workScans = 0;
+  let receivedFirst;
+  const first = new Promise((resolveFirst) => { receivedFirst = resolveFirst; });
+  child.on('message', (message) => {
+    if (message.kind !== 'source-request' || message.method !== 'listChanges') return;
+    if (message.args[0] === 'work') {
+      workScans++;
+      if (workScans === 1) {
+        firstWorkRequest = message;
+        receivedFirst();
+        return;
+      }
+    }
+    child.send({ kind: 'source-result', id: message.id,
+      value: { events: [], nextCursor: message.args[1] } });
+  });
+  await nextMessage(child, (message) => message.kind === 'ready');
+  await bounded(first, 'first source scan');
+  child.send({ kind: 'refresh-sources' });
+  child.send({ kind: 'source-result', id: firstWorkRequest.id,
+    value: { events: [], nextCursor: firstWorkRequest.args[1] } });
+  await eventually(() => workScans >= 2, 'refresh-driven second source scan', 3_000);
+  await stopWorker(child);
+});
+
+test('a source backlog beyond one scan stays unsynchronized until the next bounded drain', async (t) => {
+  const assistantHome = await home(t);
+  const memory = await AssistantMemoryRepository.open(assistantHome);
+  const audience = { kind: 'personal', id: 'local-user' };
+  const events = Array.from({ length: 51 }, (_, index) => ({ eventId: `delete-${index}`,
+    change: { sourceId: `work-turn:fixture:${index}`, sourceVersion: 'v1', kind: 'deleted',
+      audience, occurredAt: '2026-09-27T00:00:00.000Z' } }));
+  memory.sources.enqueuePage('work', '0', { nextCursor: '51', events });
+  memory.close();
+  const { child } = startWorker(assistantHome);
+  child.on('message', (message) => {
+    if (message.kind !== 'source-request') return;
+    const value = message.method === 'listChanges'
+      ? { events: [], nextCursor: message.args[1] }
+      : { status: 'deleted', sourceVersion: 'v1' };
+    child.send({ kind: 'source-result', id: message.id, value });
+  });
+  await nextMessage(child, (message) => message.kind === 'ready');
+  await eventually(() => {
+    const database = new DatabaseSync(join(assistantHome, 'state.sqlite'));
+    try { return database.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status='processed'").get().n === 51; }
+    finally { database.close(); }
+  }, 'all queued source deletions before periodic scan', 4_000);
+  await stopWorker(child);
+});
+
+test('a full source page triggers another scan to reach the next page deletion', async (t) => {
+  const assistantHome = await home(t);
+  const audience = { kind: 'personal', id: 'local-user' };
+  const events = Array.from({ length: 101 }, (_, index) => ({ eventId: `page-delete-${index}`,
+    change: { sourceId: `work-turn:paged:${index}`, sourceVersion: 'v1', kind: 'deleted',
+      audience, occurredAt: '2026-09-27T00:00:00.000Z' } }));
+  const { child } = startWorker(assistantHome);
+  child.on('message', (message) => {
+    if (message.kind !== 'source-request') return;
+    const cursor = Number(message.args[1] ?? 0);
+    const value = message.method === 'listChanges'
+      ? message.args[0] === 'work'
+        ? { events: events.slice(cursor, cursor + message.args[2]),
+          nextCursor: String(Math.min(events.length, cursor + message.args[2])) }
+        : { events: [], nextCursor: message.args[1] }
+      : { status: 'deleted', sourceVersion: 'v1' };
+    child.send({ kind: 'source-result', id: message.id, value });
+  });
+  await nextMessage(child, (message) => message.kind === 'ready');
+  await eventually(() => {
+    const database = new DatabaseSync(join(assistantHome, 'state.sqlite'));
+    try { return database.prepare("SELECT COUNT(*) AS n FROM source_events WHERE status='processed'").get().n === 101; }
+    finally { database.close(); }
+  }, 'deletion on the next source page before periodic scan', 4_000);
+  await stopWorker(child);
 });
 
 test('delegation change enters durable queue and restart reconciles the latest host status', async (t) => {
