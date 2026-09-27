@@ -37,6 +37,7 @@ import {
   PersistentScheduler,
   validateCapabilityConfig,
   detectMcpOwnershipConflicts,
+  mergeWorkFileChanges,
   type ArtifactTrustRoot,
   type AuthenticatedAgentCaller,
   type ChannelRouter,
@@ -647,6 +648,13 @@ async function serve(): Promise<void> {
     getCapabilityClient: () => mcp,
     approvals,
     sessionsPath: home.sessionsPath,
+    onWorkFileChanges: ({ runId, conversationId, piSessionId }, changes) => {
+      try {
+        metadata.workFileChanges.record(conversationId, piSessionId, runId, changes);
+      } catch {
+        // 审查数据持久化失败只影响审查视图，不阻塞会话。
+      }
+    },
     chat: {
       agentDir: home.agentPath,
       modelConfigDir: home.appPath,
@@ -1453,6 +1461,30 @@ async function serve(): Promise<void> {
         } catch (error) {
           respondWorkspaceFileError(response, error);
         }
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workFileChanges && request.method === 'GET') {
+        const conversationId = url.searchParams.get('conversationId');
+        if (!workFileConversation(conversationId)) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
+        const runId = url.searchParams.get('runId') ?? undefined;
+        if (runId && runId.length > 200) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: 'Invalid run id.' }));
+          return;
+        }
+        const files = mergeWorkFileChanges(metadata.workFileChanges.list(conversationId!, runId))
+          .map((change) => ({
+            path: change.path, runId: change.runId, toolName: change.toolName,
+            before: change.before ? { content: change.before.content, truncated: change.before.truncated } : null,
+            after: { content: change.after.content, truncated: change.after.truncated },
+            updatedAt: change.updatedAt,
+          }));
+        response.end(JSON.stringify({ conversationId, ...(runId ? { runId } : {}), files }));
         return;
       }
 

@@ -8,6 +8,7 @@ import { AssistantHostStore } from './assistant-host-store.js';
 import { AssistantSourceLifecycleStore } from './assistant-source-lifecycle-store.js';
 import { WorkConversationStore } from './work-conversation-store.js';
 import { WorkEvidenceStore } from './work-evidence-store.js';
+import { WorkFileChangeStore } from './work-file-changes-store.js';
 import { ChannelStore } from '../channels/store.js';
 import { SchedulerStore } from '../scheduler/store.js';
 
@@ -17,8 +18,9 @@ export * from './assistant-host-store.js';
 export * from './assistant-source-lifecycle-store.js';
 export * from './work-conversation-store.js';
 export * from './work-evidence-store.js';
+export * from './work-file-changes-store.js';
 
-export const YUANPU_METADATA_SCHEMA_VERSION = 15;
+export const YUANPU_METADATA_SCHEMA_VERSION = 16;
 export const YUANPU_SQLITE_DRIVER = 'node:sqlite';
 
 interface Migration {
@@ -559,6 +561,31 @@ const migrations: readonly Migration[] = [{
       updated_at TEXT NOT NULL
     ) STRICT;
   `,
+}, {
+  version: 16,
+  sql: `
+    CREATE TABLE IF NOT EXISTS yp_work_file_changes (
+      change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      pi_session_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      tool_call_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL CHECK(tool_name IN ('edit','write')),
+      relative_path TEXT NOT NULL,
+      before_content TEXT,
+      before_sha256 TEXT,
+      before_size INTEGER,
+      before_truncated INTEGER NOT NULL DEFAULT 0,
+      after_content TEXT NOT NULL,
+      after_sha256 TEXT NOT NULL,
+      after_size INTEGER NOT NULL,
+      after_truncated INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      UNIQUE(run_id, tool_call_id)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS yp_work_file_changes_conversation
+      ON yp_work_file_changes(conversation_id, change_id);
+  `,
 }];
 
 function assertWorkSourceEventSchema(database: DatabaseSync): void {
@@ -707,6 +734,7 @@ export class YuanpuMetadataDatabase {
   readonly assistantSourceLifecycle: AssistantSourceLifecycleStore;
   readonly workConversations: WorkConversationStore;
   readonly workEvidence: WorkEvidenceStore;
+  readonly workFileChanges: WorkFileChangeStore;
   readonly channels: ChannelStore;
   readonly schedules: SchedulerStore;
 
@@ -718,6 +746,7 @@ export class YuanpuMetadataDatabase {
     this.assistantSourceLifecycle = new AssistantSourceLifecycleStore(database);
     this.workConversations = new WorkConversationStore(database);
     this.workEvidence = new WorkEvidenceStore(database);
+    this.workFileChanges = new WorkFileChangeStore(database);
     this.channels = new ChannelStore(database);
     this.schedules = new SchedulerStore(database);
   }

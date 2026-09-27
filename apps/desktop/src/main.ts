@@ -178,6 +178,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   ipcMain.handle('work:order', trustedHandler((kind: 'folder' | 'conversation', parentId: string | null, ids: string[]) => runtime.reorderWorkSiblings(kind, parentId, ids)));
   ipcMain.handle('work:files:list', trustedHandler((conversationId: string, dirPath?: string, options?: { recursive?: boolean }) => runtime.listWorkFiles(conversationId, dirPath, options)));
   ipcMain.handle('work:files:read', trustedHandler((conversationId: string, filePath: string) => runtime.readWorkFile(conversationId, filePath)));
+  ipcMain.handle('work:file-changes:list', trustedHandler((query: { conversationId: string; runId?: string }) => runtime.listWorkFileChanges(query)));
   ipcMain.handle('browser:attach-guest', trustedHandlerWithEvent((event, payload: { key: string; webContentsId: number; conversationId: string }) => {
     const windowId = BrowserWindow.fromWebContents(event.sender)?.id;
     if (windowId === undefined) throw new Error('Browser guest attach requires a known window.');

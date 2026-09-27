@@ -68,6 +68,7 @@ test('migrates a real SQLite file and preserves metadata across reopen', async (
     'yp_work_conversations',
     'yp_work_create_intents',
     'yp_work_evidence_sources',
+    'yp_work_file_changes',
     'yp_work_folders',
     'yp_work_source_event_sequence',
     'yp_work_tags',
@@ -127,13 +128,13 @@ test('v13 Work tree metadata upgrades through proactive delivery without droppin
     VALUES ('tag-one','/workspace','Important','#123456','2026-09-27','2026-09-27')`).run();
   old.close();
   const upgraded = openYuanpuMetadataDatabase(path);
-  assert.equal(upgraded.schemaVersion, 15);
+  assert.equal(upgraded.schemaVersion, YUANPU_METADATA_SCHEMA_VERSION);
   assert.equal(upgraded.database.prepare('SELECT name FROM yp_work_tags WHERE tag_id=?')
     .get('tag-one').name, 'Important');
   assert.deepEqual(upgraded.workEvidence.sourcePage(0, 10), []);
   upgraded.close();
   const repeated = openYuanpuMetadataDatabase(path);
-  assert.equal(repeated.schemaVersion, 15);
+  assert.equal(repeated.schemaVersion, YUANPU_METADATA_SCHEMA_VERSION);
   assert.equal(repeated.database.prepare('SELECT COUNT(*) AS n FROM yp_work_tags').get().n, 1);
   repeated.close();
 });
