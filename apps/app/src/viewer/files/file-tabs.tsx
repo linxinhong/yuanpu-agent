@@ -199,25 +199,28 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
         : !host ? <div className="activity-empty"><strong>还没有打开的工作</strong><span>选择或新建工作后，可在这里浏览工作区文件。</span></div>
         : activeTab?.kind === 'file'
           ? <div className="file-preview-layout">
-              <div className="file-preview-main">
-                <div className="file-preview-breadcrumb"><button type="button" onClick={() => activate(TREE_TAB)}>{rootName ?? '工作区'}</button>
-                  {activeTab.path.split('/').map((part, index) => <span key={`${index}:${part}`}><AppIcon name="chevron" />{part}</span>)}
+              <div className={`file-preview-main${treeOpen ? '' : ' full-width'}`}>
+                <div className="file-preview-topline">
+                  <div className="file-preview-breadcrumb"><button type="button" onClick={() => activate(TREE_TAB)}>{rootName ?? '工作区'}</button>
+                    {activeTab.path.split('/').map((part, index) => <span key={`${index}:${part}`}><AppIcon name="chevron" />{part}</span>)}
+                  </div>
+                  <button type="button" className="file-toolbar-button" title={treeOpen ? '隐藏文件列表' : '显示文件列表'}
+                    aria-label={treeOpen ? '隐藏文件列表' : '显示文件列表'} aria-pressed={treeOpen}
+                    onClick={() => setTreeOpen((value) => !value)}><AppIcon name="panel" /></button>
                 </div>
                 <FilePreview host={host} scopeKey={scopeKey} filePath={activeTab.path}
                   onRequestLocate={(path) => { setTreeSelection(path); setTreeOpen(true); }} />
               </div>
-              <aside className={`file-preview-sidebar${treeOpen ? '' : ' collapsed'}`} aria-label="文件目录">
+              {treeOpen && <aside className="file-preview-sidebar" aria-label="文件目录">
                 <div className="file-sidebar-toolbar">
-                  {treeOpen && host.openFile && <button type="button" className="file-toolbar-button" title="用本地程序打开" aria-label="用本地程序打开"
+                  {host.openFile && <button type="button" className="file-toolbar-button" title="用本地程序打开" aria-label="用本地程序打开"
                     onClick={() => { setOpenLocalError(undefined); void host.openFile!(activeTab.path).catch((error: unknown) => setOpenLocalError(error instanceof Error ? error.message : String(error))); }}><AppIcon name="external" /></button>}
-                  <button type="button" className="file-toolbar-button" title={treeOpen ? '隐藏文件列表' : '显示文件列表'} aria-label={treeOpen ? '隐藏文件列表' : '显示文件列表'}
-                    aria-pressed={treeOpen} onClick={() => setTreeOpen((value) => !value)}><AppIcon name="panel" /></button>
                 </div>
                 {openLocalError && <p className="file-tree-status" role="alert">打开失败：{openLocalError}</p>}
-                {treeOpen && <WorkspaceTreeView host={host} scopeKey={scopeKey}
+                <WorkspaceTreeView host={host} scopeKey={scopeKey}
                   selectedPath={activeTab.path} rootName={rootName} directoryPath={directoryPath} onDirectoryChange={setDirectoryPath}
-                  onOpenFile={(path) => activate({ id: fileTabId(path), kind: 'file', path })} />}
-              </aside>
+                  onOpenFile={(path) => activate({ id: fileTabId(path), kind: 'file', path })} />
+              </aside>}
             </div>
           : <WorkspaceTreeView host={host} scopeKey={scopeKey} selectedPath={treeSelection} rootName={rootName}
               directoryPath={directoryPath} onDirectoryChange={setDirectoryPath}

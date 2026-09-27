@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { WorkFilePreview } from '@yuanpu-agent/protocol';
 
 import { AppIcon } from '../../shared/app-icon.js';
+import { ImageLightbox } from '../../shared/image-lightbox.js';
 import { MessageContent } from '../../shared/message-content.js';
 import { classifyWorkFile } from '../core/content-kind.js';
 import { formatFileSize, formatFileTime } from '../core/format.js';
@@ -68,6 +69,7 @@ function TextPreview({ fileName, content }: { fileName: string; content: string 
 /** Blob URL instead of inline base64: less memory and SVG never executes script; revoked on unmount. */
 function ImageViewer({ mediaType, base64, alt }: { mediaType: string; base64: string; alt: string }) {
   const [src, setSrc] = useState<string>();
+  const [fullScreen, setFullScreen] = useState(false);
   useEffect(() => {
     const binary = window.atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -77,7 +79,11 @@ function ImageViewer({ mediaType, base64, alt }: { mediaType: string; base64: st
     return () => URL.revokeObjectURL(url);
   }, [base64, mediaType]);
   if (!src) return null;
-  return <img className="file-preview-image" src={src} alt={alt} />;
+  return <>
+    <button type="button" className="file-preview-image-open" aria-label={`全屏预览图片：${alt}`}
+      onClick={() => setFullScreen(true)}><img className="file-preview-image" src={src} alt={alt} /></button>
+    {fullScreen && <ImageLightbox src={src} alt={alt} onClose={() => setFullScreen(false)} />}
+  </>;
 }
 
 /** Read-only preview of one workspace file with a review-style toolbar: view toggle, diff stats and quick actions. */
