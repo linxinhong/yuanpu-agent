@@ -13,7 +13,7 @@
 | V50-05 拒绝、重复与恢复 | 重复桌面/企微入站、来源撤销、委派取消与未知结果不得重复执行或越权；遗忘后旧事件不复活。 | **PASS（临时 Host、真实 Worker 和合成渠道适配器的回归）**。本次 `pnpm check` 中 `assistant-channel-live`、`assistant-source-live`、`assistant-delegation-service`、`assistant-suggestion-worker` 与 TASK-047 场景通过。此行不是一次真人企微故障注入。 |
 | V50-06 七项技能与进程生命周期 | 打包 App 首次启动后助理 Home 有七项专属技能；完整退出时 SEA Runtime 与 Assistant Worker 停止，再启动不重复建议或来源撤销。 | **PASS（真实打包 Electron/SEA、临时 Home）**。V50-01 探针直接检查七个目录及两个子 PID 退出；重复启动核对持久状态。`pnpm package:desktop` 内含 native 构建、smoke 和 Runtime 更新 smoke。 |
 | V50-07 更新/回退 | 打包 App 激活新版 SEA，拒绝协议不兼容与启动失败候选，继续读取会话/计划且不留 Runtime 或 Worker 子进程。 | **PASS（真实打包 Electron/SEA、临时 Home）**。[更新/回退探针](../../../apps/desktop/test/task-021-packaged-electron-app-probe.mjs) 在本卡中补充 Worker 退出等待，并把 Work 模型请求与后台助理 review 请求分开计数；runner `1790468015649433000.log`。首轮 `ENOTEMPTY` 是未等待 Worker 的测试清理竞态，第二轮旧请求计数断言过时；修正后完整回退场景通过。 |
-| V50-08 真人企微修订记忆 | 同一已配对测试账号私聊应引用桌面纠正后的测试记忆，且独立于 Work 会话；主动建议仅在另行同意时推送。 | **UNVERIFIED**。用户此前确认过一次普通企微私聊机器人回复“收到”，但未授权本次新的真实 Home 测试记忆写入或新往返；本卡未重复使用该授权。当前只通过合成 `ChannelRouter`/Worker 的渠道、身份和去重回归。 |
+| V50-08 真人企微修订记忆 | 同一已配对测试账号私聊应引用桌面纠正后的测试记忆，且独立于 Work 会话；主动建议仅在另行同意时推送。 | **BLOCKED / UNVERIFIED**。用户已授权一轮精确的真实测试，但尚未执行：另一个正在进行的任务持有真实 Home 的 Runtime/Worker，不能双写。先在临时 Home 以真实 Worker/Pi + loopback 模型复现产品缺陷：修订到 v2 后，既有助理会话的下一次模型输入没有新记忆，答复为“未知”。见下方红测。真实账号次数不用于撞击已知缺陷。 |
 | V50-09 外部模型与平台 | 外部模型在多样工作上的事实判断、费用和长期用户理解；真实用户 Home 迁移；Windows/Linux 发布；云端同步。 | **UNVERIFIED**。本机打包与固定 loopback 不能推出这些结果；云端及其他 IM 不在本卡范围。 |
 
 执行命令与结果：
@@ -23,4 +23,6 @@
 3. `node apps/desktop/test/task-050-packaged-assistant-probe.mjs`：最终 runner `1790468606540187000.log`，exit 0；包含七技能目录、真实桌面纠正/两步撤销/忽略点击及合成截图。早期 runner `1790468060790104000.log` 通过桥接纠正/撤销与 UI 忽略；本次把前两项也改为真实界面点击。
 4. `node apps/desktop/test/task-021-packaged-electron-app-probe.mjs`：最终 runner `1790468015649433000.log`，exit 0。早期失败 runner `1790467842769413000.log` 和 `1790467959237961000.log` 分别暴露测试清理竞态与过时模型请求计数。
 
-本记录的 PASS 只覆盖注明的环境和输入。TASK-050 的真实企微“修订后记忆”结果尚未取得，不将卡标为 done。已向用户提出的待授权步骤是：真实助理 Home 中建立纯测试记忆“蓝色纸鹤”，纠正为“绿色纸鹤”，由已配对测试账号发送一次「助理验收：我刚在桌面修订的验收口令偏好是什么？请只回答四个字。」并允许机器人原路回复；核对后清理测试记忆。未收到明确答复前不执行。否则保持 UNVERIFIED，避免把 fixture 或已有“收到”回执冒充本轮完整业务验收。
+红测最小复现：运行 [独立记忆刷新探针](../../../apps/runtime/test/task-050-memory-refresh-probe.mjs)；使用临时 Home、真实 `AssistantWorkerManager` / Worker / Pi、loopback 模型，不访问真实凭据或外部消息。先向同一助理会话问候，再通过 Worker API 导入“我的验收口令偏好是蓝色纸鹤”并纠正为“我的验收口令偏好是绿色纸鹤”（版本 2），最后在原会话询问偏好。runner `1790469379939975000.log` exit 1；结构化结果为 `sessionReused=true`、`correctedMemoryVersion=2`、`refreshedMemoryVisibleToModel=false`、`answerMatchesCorrection=false`。预期后两项为 true。探针故意不加入常规 `pnpm check`，待独立产品修复卡修复后转为通过的回归。代码审阅显示已存在会话使用冻结的 system prompt，且导入记忆另存文档；最终原因和修复由产品卡判定。
+
+本记录的 PASS 只覆盖注明的环境和输入。TASK-050 的真实企微“修订后记忆”结果尚未取得，不将卡标为 done。用户现已授权在真实助理 Home 建立纯测试记忆“蓝色纸鹤”、纠正为“绿色纸鹤”，由已配对测试账号发送一次「助理验收：我刚在桌面修订的验收口令偏好是什么？请只回答四个字。」并允许机器人原路回复；核对后在 App 遗忘测试记忆并退出。原始消息与最小 tombstone 可保留。须先修复上述产品缺陷，并由另一个任务安全退出真实 App 后备份 Home；在此之前不执行授权流程，不外发主动建议或第二条消息。不能把 fixture 或已有“收到”回执冒充本轮完整业务验收。
