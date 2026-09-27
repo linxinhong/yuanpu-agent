@@ -2585,7 +2585,7 @@ tasks:
 
   - id: TASK-072
     title: "工作会话审查标签：按轮次批量展示文件修改 diff"
-    status: in_progress
+    status: done
     goal: "用户在工作会话右侧「审查」tab 选择上一轮或本会话，批量查看 agent 修改过的文件列表（+N -N）并展开 unified diff；机制迁移 ZCode 的「工具执行时读旧内容自产快照」，不依赖 git，不修改 Pi 上游。"
     scope:
       in: ["pi/index.ts 会话订阅捕获 edit/write 工具执行前后文件内容（提取可测纯函数），随 run 归档", "persistence 新迁移建 yp_work_file_changes 表与幂等读写（before/after ≤256KB 截断 + sha256）", "GET /v1/work/file-changes 路由：scope=last-run|conversation，同文件多编辑合并为首 before+末 after 重算 unified patch 与统计", "protocol 类型 + DesktopBridge + runtime-manager/main/preload 接线", "渲染端审查 tab：chat.tsx/file-tabs/review-panel（复用 @pierre/diffs PatchDiff 与 .file-diff-stats）/图标/CSS token 化，run 终态自动刷新", "store/捕获合并/路由 scope 的单测或 loopback 测试"]
@@ -2614,8 +2614,15 @@ tasks:
       owner: "zcode-reviewtab-20260927-32374"
       attempts: 0
       claimed_at: "2026-09-27T05:10:55.699Z"
-      completed_at: null
+      completed_at: "2026-09-27T06:17:58.129Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/review-tab"
       branch: "task/task-072-review-tab"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "integrated revision", status: "passed", summary: "Branch task/task-072-review-tab (implementation 3e15a2c, claim base 9905a98) merged into main at 0e1d1ee with both-side conflict resolution; task records committed at b4b38f1. No push performed."}
+        - {type: "command", check: "focused package tests", status: "passed", summary: "packages/yuanpu-runtime/test/work-file-changes.test.mjs 5/5 (path containment, capture semantics incl. new-file/unchanged/before-failure/truncation, merge first-before-last-after, store idempotency + run filter, schema v16) and persistence 14/14 (table list updated for yp_work_file_changes) on the task branch and the fused main tree after dist rebuild."}
+        - {type: "command", check: "pnpm --filter @yuanpu-agent/app test + desktop tests", status: "passed", summary: "App 44/44 (theme-contract covers the new review CSS tokens and chat.tsx/file-tabs changes) and Desktop 22/22 on the fused tree; app/desktop/runtime typecheck all clean after fusion."}
+        - {type: "command", check: "pnpm check", status: "passed", summary: "Full build, Yuanpu typechecks and all package tests green except ONE pre-existing runtime-kit failure (mcp-source 'tool discovery timeout terminates the initialized MCP process': fixture child exits with 'MCP error -32000: Connection closed' during init instead of hanging on tools/list). Verified pre-existing at base 9905a98 by stashing all changes and rebuilding dists; MCP capability sources were unchanged 4bf9352..9905a98; unrelated to TASK-072 and recorded as a follow-up candidate."}
+        - {type: "verification", check: "browser acceptance with stub bridge", status: "passed", summary: "Playwright over the vite build with an injected Proxy window.yuanpu stub: review tab reachable from the workspace '+' menu; last-run scope shows the 'run finished' guidance when no run exists; conversation scope lists three fixture files with per-file +N -N, 新建/内容过大 badges and summary '+9 -1 · 1 个大文件未计入'; expanding chat.tsx renders the unified diff with line numbers, red/green hunks and collapsed unmodified lines via the existing PatchDiff pipeline. Screenshots in .tasks/ui/task-072-review-tab/images/."}
+        - {type: "assert", check: "integration fusion preserved parallel work", status: "passed", summary: "Merge resolved 6 conflicts with the file-preview refinement (both routes/bridge methods/icons kept); stash pop fused the in-flight session-trajectory WIP by widening activityTab to 'trajectory'|'subagents'|'files'|'review', keeping the WIP's runContent and this card's reviewContent side by side; the WIP remains uncommitted in the main worktree exactly as before."}
+        - {type: "memory", check: "task handoff", status: "passed", summary: ".tasks/memory/TASK-072.md records the capture/persistence/read mechanisms, fusion notes, the addInitScript Proxy serialization pitfall for browser stubs, and follow-ups (pre-existing mcp test, bash/subagent capture, ledger cleanup)."}
       follow_up_candidates: []
