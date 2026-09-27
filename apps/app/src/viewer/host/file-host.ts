@@ -11,4 +11,5 @@ import type { WorkDirectoryListing, WorkFilePreview } from '@yuanpu-agent/protoc
 export interface ViewerFileHost {
   listDirectory(dirPath?: string, options?: { recursive?: boolean }): Promise<WorkDirectoryListing>;
   readFile(filePath: string): Promise<WorkFilePreview>;
+  openFile?(filePath: string): Promise<void>;
 }

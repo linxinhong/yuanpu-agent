@@ -58,6 +58,7 @@ export const RUNTIME_ROUTES = {
   workOrder: '/v1/work/order',
   workFiles: '/v1/work/files',
   workFileContent: '/v1/work/files/content',
+  workFilePath: '/v1/work/files/path',
   modelSettings: '/v1/settings/models',
   modelSettingsDelete: '/v1/settings/models/delete',
   modelCatalog: '/v1/settings/models/catalog',
@@ -558,6 +559,7 @@ export interface DesktopBridge {
   onBrowserGuestCrashed(listener: (guestKey: string) => void): () => void;
   onBrowserSessionRequest(listener: (conversationId: string) => void): () => void;
   readWorkFile(conversationId: string, filePath: string): Promise<WorkFilePreview>;
+  openWorkFile(conversationId: string, filePath: string): Promise<void>;
   getAssistantLink(): Promise<AssistantLinkStatus>;
   bindAssistantContact(contactId: string): Promise<AssistantLinkStatus>;
   unbindAssistantContact(): Promise<AssistantLinkStatus>;

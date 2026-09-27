@@ -38,26 +38,29 @@ function fileTabLabel(path: string): string {
   return path.split('/').pop() ?? path;
 }
 
-function WorkspaceTreeView({ host, scopeKey, selectedPath, onOpenFile, rootName }: {
+function WorkspaceTreeView({ host, scopeKey, selectedPath, onOpenFile, rootName, directoryPath, onDirectoryChange }: {
   host: ViewerFileHost;
   scopeKey: string;
   selectedPath?: string;
   onOpenFile: (path: string) => void;
   rootName?: string;
+  directoryPath?: string;
+  onDirectoryChange?: (path: string) => void;
 }) {
-  const tree = useWorkspaceTree(host, scopeKey);
+  const tree = useWorkspaceTree(host, scopeKey, directoryPath);
   const fileCount = tree.data?.entries.filter((entry) => entry.kind === 'file').length;
   return <>
     <div className="file-toolbar">
       <div className="file-toolbar-side">
-        <span className="file-preview-meta">工作区{fileCount !== undefined ? ` · ${fileCount} 个文件` : ''}</span>
+        <span className="file-preview-meta">工作区{fileCount !== undefined && fileCount !== 1 ? ` · ${fileCount} 个文件` : ''}</span>
       </div>
       <div className="file-toolbar-actions">
         <button type="button" className="file-toolbar-button" title="刷新工作区" aria-label="刷新工作区"
           onClick={() => { void tree.refetch(); }}><AppIcon name="refresh" /></button>
       </div>
     </div>
-    <FileTree host={host} scopeKey={scopeKey} selectedPath={selectedPath} onOpenFile={onOpenFile} rootName={rootName} />
+    <FileTree host={host} scopeKey={scopeKey} selectedPath={selectedPath} onOpenFile={onOpenFile} rootName={rootName}
+      directoryPath={directoryPath} onDirectoryChange={onDirectoryChange} />
   </>;
 }
 
@@ -86,6 +89,9 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
   const [treeSelection, setTreeSelection] = useState<string>();
   const [menuOpen, setMenuOpen] = useState(false);
   const [browserTitle, setBrowserTitle] = useState('浏览器');
+  const [treeOpen, setTreeOpen] = useState(true);
+  const [directoryPath, setDirectoryPath] = useState('');
+  const [openLocalError, setOpenLocalError] = useState<string>();
 
   function activate(tab: FileTab) {
     setTabs((current) => current.some((item) => item.id === tab.id) ? current : [...current, tab]);
@@ -172,12 +178,23 @@ export function FileWorkspace({ host, browserHost, scopeKey, requestPath, browse
                   {activeTab.path.split('/').map((part, index) => <span key={`${index}:${part}`}><AppIcon name="chevron" />{part}</span>)}
                 </div>
                 <FilePreview host={host} scopeKey={scopeKey} filePath={activeTab.path}
-                  onRequestLocate={(path) => { setTreeSelection(path); activate(TREE_TAB); }} />
+                  onRequestLocate={(path) => { setTreeSelection(path); setTreeOpen(true); }} />
               </div>
-              <aside className="file-preview-sidebar" aria-label="文件目录"><WorkspaceTreeView host={host} scopeKey={scopeKey}
-                selectedPath={activeTab.path} rootName={rootName} onOpenFile={(path) => activate({ id: fileTabId(path), kind: 'file', path })} /></aside>
+              <aside className={`file-preview-sidebar${treeOpen ? '' : ' collapsed'}`} aria-label="文件目录">
+                <div className="file-sidebar-toolbar">
+                  {treeOpen && host.openFile && <button type="button" className="file-toolbar-button" title="用本地程序打开" aria-label="用本地程序打开"
+                    onClick={() => { setOpenLocalError(undefined); void host.openFile!(activeTab.path).catch((error: unknown) => setOpenLocalError(error instanceof Error ? error.message : String(error))); }}><AppIcon name="external" /></button>}
+                  <button type="button" className="file-toolbar-button" title={treeOpen ? '隐藏文件列表' : '显示文件列表'} aria-label={treeOpen ? '隐藏文件列表' : '显示文件列表'}
+                    aria-pressed={treeOpen} onClick={() => setTreeOpen((value) => !value)}><AppIcon name="panel" /></button>
+                </div>
+                {openLocalError && <p className="file-tree-status" role="alert">打开失败：{openLocalError}</p>}
+                {treeOpen && <WorkspaceTreeView host={host} scopeKey={scopeKey}
+                  selectedPath={activeTab.path} rootName={rootName} directoryPath={directoryPath} onDirectoryChange={setDirectoryPath}
+                  onOpenFile={(path) => activate({ id: fileTabId(path), kind: 'file', path })} />}
+              </aside>
             </div>
           : <WorkspaceTreeView host={host} scopeKey={scopeKey} selectedPath={treeSelection} rootName={rootName}
+              directoryPath={directoryPath} onDirectoryChange={setDirectoryPath}
               onOpenFile={(path) => activate({ id: fileTabId(path), kind: 'file', path })} />}
     </div>}
   </div>;

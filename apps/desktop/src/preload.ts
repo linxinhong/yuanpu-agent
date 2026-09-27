@@ -31,6 +31,7 @@ const bridge: DesktopBridge = {
   reorderWorkSiblings: (kind, parentId, ids) => ipcRenderer.invoke('work:order', kind, parentId, ids),
   listWorkFiles: (conversationId, dirPath, options) => ipcRenderer.invoke('work:files:list', conversationId, dirPath, options),
   readWorkFile: (conversationId, filePath) => ipcRenderer.invoke('work:files:read', conversationId, filePath),
+  openWorkFile: (conversationId, filePath) => ipcRenderer.invoke('work:files:open', conversationId, filePath),
   getAssistantLink: () => ipcRenderer.invoke('assistant:link:get'),
   bindAssistantContact: (contactId) => ipcRenderer.invoke('assistant:link:bind', contactId),
   unbindAssistantContact: () => ipcRenderer.invoke('assistant:link:unbind'),

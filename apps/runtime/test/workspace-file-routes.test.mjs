@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -85,6 +85,14 @@ test('work file routes serve the workspace with containment enforcement', async 
   assert.equal(textBody.kind, 'text');
   assert.equal(textBody.truncated, false);
   assert.match(textBody.content, /# 工作区笔记/);
+
+  const localPath = await send(`/v1/work/files/path?conversationId=${encodeURIComponent(conversation.id)}&path=${encodeURIComponent('notes.md')}`);
+  assert.equal(localPath.status, 200);
+  assert.equal((await localPath.json()).path, await realpath(join(conversationWorkspace, 'notes.md')));
+  const localDirectory = await send(`/v1/work/files/path?conversationId=${encodeURIComponent(conversation.id)}&path=${encodeURIComponent('sub')}`);
+  assert.equal(localDirectory.status, 400);
+  const localEscape = await send(`/v1/work/files/path?conversationId=${encodeURIComponent(conversation.id)}&path=${encodeURIComponent('../../secrets')}`);
+  assert.equal(localEscape.status, 400);
 
   const directory = await send(`/v1/work/files/content?conversationId=${encodeURIComponent(conversation.id)}&path=${encodeURIComponent('sub')}`);
   assert.equal(directory.status, 400);

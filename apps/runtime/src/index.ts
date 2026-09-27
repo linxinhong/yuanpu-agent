@@ -90,7 +90,7 @@ import { createManagedWorkspaceDirectory, removeUncommittedWorkspaceDirectory } 
 import { installParentProcessMonitor, type ParentProcessMonitor } from './process-lifecycle.js';
 import { cleanupRuntimeResources, getDesktopNavigableRun, getDesktopPrivateImRunSummary } from './runtime-host.js';
 import { createScheduledImDelivery, handleScheduledImHttp } from './scheduled-im-delivery.js';
-import { WorkspaceFileAccessError, listWorkspaceFiles, listWorkspaceTree, readWorkspaceFile } from './workspace-files.js';
+import { WorkspaceFileAccessError, listWorkspaceFiles, listWorkspaceTree, readWorkspaceFile, resolveWorkspaceFilePath } from './workspace-files.js';
 import {
   closeWecomChannels,
   configuredWecomDocument,
@@ -1450,6 +1450,24 @@ async function serve(): Promise<void> {
           const workspaceRoot = workConversations.row(home.config.workingDirectory, conversationId!)?.working_directory
             ?? home.config.workingDirectory;
           response.end(JSON.stringify(await readWorkspaceFile(workspaceRoot, url.searchParams.get('path') ?? '')));
+        } catch (error) {
+          respondWorkspaceFileError(response, error);
+        }
+        return;
+      }
+
+      if (url.pathname === RUNTIME_ROUTES.workFilePath && request.method === 'GET') {
+        const conversationId = url.searchParams.get('conversationId');
+        if (!workFileConversation(conversationId)) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Unknown Work conversation.' }));
+          return;
+        }
+        try {
+          const workspaceRoot = workConversations.row(home.config.workingDirectory, conversationId!)?.working_directory
+            ?? home.config.workingDirectory;
+          const path = await resolveWorkspaceFilePath(workspaceRoot, url.searchParams.get('path') ?? '');
+          response.end(JSON.stringify({ path }));
         } catch (error) {
           respondWorkspaceFileError(response, error);
         }

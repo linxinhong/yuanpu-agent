@@ -18,6 +18,7 @@ const {
   listWorkspaceTree,
   readWorkspaceFile,
   resolveWorkspacePath,
+  resolveWorkspaceFilePath,
 } = await import('../src/workspace-files.ts');
 
 async function createWorkspace() {
@@ -78,6 +79,22 @@ test('resolveWorkspacePath rejects symlink escapes but allows in-workspace links
     await assertAccessError(resolveWorkspacePath(root, 'escape-file.txt'), 400);
     const inside = await resolveWorkspacePath(root, 'inside-link/index.ts');
     assert.equal(inside, await realpath(join(root, 'src', 'index.ts')));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('resolveWorkspaceFilePath accepts regular files and rejects directories or escapes', async () => {
+  const root = await createWorkspace();
+  const outside = await mkdtemp(join(tmpdir(), 'yuanpu-outside-'));
+  try {
+    await writeFile(join(outside, 'secret.txt'), 'outside');
+    await symlink(join(outside, 'secret.txt'), join(root, 'escape-file.txt'));
+    assert.equal(await resolveWorkspaceFilePath(root, 'README.md'), await realpath(join(root, 'README.md')));
+    await assertAccessError(resolveWorkspaceFilePath(root, 'src'), 400);
+    await assertAccessError(resolveWorkspaceFilePath(root, 'escape-file.txt'), 400);
+    await assertAccessError(resolveWorkspaceFilePath(root, '../secret.txt'), 400);
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });

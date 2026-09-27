@@ -864,6 +864,7 @@ export function ChatPanel({
     ? {
       listDirectory: (dirPath?: string, options?: { recursive?: boolean }) => desktop.listWorkFiles(workConversationId, dirPath, options),
       readFile: (filePath: string) => desktop.readWorkFile(workConversationId, filePath),
+      openFile: (filePath: string) => desktop.openWorkFile(workConversationId, filePath),
     }
     : undefined;
 
@@ -1228,7 +1229,7 @@ export function ChatPanel({
             run={visibleRun} archiveOpen={archiveOpen} onToggleArchive={() => setArchiveOpen((value) => !value)} /> : <>
           <FileWorkspace key={`${workConversationId ?? 'empty'}:${selectedWork?.workingDirectory ?? ''}`}
             host={fileHost} browserHost={browserHost} browserRequest={browserRequest} scopeKey={workConversationId ?? 'empty'}
-            rootName={selectedWork?.title || '工作区'}
+            rootName={selectedWork?.workingDirectory?.split(/[\\/]/).filter(Boolean).at(-1) || '工作区'}
             requestPath={filePreviewPath} requestImage={imagePreviewRequest} onActiveFileChange={setFilePreviewPath} tabHost={workspaceTabHost}
             view={activityTab} onViewChange={setActivityTab} onClose={() => { setActivityOpen(false); setRightPanelMaximized(false); setActivityTab('files'); setFilePreviewPath(undefined); setImagePreviewRequest(undefined); }}
             runContent={activityTab === 'activity' ? (

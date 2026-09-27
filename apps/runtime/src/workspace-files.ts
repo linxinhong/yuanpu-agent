@@ -63,6 +63,14 @@ export async function resolveWorkspacePath(root: string, inputPath: string): Pro
   return real;
 }
 
+/** Resolve only regular files before handing a path to the desktop shell. */
+export async function resolveWorkspaceFilePath(root: string, inputPath: string): Promise<string> {
+  const path = await resolveWorkspacePath(root, inputPath);
+  const stat = await fs.stat(path).catch(() => { throw new WorkspaceFileAccessError('文件不存在。', 404); });
+  if (!stat.isFile()) throw new WorkspaceFileAccessError('所选路径不是文件。', 400);
+  return path;
+}
+
 /** NUL bytes or a dominant share of control characters mark binary content. */
 export function isProbablyBinary(buffer: Buffer): boolean {
   const sample = buffer.subarray(0, 8192);

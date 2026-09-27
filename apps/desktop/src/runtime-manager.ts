@@ -760,6 +760,11 @@ export class RuntimeManager {
     return this.request(`${RUNTIME_ROUTES.workFileContent}?${query}`);
   }
 
+  resolveWorkFilePath(conversationId: string, filePath: string): Promise<{ path: string }> {
+    const query = new URLSearchParams({ conversationId, path: filePath });
+    return this.request(`${RUNTIME_ROUTES.workFilePath}?${query}`);
+  }
+
   getAssistantLink(): Promise<AssistantLinkStatus> {
     return this.request(RUNTIME_ROUTES.assistantLink);
   }

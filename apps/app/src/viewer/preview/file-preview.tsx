@@ -15,6 +15,15 @@ import { PdfView } from './pdf-view.js';
 
 const MAX_RENDERED_LINES = 2000;
 type TextPreviewMode = 'result' | 'diff';
+type ContentView = 'rendered' | 'source';
+
+const HTML_PREVIEW_CSP = "default-src 'none'; img-src data: blob:; font-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+
+function staticHtmlSrcDoc(content: string): string {
+  const policy = `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`;
+  const doctype = content.match(/^\s*<!doctype[^>]*>/i);
+  return doctype ? `${doctype[0]}${policy}${content.slice(doctype[0].length)}` : `${policy}${content}`;
+}
 
 function TextPreview({ fileName, content }: { fileName: string; content: string }) {
   const lines = useMemo(() => {
@@ -91,6 +100,8 @@ export function FilePreview({ host, scopeKey, filePath, onRequestLocate }: {
 
   const [previous, setPrevious] = useState<CachedFileVersion>();
   const [mode, setMode] = useState<TextPreviewMode>('result');
+  const [contentView, setContentView] = useState<ContentView>('rendered');
+  useEffect(() => { setContentView('rendered'); }, [filePath]);
   useEffect(() => {
     if (preview?.kind !== 'text') return;
     const known = getKnownFileVersion(scopeKey, filePath);
@@ -111,10 +122,19 @@ export function FilePreview({ host, scopeKey, filePath, onRequestLocate }: {
   }, [previous, preview, name]);
 
   const isTextWithPrevious = Boolean(previous && preview?.kind === 'text');
-  const toolbarVisible = Boolean(preview) && (isTextWithPrevious || Boolean(meta));
+  const contentKind = classifyWorkFile(name);
+  const isHtml = /\.html?$/i.test(name);
+  const canRender = preview?.kind === 'text' && (contentKind === 'markdown' || isHtml);
+  const toolbarVisible = Boolean(preview) && (isTextWithPrevious || Boolean(meta) || preview?.kind === 'text');
   return <div className="file-preview">
     {toolbarVisible && <div className="file-toolbar">
       <div className="file-toolbar-side">
+        {preview?.kind === 'text' && <div className="file-content-toggle" role="group" aria-label="文件显示方式">
+          {canRender && <button type="button" title="渲染预览" aria-label="渲染预览" aria-pressed={contentView === 'rendered'}
+            onClick={() => { setContentView('rendered'); setMode('result'); }}><AppIcon name="eye" /></button>}
+          <button type="button" title="查看源代码" aria-label="查看源代码" aria-pressed={!canRender || contentView === 'source'}
+            onClick={() => { setContentView('source'); setMode('result'); }}><AppIcon name="code" /></button>
+        </div>}
         {isTextWithPrevious ? <>
           <div className="file-view-toggle" role="tablist" aria-label="预览视图切换">
             <button type="button" aria-pressed={mode === 'result'} onClick={() => setMode('result')}>最终内容</button>
@@ -144,8 +164,11 @@ export function FilePreview({ host, scopeKey, filePath, onRequestLocate }: {
         {preview.truncated && <p className="file-preview-truncated" role="status">文件超过 256 KB，仅显示开头部分。</p>}
         {mode === 'diff' && previous
           ? <FileDiffView fileName={name} oldText={previous.content} newText={preview.content} />
-          : classifyWorkFile(name) === 'markdown'
+          : canRender && contentView === 'rendered' && contentKind === 'markdown'
             ? <div className="file-preview-markdown"><MessageContent text={preview.content} /></div>
+            : canRender && contentView === 'rendered' && isHtml
+              ? <iframe className="file-preview-html" title={`${name} 渲染预览`} sandbox="" referrerPolicy="no-referrer"
+                  srcDoc={staticHtmlSrcDoc(preview.content)} />
             : <TextPreview fileName={name} content={preview.content} />}
       </>}
     </div>
