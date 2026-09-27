@@ -2347,7 +2347,7 @@ tasks:
       follow_up_candidates: []
   - id: TASK-065
     title: "让持续助理会话读取最新个人记忆"
-    status: in_progress
+    status: done
     goal: "助理个人记忆被纠正、遗忘或来源撤销后，已打开的桌面与企业微信助理会话在下一次模型请求中只使用仍有效的最新版本。"
     scope:
       in: ["助理 Worker 单写入记忆库到 Pi 助理会话的动态个人记忆读取", "版本、受众、来源有效性和提示词预算边界", "同会话纠正/遗忘/重启与渠道共用路径回归"]
@@ -2372,8 +2372,12 @@ tasks:
       owner: "root-assistant-live-memory-10414-10414-10414"
       attempts: 0
       claimed_at: "2026-09-27T00:38:56.876Z"
-      completed_at: null
+      completed_at: "2026-09-27T01:16:56.641Z"
       worktree: "/Users/linxinhong/projects/yuanpu-agent/.worktrees/assistant-organize"
       branch: "task/task-065-assistant-live-memory"
-      evidence: []
+      evidence:
+        - {type: "commit", check: "TASK-065 implementation integrated on main", status: "passed", summary: "Implementation 53786b6 and handoff 6683d69 merged at c48373c. See .tasks/memory/TASK-065.md."}
+        - {type: "command", check: "pnpm check on branch and integrated main", status: "passed", summary: "Node 24.15.0, pnpm 11.22.0; branch runner 1790471575716397000.log exit 0; main c48373c runner 1790471730579155000.log exit 0."}
+        - {type: "test", check: "Request-level correction, forget, source and recovery", status: "passed", summary: "Assistant focused 1790471566742683000.log; real Worker/Pi memory probe 1790471132379238000.log; Worker refresh/backlog/pagination 1790471355685923000.log. All exited 0."}
+        - {type: "review", check: "Independent read-only TASK-065 review", status: "passed", summary: "Reviewer /root/task043_readonly_review inspected 53786b6 and found no remaining card blocker. Limits: prior conversation history, unindexed legacy file review, semantic paraphrase."}
       follow_up_candidates: []
